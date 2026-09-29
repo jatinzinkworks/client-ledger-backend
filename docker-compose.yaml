@@ -1,0 +1,70 @@
+services:
+  db:
+    image: postgres:16
+    container_name: wayfare-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: wayfare
+      # Everything runs in UTC — the JVM sets its default zone to UTC at startup, so
+      # keeping the server here matches it. Postgres log lines and any session that
+      # does not override timezone then report UTC too.
+      TZ: UTC
+      PGTZ: UTC
+      # Point PGDATA at a SUBDIRECTORY of the mount, not the mount root.
+      # Postgres refuses to initialise into a directory that already has
+      # lost+found or other stray entries.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - "D:/PostgreSQL/data:/var/lib/postgresql/data"
+      - "D:/PostgreSQL/dumps:/dumps"
+    shm_size: "256mb"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d wayfare"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    command:
+      - "postgres"
+      - "-c"
+      - "log_statement=all"
+      - "-c"
+      - "log_min_duration_statement=200"
+
+  # Optional. Remove this block if you already have pgAdmin installed natively.
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: wayfare-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: jatin.marwaha@zinkworks.com
+      PGADMIN_DEFAULT_PASSWORD: dev
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "5050:80"
+    depends_on:
+      db:
+        condition: service_healthy
+
+# ---------------------------------------------------------------------------
+# FALLBACK if the bind mount above fails with:
+#   initdb: error: could not change permissions of directory
+#          "/var/lib/postgresql/data": Operation not permitted
+#
+# That means your D: drive is a Windows-formatted volume exposed to WSL2,
+# which cannot represent the 0700 ownership Postgres demands. Swap the two
+# volume lines in the db service for the named volume below, and keep
+# D:/PostgreSQL/dumps mounted so backups still land on D:.
+#
+#     volumes:
+#       - pgdata:/var/lib/postgresql/data
+#       - "D:/PostgreSQL/dumps:/dumps"
+#
+# and uncomment:
+#
+# volumes:
+#   pgdata:
+# ---------------------------------------------------------------------------

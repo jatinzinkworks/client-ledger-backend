@@ -1,0 +1,263 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>4.1.1</version>
+        <relativePath/> <!-- lookup parent from repository -->
+    </parent>
+
+    <groupId>com.zinkworks</groupId>
+    <artifactId>tripfold-backend</artifactId>
+    <version>0.1</version>
+    <name>tripfold-backend</name>
+    <description>Tripfold Backend Service</description>
+
+    <properties>
+        <java.version>21</java.version>
+        <springdoc.version>3.1.0</springdoc.version>
+        <spotless.version>2.44.5</spotless.version>
+        <jacoco.version>0.8.13</jacoco.version>
+        <!-- Overrides the 11.0.24 that spring-boot-dependencies imports, which is affected by
+             CVE-2026-65182 (security constraint bypass), CVE-2026-65905 (DIGEST authentication
+             bypass by replay) and CVE-2026-68525 (FORM authentication bypass) - all critical,
+             all fixed in 11.0.25. Set as the property rather than as an explicit
+             tomcat-embed-core dependency so every Tomcat artifact moves together: the BOM ties
+             embed-core, embed-el, embed-websocket and the rest to this one value, and pinning
+             just one of them would leave the others behind at a mismatched version.
+             Delete this once the Spring Boot version in use manages 11.0.25 or later. -->
+        <tomcat.version>11.0.25</tomcat.version>
+        <!-- Overrides the 2.0.5 that spring-boot-dependencies imports. Testcontainers 2.x
+             renamed every module (postgresql -> testcontainers-postgresql) and reorganised
+             its packages; 1.21.3 is the last 1.x and the API the tests are written against.
+             To move to 2.x: delete this property, prefix both artifactIds with
+             'testcontainers-', and fix up the imports in the integration test. -->
+        <testcontainers.version>1.21.3</testcontainers.version>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <debug.port>5005</debug.port>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+
+        <!-- Supplies the health endpoint the platform probes on deployment. Version comes from
+             spring-boot-dependencies, so it moves with the Boot version. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- Spring Boot 4 moved each technology's auto-configuration out of
+             spring-boot-autoconfigure and into its own module. Flyway has no starter,
+             so this module is what supplies FlywayAutoConfiguration and makes the
+             spring.flyway.* properties take effect; flyway-core alone is inert. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-flyway</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>${springdoc.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Repository integration tests run against a real Postgres in Docker, so the
+             migrations and the native advisory-lock queries are exercised as written.
+             Versions come from the testcontainers BOM, pinned by the testcontainers.version
+             property above. -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                    <!-- Start the app with the JDWP agent so a remote debugger can attach on
+                         ${debug.port}. server=y: the JVM acts as the debug server; suspend=n: the
+                         app starts immediately and does not wait for a debugger; address=*:port
+                         listens on all interfaces (so it works from another host or a container). -->
+                    <jvmArguments>
+                        -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:${debug.port}
+                    </jvmArguments>
+                </configuration>
+            </plugin>
+            <!-- Test coverage. `prepare-agent` attaches the JaCoCo agent to the Surefire JVM
+                 and `report` turns the recording into HTML at
+                 target/site/jacoco/index.html, written during `mvn test`. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco.version}</version>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <!-- Bound to `test` rather than `verify` so a plain `mvn test`
+                             produces the report; at `verify` it would only appear on a
+                             fuller build. -->
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <excludes>
+                        <!-- Generated or declaration-only types. Counting them reports
+                             coverage of Lombok's output and of annotation blocks rather
+                             than of anything that can hold a bug. -->
+                        <exclude>**/TripfoldBackendApplication.class</exclude>
+                        <exclude>**/config/**</exclude>
+                        <exclude>**/dto/**</exclude>
+                        <exclude>**/PolicyApi.class</exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+
+            <!-- Code formatting. Run on demand:
+                   mvn spotless:check   report violations
+                   mvn spotless:apply   fix them in place
+                 Deliberately not bound to a lifecycle phase, so an ordinary build never
+                 rewrites sources unasked. Uncomment the execution below to enforce the rules
+                 during `mvn verify`. -->
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+                <version>${spotless.version}</version>
+                <configuration>
+                    <java>
+                        <!-- Hygiene steps only - no whole-file reformatter is configured, so
+                             the hand-wrapped Swagger annotation blocks keep their layout. Add
+                             <palantirJavaFormat/> here to enforce a complete style; Palantir
+                             is the closest match to this project's 4-space indent and
+                             120-column limit. Google Java Format is not - it would reindent
+                             every file to 2 spaces. -->
+                        <removeUnusedImports/>
+                        <importOrder>
+                            <!-- Empty first entry means "everything else", so imports sort
+                                 alphabetically with java/javax last - the convention already
+                                 used across the codebase. -->
+                            <order>,java,javax</order>
+                        </importOrder>
+                        <trimTrailingWhitespace/>
+                        <endWithNewline/>
+                    </java>
+                </configuration>
+                <!--
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                -->
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>default-compile</id>
+                        <phase>compile</phase>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <configuration>
+                            <annotationProcessorPaths>
+                                <path>
+                                    <groupId>org.projectlombok</groupId>
+                                    <artifactId>lombok</artifactId>
+                                </path>
+                            </annotationProcessorPaths>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>default-testCompile</id>
+                        <phase>test-compile</phase>
+                        <goals>
+                            <goal>testCompile</goal>
+                        </goals>
+                        <configuration>
+                            <annotationProcessorPaths>
+                                <path>
+                                    <groupId>org.projectlombok</groupId>
+                                    <artifactId>lombok</artifactId>
+                                </path>
+                            </annotationProcessorPaths>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>
