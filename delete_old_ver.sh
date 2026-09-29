@@ -1,8 +1,7 @@
 #!/usr/bin/bash
 set -euo pipefail
-PROJECT="nexa-477913"
-REGION="europe-west2"
-SERVICE="apex-data-governance-backend-ext"
+
+source variables.sh
 
 ACTIVE_REVISION=$(gcloud run services describe "${SERVICE}" \
   --region="${REGION}" \

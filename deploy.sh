@@ -6,10 +6,8 @@ set -euo pipefail
 # Exits immediately on any failure (set -e), undefined variables (set -u),
 # or failed pipeline command (set -o pipefail).
 # ----------------------------------------------------------------------------
-PROJECT="nexa-477913"
-REGION="europe-west2"
-SERVICE="apex-data-governance-backend-ext"
-REPO="europe-west2-docker.pkg.dev/${PROJECT}/nexa-docker-release/${SERVICE}"
+
+source variables.sh
 
 # ---------- Step 0: Validate input ------------------------------------------
 echo ""
