@@ -1,0 +1,217 @@
+openapi: 3.1.0
+info:
+  title: Client Ledger API
+  description: REST API for the PSC Client Ledger backend service.
+  contact:
+    name: PSC Client Ledger Team
+  version: v1
+servers:
+- url: /
+  description: Default server
+tags:
+- name: Global Settings
+  description: "Tenant-wide configuration for the Client Ledger, such as payment terms"
+paths:
+  /psc/cl/v1/global-settings/payment-terms:
+    get:
+      tags:
+      - Global Settings
+      summary: Fetch payment terms
+      description: Returns the tenant-wide payment terms currently in force. Responds
+        with 404 until they have been created.
+      operationId: getPaymentTerms
+      responses:
+        "200":
+          description: Payment terms found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentTermsResponse"
+        "404":
+          description: No payment terms have been configured yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      tags:
+      - Global Settings
+      summary: Create or update payment terms
+      description: "Stores the tenant-wide payment terms. Payment terms are a singleton\
+        \ setting, so this endpoint creates them on the first call (201) and overwrites\
+        \ them on every subsequent call (200) — there is no separate update endpoint.\
+        \ Any omitted field falls back to its default: invoicing 15 days after completion,\
+        \ overdue 60 days after invoicing, and reminders disabled. Note that an update\
+        \ replaces the record wholesale, so omitted fields are reset to their defaults\
+        \ rather than left untouched."
+      operationId: savePaymentTerms
+      requestBody:
+        description: Payment terms to store
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentTermsRequest"
+        required: true
+      responses:
+        "200":
+          description: Existing payment terms updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentTermsResponse"
+        "201":
+          description: Payment terms created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentTermsResponse"
+        "400":
+          description: Request body failed validation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: A concurrent save conflicted; retry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  schemas:
+    PaymentTermsRequest:
+      type: object
+      description: Payment terms to create under Global Settings
+      properties:
+        paymentInvoiceAfterDays:
+          type: integer
+          format: int32
+          default: 15
+          description: Days after work completion before an invoice is raised
+          example: 15
+          maximum: 365
+          minimum: 1
+        markOverdueAfterDays:
+          type: integer
+          format: int32
+          default: 60
+          description: Days after an invoice is raised before it is marked overdue
+          example: 60
+          maximum: 365
+          minimum: 1
+        paymentReminderEnabled:
+          type: boolean
+          default: false
+          description: Whether payment reminders are sent for outstanding invoices
+          example: true
+        paymentReminderDays:
+          type: integer
+          format: int32
+          description: "Days before the due date on which a reminder is sent. Required\
+            \ when paymentReminderEnabled is true, ignored otherwise"
+          example: 7
+          maximum: 365
+          minimum: 1
+    PaymentTermsResponse:
+      type: object
+      description: Payment terms currently held under Global Settings
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identifier of the payment terms record
+          example: 3f2a6c1e-8b4d-4a91-9f0c-2d5e7a1b3c4d
+        paymentInvoiceAfterDays:
+          type: integer
+          format: int32
+          description: Days after work completion before an invoice is raised
+          example: 15
+        markOverdueAfterDays:
+          type: integer
+          format: int32
+          description: Days after an invoice is raised before it is marked overdue
+          example: 60
+        paymentReminderEnabled:
+          type: boolean
+          description: Whether payment reminders are sent for outstanding invoices
+          example: true
+        paymentReminderDays:
+          type: integer
+          format: int32
+          description: Days before the due date on which a reminder is sent. Absent
+            when reminders are disabled
+          example: 7
+        createdAt:
+          type: string
+          format: date-time
+          description: When the record was created
+          example: 2026-09-29T10:15:30Z
+        updatedAt:
+          type: string
+          format: date-time
+          description: When the record was last updated
+          example: 2026-09-29T10:15:30Z
+    ErrorResponse:
+      type: object
+      description: Standard error payload
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: Moment the error was produced
+          example: 2026-09-29T10:15:30Z
+        status:
+          type: integer
+          format: int32
+          description: HTTP status code
+          example: 400
+        code:
+          type: string
+          description: "Short, machine-friendly error code"
+          example: VALIDATION_FAILED
+        message:
+          type: string
+          description: Human readable summary of what went wrong
+          example: One or more fields are invalid
+        path:
+          type: string
+          description: Request path that produced the error
+          example: /psc/cl/v1/global-settings/payment-terms
+        errors:
+          type: array
+          description: "Field level validation failures, present only for validation\
+            \ errors"
+          items:
+            $ref: "#/components/schemas/FieldError"
+    FieldError:
+      type: object
+      description: A single field level validation failure
+      properties:
+        field:
+          type: string
+          description: Name of the offending field
+          example: markOverdueAfterDays
+        message:
+          type: string
+          description: Why the value was rejected
+          example: must be greater than or equal to 1
+  securitySchemes:
+    bearerAuth:
+      type: http
+      description: JWT bearer token. Supply the raw token — the 'Bearer ' prefix is
+        added for you.
+      in: header
+      scheme: bearer
+      bearerFormat: JWT

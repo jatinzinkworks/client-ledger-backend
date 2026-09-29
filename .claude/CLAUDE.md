@@ -20,7 +20,7 @@ Java-based microservices project developed in IntelliJ IDEA.
 - Review code for bugs, issues, or improvements when asked
 
 ## Package Structure
-All code lives under the base package `com.vmo2.apex.data.governance`. Place new
+All code lives under the base package `com.psc.cl`. Place new
 classes in the package matching their responsibility — do not introduce other
 top-level packages without being asked.
 This project will have different modeules in backend as part of same project. Repeat below structure for each module.

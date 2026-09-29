@@ -77,5 +77,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
 # and has no BOOT-INF to launch here.
 ENTRYPOINT ["java", \
     "-XX:MaxRAMPercentage=75.0", \
+    "-Duser.timezone=UTC", \
     "-Djava.security.egd=file:/dev/./urandom", \
     "-jar", "application.jar"]

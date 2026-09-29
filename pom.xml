@@ -138,7 +138,7 @@
                 </executions>
                 <configuration>
                     <excludes>
-                        <exclude>**/TripfoldBackendApplication.class</exclude>
+                        <exclude>**/ClientLedgerApplication.class</exclude>
                         <exclude>**/config/**</exclude>
                         <exclude>**/dto/**</exclude>
                         <exclude>**/PolicyApi.class</exclude>

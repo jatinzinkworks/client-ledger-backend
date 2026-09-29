@@ -1,12 +1,12 @@
 services:
   db:
     image: postgres:16
-    container_name: wayfare-db
+    container_name: client-ledger-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
-      POSTGRES_DB: wayfare
+      POSTGRES_DB: client-ledger
       # Everything runs in UTC — the JVM sets its default zone to UTC at startup, so
       # keeping the server here matches it. Postgres log lines and any session that
       # does not override timezone then report UTC too.
@@ -23,7 +23,7 @@ services:
       - "D:/PostgreSQL/dumps:/dumps"
     shm_size: "256mb"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d wayfare"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d client-ledger"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -37,7 +37,7 @@ services:
   # Optional. Remove this block if you already have pgAdmin installed natively.
   pgadmin:
     image: dpage/pgadmin4:latest
-    container_name: wayfare-pgadmin
+    container_name: client-ledger-pgadmin
     restart: unless-stopped
     environment:
       PGADMIN_DEFAULT_EMAIL: jatin.marwaha@zinkworks.com
