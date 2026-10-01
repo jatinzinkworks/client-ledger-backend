@@ -25,6 +25,7 @@ import com.psc.cl.servicecatalog.model.BillingFrequency;
 import com.psc.cl.servicecatalog.model.QuarterInvoiceMonth;
 import com.psc.cl.servicecatalog.model.ServiceCategory;
 import com.psc.cl.servicecatalog.service.ServiceCatalogService;
+import com.psc.cl.servicecatalog.model.InvoiceMonth;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -36,7 +37,6 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.time.Month;
 import java.util.List;
 import java.util.UUID;
 
@@ -133,7 +133,7 @@ class ServiceCatalogControllerTest {
         ArgumentCaptor<CatalogServiceRequest> captor =
                 ArgumentCaptor.forClass(CatalogServiceRequest.class);
         verify(serviceCatalogService).createService(captor.capture());
-        assertThat(captor.getValue().invoiceSchedule().month()).isEqualTo(Month.APRIL);
+        assertThat(captor.getValue().invoiceSchedule().month()).isEqualTo(InvoiceMonth.APRIL);
     }
 
     @Test

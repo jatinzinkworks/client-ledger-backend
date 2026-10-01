@@ -13,6 +13,9 @@ tags:
   description: "Tenant-wide configuration for the Client Ledger, such as payment terms"
 - name: Service Catalog
   description: "Billable services the firm offers, with their fees and billing schedules"
+- name: Manager Catalog
+  description: "Staff who can be assigned to client work, with their roles and contact\
+    \ details"
 paths:
   /psc/cl/v1/services/{id}:
     get:
@@ -153,6 +156,137 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/managers/{id}:
+    get:
+      tags:
+      - Manager Catalog
+      summary: Fetch a manager
+      description: Returns one manager by identifier.
+      operationId: getManager
+      parameters:
+      - name: id
+        in: path
+        description: Identifier of the manager
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: e9b2c4d1-7f35-4a68-91c0-3d8a5e2f6b47
+      responses:
+        "200":
+          description: Manager found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagerResponse"
+        "400":
+          description: The identifier is not a valid UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No manager carries this identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      tags:
+      - Manager Catalog
+      summary: Update a manager
+      description: "Replaces a manager wholesale. Every field is mandatory, so nothing\
+        \ is left behind from the previous version."
+      operationId: updateManager
+      parameters:
+      - name: id
+        in: path
+        description: Identifier of the manager
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: e9b2c4d1-7f35-4a68-91c0-3d8a5e2f6b47
+      requestBody:
+        description: New content for the manager
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManagerRequest"
+        required: true
+      responses:
+        "200":
+          description: Manager updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagerResponse"
+        "400":
+          description: Request body failed validation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No manager carries this identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Another manager already holds this email address
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      tags:
+      - Manager Catalog
+      summary: Delete a manager
+      description: Removes a manager from the catalog.
+      operationId: deleteManager
+      parameters:
+      - name: id
+        in: path
+        description: Identifier of the manager
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: e9b2c4d1-7f35-4a68-91c0-3d8a5e2f6b47
+      responses:
+        "204":
+          description: Manager deleted
+        "400":
+          description: The identifier is not a valid UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No manager carries this identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /psc/cl/v1/services:
     get:
       tags:
@@ -208,6 +342,68 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: A service with this name already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/managers:
+    get:
+      tags:
+      - Manager Catalog
+      summary: List managers
+      description: "Returns every manager, ordered by last name then first name. The\
+        \ list is returned whole; it is not paged."
+      operationId: listManagers
+      responses:
+        "200":
+          description: "The catalog, empty when nobody has been added yet"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ManagerResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      tags:
+      - Manager Catalog
+      summary: Create a manager
+      description: "Adds a manager to the catalog. Every field is mandatory, and the\
+        \ email address must be unique across the catalog, ignoring case."
+      operationId: createManager
+      requestBody:
+        description: Manager to add to the catalog
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManagerRequest"
+        required: true
+      responses:
+        "201":
+          description: Manager created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagerResponse"
+        "400":
+          description: Request body failed validation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: A manager already holds this email address
           content:
             application/json:
               schema:
@@ -575,6 +771,93 @@ components:
           type: string
           description: Why the value was rejected
           example: must be greater than or equal to 1
+    ManagerRequest:
+      type: object
+      description: Manager to store in the catalog
+      properties:
+        firstName:
+          type: string
+          description: Given name of the manager
+          example: Pranay
+          maxLength: 100
+          minLength: 0
+        lastName:
+          type: string
+          description: Family name of the manager
+          example: Singhal
+          maxLength: 100
+          minLength: 0
+        email:
+          type: string
+          format: email
+          description: "Work email address, unique across the catalog"
+          example: pranay.singhal@pranaysinghal.in
+          maxLength: 254
+          minLength: 0
+        role:
+          type: string
+          description: Seniority the manager holds
+          enum:
+          - SENIOR_MANAGER
+          - MANAGER
+          - ASSOCIATE
+          example: SENIOR_MANAGER
+        mobileNumber:
+          type: string
+          description: Mobile contact number
+          example: +91 98765 43210
+          maxLength: 20
+          minLength: 0
+          pattern: "^[+]?[0-9 ()-]{6,20}$"
+      required:
+      - email
+      - firstName
+      - lastName
+      - mobileNumber
+      - role
+    ManagerResponse:
+      type: object
+      description: A manager held in the catalog
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identifier of the manager
+          example: e9b2c4d1-7f35-4a68-91c0-3d8a5e2f6b47
+        firstName:
+          type: string
+          description: Given name of the manager
+          example: Pranay
+        lastName:
+          type: string
+          description: Family name of the manager
+          example: Singhal
+        email:
+          type: string
+          description: Work email address
+          example: pranay.singhal@pranaysinghal.in
+        role:
+          type: string
+          description: Seniority the manager holds
+          enum:
+          - SENIOR_MANAGER
+          - MANAGER
+          - ASSOCIATE
+          example: SENIOR_MANAGER
+        mobileNumber:
+          type: string
+          description: Mobile contact number
+          example: +91 98765 43210
+        createdAt:
+          type: string
+          format: date-time
+          description: When the manager was added
+          example: 2026-10-01T10:15:30Z
+        updatedAt:
+          type: string
+          format: date-time
+          description: When the manager was last updated
+          example: 2026-10-01T10:15:30Z
     PaymentTermsRequest:
       type: object
       description: Payment terms to store under Global Settings

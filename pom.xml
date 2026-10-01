@@ -25,6 +25,9 @@
         <testcontainers.version>1.21.3</testcontainers.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <debug.port>5005</debug.port>
+        <!-- Overwritten by jacoco:prepare-agent-integration during a full build; empty here so the
+             failsafe plugin still has a resolvable argLine when jacoco has not run. -->
+        <failsafeArgLine/>
     </properties>
 
     <dependencies>
@@ -135,6 +138,60 @@
                             <goal>report</goal>
                         </goals>
                     </execution>
+                    <!--
+                        Integration tests are instrumented separately: this writes to
+                        target/jacoco-it.exec and exposes the agent as ${failsafeArgLine}, which the
+                        failsafe plugin below picks up. Without the separate property Failsafe would
+                        inherit ${argLine} and append IT data to the unit-test exec file, which the
+                        `report` execution above has already consumed by then.
+                    -->
+                    <execution>
+                        <id>prepare-agent-integration</id>
+                        <goals>
+                            <goal>prepare-agent-integration</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report-integration</id>
+                        <phase>post-integration-test</phase>
+                        <goals>
+                            <goal>report-integration</goal>
+                        </goals>
+                    </execution>
+                    <!-- Unit and integration coverage combined, so overall numbers credit a line
+                         covered by either. -->
+                    <execution>
+                        <id>merge-coverage</id>
+                        <phase>post-integration-test</phase>
+                        <goals>
+                            <goal>merge</goal>
+                        </goals>
+                        <configuration>
+                            <fileSets>
+                                <fileSet>
+                                    <directory>${project.build.directory}</directory>
+                                    <includes>
+                                        <include>jacoco.exec</include>
+                                        <include>jacoco-it.exec</include>
+                                    </includes>
+                                </fileSet>
+                            </fileSets>
+                            <destFile>${project.build.directory}/jacoco-merged.exec</destFile>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>report-merged</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                        <configuration>
+                            <dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
+                            <outputDirectory>
+                                ${project.reporting.outputDirectory}/jacoco-merged
+                            </outputDirectory>
+                        </configuration>
+                    </execution>
                 </executions>
                 <configuration>
                     <excludes>
@@ -143,6 +200,30 @@
                         <exclude>**/dto/**</exclude>
                         <exclude>**/PolicyApi.class</exclude>
                     </excludes>
+                </configuration>
+            </plugin>
+
+            <!--
+                Integration tests (*IT) run against a real PostgreSQL container, so they are kept
+                out of `mvn test` and run in the `verify` phase instead. Failsafe's version comes
+                from the Spring Boot parent. Note that `verify` therefore requires Docker.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <!--
+                    No <executions> here on purpose: the Spring Boot parent already binds
+                    integration-test and verify in its pluginManagement, so declaring the plugin is
+                    enough to activate them. Adding our own execution ran the suite twice, with the
+                    second one reporting "skipping, already run".
+                -->
+                <configuration>
+                    <!-- ${failsafeArgLine} is set by jacoco:prepare-agent-integration, and
+                         defaulted to empty in <properties> so running this plugin on its own does
+                         not pass a literal placeholder to the JVM. The explicit UTC flag guards any
+                         future @SpringBootTest that does not extend AbstractPostgresIT, which pins
+                         the zone for itself. -->
+                    <argLine>${failsafeArgLine} -Duser.timezone=UTC</argLine>
                 </configuration>
             </plugin>
 

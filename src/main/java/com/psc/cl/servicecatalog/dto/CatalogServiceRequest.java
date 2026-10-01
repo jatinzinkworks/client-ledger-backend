@@ -5,6 +5,7 @@ import com.psc.cl.servicecatalog.model.BillingFrequency;
 import com.psc.cl.servicecatalog.model.CatalogService;
 import com.psc.cl.servicecatalog.model.QuarterInvoiceMonth;
 import com.psc.cl.servicecatalog.model.ServiceCategory;
+import com.psc.cl.servicecatalog.model.InvoiceMonth;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
@@ -17,7 +18,6 @@ import jakarta.validation.constraints.Size;
 import lombok.Builder;
 
 import java.math.BigDecimal;
-import java.time.Month;
 import java.util.Objects;
 
 /**
@@ -98,7 +98,7 @@ public record CatalogServiceRequest(
     /** @return the scheduled month, or null when there is no schedule */
     @JsonIgnore
     @Schema(hidden = true)
-    public Month scheduledMonth() {
+    public InvoiceMonth scheduledMonth() {
         return invoiceSchedule == null ? null : invoiceSchedule.month();
     }
 

@@ -18,7 +18,6 @@ import lombok.Setter;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.time.Month;
 import java.util.UUID;
 
 /**
@@ -83,7 +82,7 @@ public class CatalogService {
     /** Set only for {@link BillingFrequency#ANNUAL}. */
     @Enumerated(EnumType.STRING)
     @Column(name = "invoice_month", length = 20)
-    private Month invoiceMonth;
+    private InvoiceMonth invoiceMonth;
 
     /**
      * How many companies currently subscribe to this service. Maintained by the assignment flow,

@@ -1,6 +1,6 @@
 #!/usr/bin/bash
-PROJECT="zinkworks-tools-poc"
-REGION="europe-west2"
+PROJECT="test-project"
+REGION="asia-south2"
 SERVICE="client-ledger-backend"
 ARTIFACT_REPO="docker-release"
 REPO=${REGION}"-docker.pkg.dev/${PROJECT}/${ARTIFACT_REPO}/${SERVICE}"

@@ -12,7 +12,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.psc.cl.globalsettings.dto.FirmDetailsRequest;
 import com.psc.cl.globalsettings.dto.FirmDetailsResponse;
 import com.psc.cl.globalsettings.dto.PaymentTermsRequest;
@@ -59,9 +58,6 @@ class GlobalSettingsControllerTest {
     @Autowired
     private MockMvc mockMvc;
 
-    @Autowired
-    private ObjectMapper objectMapper;
-
     @MockitoBean
     private PaymentTermsService paymentTermsService;
 
@@ -76,12 +72,13 @@ class GlobalSettingsControllerTest {
 
         mockMvc.perform(post(PAYMENT_TERMS_URL)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(PaymentTermsRequest.builder()
-                                .paymentDueAfterDays(15)
-                                .markOverdueAfterDays(60)
-                                .paymentReminderEnabled(true)
-                                .paymentReminderDays(7)
-                                .build())))
+                        .content("""
+                                {
+                                  "paymentDueAfterDays": 15,
+                                  "markOverdueAfterDays": 60,
+                                  "paymentReminderEnabled": true,
+                                  "paymentReminderDays": 7
+                                }"""))
                 .andExpect(status().isCreated())
                 .andExpect(header().string(HttpHeaders.LOCATION, PAYMENT_TERMS_URL))
                 .andExpect(jsonPath("$.paymentDueAfterDays").value(15))

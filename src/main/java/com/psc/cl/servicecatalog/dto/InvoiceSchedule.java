@@ -2,12 +2,12 @@ package com.psc.cl.servicecatalog.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.psc.cl.servicecatalog.model.QuarterInvoiceMonth;
+import com.psc.cl.servicecatalog.model.InvoiceMonth;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import lombok.Builder;
 
-import java.time.Month;
 
 /**
  * When invoices are raised for a recurring service.
@@ -34,5 +34,5 @@ public record InvoiceSchedule(
 
         @Schema(description = "Annual billing only: the month the invoice is raised in, by name",
                 example = "APRIL")
-        Month month) {
+        InvoiceMonth month) {
 }

@@ -19,6 +19,7 @@ import com.psc.cl.servicecatalog.model.CatalogService;
 import com.psc.cl.servicecatalog.model.QuarterInvoiceMonth;
 import com.psc.cl.servicecatalog.model.ServiceCategory;
 import com.psc.cl.servicecatalog.repository.CatalogServiceRepository;
+import com.psc.cl.servicecatalog.model.InvoiceMonth;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,7 +32,6 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Sort;
 
 import java.math.BigDecimal;
-import java.time.Month;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -104,12 +104,12 @@ class ServiceCatalogServiceImplTest {
                         .billingFrequency(BillingFrequency.ANNUAL)
                         .standardFee(new BigDecimal("50000.00"))
                         .invoiceSchedule(InvoiceSchedule.builder()
-                                .month(Month.APRIL)
+                                .month(InvoiceMonth.APRIL)
                                 .dayOfMonth(15)
                                 .build())
                         .build());
 
-        assertThat(response.getInvoiceSchedule().month()).isEqualTo(Month.APRIL);
+        assertThat(response.getInvoiceSchedule().month()).isEqualTo(InvoiceMonth.APRIL);
         assertThat(response.getInvoiceSchedule().dayOfMonth()).isEqualTo(15);
         assertThat(response.getInvoiceSchedule().monthOfQuarter()).isNull();
     }
@@ -275,7 +275,7 @@ class ServiceCatalogServiceImplTest {
                         .billingFrequency(BillingFrequency.ANNUAL)
                         .standardFee(new BigDecimal("50000.00"))
                         .invoiceSchedule(InvoiceSchedule.builder()
-                                .month(Month.APRIL)
+                                .month(InvoiceMonth.APRIL)
                                 .dayOfMonth(15)
                                 .build())
                         .build());
@@ -285,9 +285,9 @@ class ServiceCatalogServiceImplTest {
         assertThat(saved).isSameAs(stored);
         assertThat(saved.getServiceName()).isEqualTo("Statutory Audit");
         assertThat(saved.getBillingFrequency()).isEqualTo(BillingFrequency.ANNUAL);
-        assertThat(saved.getInvoiceMonth()).isEqualTo(Month.APRIL);
+        assertThat(saved.getInvoiceMonth()).isEqualTo(InvoiceMonth.APRIL);
         assertThat(saved.getInvoiceDayOfMonth()).isEqualTo(15);
-        assertThat(response.getInvoiceSchedule().month()).isEqualTo(Month.APRIL);
+        assertThat(response.getInvoiceSchedule().month()).isEqualTo(InvoiceMonth.APRIL);
     }
 
     @Test
