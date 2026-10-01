@@ -1,5 +1,11 @@
 package com.psc.cl.globalsettings.service;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
 import com.psc.cl.globalsettings.dto.PaymentTermsRequest;
 import com.psc.cl.globalsettings.dto.PaymentTermsResponse;
 import com.psc.cl.globalsettings.exception.PaymentTermsNotFoundException;
@@ -17,12 +23,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class PaymentTermsServiceImplTest {
