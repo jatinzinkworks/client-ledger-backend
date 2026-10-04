@@ -18,6 +18,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.UUID;
 
@@ -37,6 +38,9 @@ class ServiceCatalogIT extends AbstractPostgresIT {
 
     @Autowired
     private CatalogServiceRepository catalogServiceRepository;
+
+    @Autowired
+    private TransactionTemplate transactionTemplate;
 
     @BeforeEach
     void clearCatalog() {
@@ -215,10 +219,13 @@ class ServiceCatalogIT extends AbstractPostgresIT {
                 .andReturn().getResponse().getContentAsString();
         UUID id = UUID.fromString(JsonPath.read(created, "$.id"));
 
-        // Nothing increments the subscriber count yet, so set it directly to exercise the guard.
-        CatalogService stored = catalogServiceRepository.findById(id).orElseThrow();
-        stored.setUsedByCompanies(3);
-        catalogServiceRepository.saveAndFlush(stored);
+        // Raise the subscriber count the way the assignment flow does, without needing clients.
+        // The column is not updatable through the entity, so saving an edited entity would not do.
+        transactionTemplate.executeWithoutResult(status -> {
+            for (int i = 0; i < 3; i++) {
+                catalogServiceRepository.incrementUsedByCompanies(id);
+            }
+        });
 
         mockMvc.perform(delete(SERVICES_URL + "/" + id))
                 .andExpect(status().isConflict())

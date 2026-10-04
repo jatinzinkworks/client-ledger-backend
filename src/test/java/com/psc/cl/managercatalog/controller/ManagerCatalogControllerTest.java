@@ -19,6 +19,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.psc.cl.managercatalog.dto.ManagerRequest;
 import com.psc.cl.managercatalog.dto.ManagerResponse;
 import com.psc.cl.managercatalog.exception.ManagerEmailAlreadyExistsException;
+import com.psc.cl.managercatalog.exception.ManagerHasClientsException;
 import com.psc.cl.managercatalog.exception.ManagerNotFoundException;
 import com.psc.cl.managercatalog.model.ManagerRole;
 import com.psc.cl.managercatalog.service.ManagerCatalogService;
@@ -308,6 +309,17 @@ class ManagerCatalogControllerTest {
         mockMvc.perform(delete(MANAGERS_URL + "/" + id))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+    }
+
+    @Test
+    @DisplayName("returns 409 when deleting a manager who still has clients")
+    void deleteReturnsConflictWhenClientsAssigned() throws Exception {
+        UUID id = UUID.randomUUID();
+        doThrow(new ManagerHasClientsException(id, 2)).when(managerCatalogService).deleteManager(id);
+
+        mockMvc.perform(delete(MANAGERS_URL + "/" + id))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("RESOURCE_IN_USE"));
     }
 
     private ManagerResponse response() {

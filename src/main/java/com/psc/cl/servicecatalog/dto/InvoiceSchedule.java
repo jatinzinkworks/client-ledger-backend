@@ -1,8 +1,8 @@
 package com.psc.cl.servicecatalog.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.psc.cl.servicecatalog.model.QuarterInvoiceMonth;
 import com.psc.cl.servicecatalog.model.InvoiceMonth;
+import com.psc.cl.servicecatalog.model.QuarterInvoiceMonth;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;

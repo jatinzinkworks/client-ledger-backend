@@ -1,8 +1,10 @@
 package com.psc.cl.managercatalog.service;
 
+import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.managercatalog.dto.ManagerRequest;
 import com.psc.cl.managercatalog.dto.ManagerResponse;
 import com.psc.cl.managercatalog.exception.ManagerEmailAlreadyExistsException;
+import com.psc.cl.managercatalog.exception.ManagerHasClientsException;
 import com.psc.cl.managercatalog.exception.ManagerNotFoundException;
 import com.psc.cl.managercatalog.model.Manager;
 import com.psc.cl.managercatalog.repository.ManagerRepository;
@@ -29,6 +31,8 @@ public class ManagerCatalogServiceImpl implements ManagerCatalogService {
     private static final Sort BY_NAME = Sort.by(Sort.Direction.ASC, "lastName", "firstName");
 
     private final ManagerRepository managerRepository;
+
+    private final ClientRepository clientRepository;
 
     @Override
     @Transactional
@@ -83,7 +87,20 @@ public class ManagerCatalogServiceImpl implements ManagerCatalogService {
     @Transactional
     public void deleteManager(UUID id) {
         Manager manager = require(id);
-        managerRepository.delete(manager);
+
+        long assignedClients = clientRepository.countByManagerId(id);
+        if (assignedClients > 0) {
+            throw new ManagerHasClientsException(id, assignedClients);
+        }
+
+        try {
+            managerRepository.delete(manager);
+            managerRepository.flush();
+        } catch (DataIntegrityViolationException ex) {
+            // The foreign key caught a client assigned concurrently, after the check above.
+            log.warn("Delete of manager {} was rejected by the database: clients are assigned", id, ex);
+            throw new ManagerHasClientsException(id);
+        }
         log.info("Deleted manager {}", id);
     }
 

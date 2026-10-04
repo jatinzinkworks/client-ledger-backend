@@ -4,13 +4,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.managercatalog.dto.ManagerRequest;
 import com.psc.cl.managercatalog.dto.ManagerResponse;
 import com.psc.cl.managercatalog.exception.ManagerEmailAlreadyExistsException;
+import com.psc.cl.managercatalog.exception.ManagerHasClientsException;
 import com.psc.cl.managercatalog.exception.ManagerNotFoundException;
 import com.psc.cl.managercatalog.model.Manager;
 import com.psc.cl.managercatalog.model.ManagerRole;
@@ -35,6 +38,9 @@ class ManagerCatalogServiceImplTest {
 
     @Mock
     private ManagerRepository managerRepository;
+
+    @Mock
+    private ClientRepository clientRepository;
 
     @InjectMocks
     private ManagerCatalogServiceImpl managerCatalogService;
@@ -224,9 +230,39 @@ class ManagerCatalogServiceImplTest {
         Manager stored = stored();
         when(managerRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
 
+        when(clientRepository.countByManagerId(stored.getId())).thenReturn(0L);
+
         managerCatalogService.deleteManager(stored.getId());
 
         verify(managerRepository).delete(stored);
+        verify(managerRepository).flush();
+    }
+
+    @Test
+    @DisplayName("refuses to delete a manager who still has clients assigned")
+    void deleteRejectsManagerWithClients() {
+        Manager stored = stored();
+        when(managerRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
+        when(clientRepository.countByManagerId(stored.getId())).thenReturn(3L);
+
+        assertThatThrownBy(() -> managerCatalogService.deleteManager(stored.getId()))
+                .isInstanceOf(ManagerHasClientsException.class)
+                .hasMessageContaining("3 client(s)");
+
+        verify(managerRepository, never()).delete(any());
+    }
+
+    @Test
+    @DisplayName("maps a foreign key violation from a concurrent client assignment onto in use")
+    void deleteMapsIntegrityViolationToInUse() {
+        Manager stored = stored();
+        when(managerRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
+        when(clientRepository.countByManagerId(stored.getId())).thenReturn(0L);
+        doThrow(new DataIntegrityViolationException("fk_clients_manager"))
+                .when(managerRepository).flush();
+
+        assertThatThrownBy(() -> managerCatalogService.deleteManager(stored.getId()))
+                .isInstanceOf(ManagerHasClientsException.class);
     }
 
     @Test

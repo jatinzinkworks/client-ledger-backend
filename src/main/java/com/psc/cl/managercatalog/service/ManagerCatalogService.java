@@ -57,6 +57,8 @@ public interface ManagerCatalogService {
      * @param id the manager to remove
      * @throws com.psc.cl.managercatalog.exception.ManagerNotFoundException
      *         when no manager carries this identifier
+     * @throws com.psc.cl.managercatalog.exception.ManagerHasClientsException
+     *         when clients are still assigned to the manager
      */
     void deleteManager(UUID id);
 }

@@ -130,13 +130,17 @@ public interface ManagerCatalogApi {
             @Valid @RequestBody ManagerRequest request);
 
     @Operation(summary = "Delete a manager",
-            description = "Removes a manager from the catalog.")
+            description = "Removes a manager from the catalog. A manager who still has clients "
+                    + "assigned cannot be deleted; reassign those clients first.")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "Manager deleted"),
             @ApiResponse(responseCode = "400", description = "The identifier is not a valid UUID",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "404", description = "No manager carries this identifier",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "409", description = "Clients are still assigned to the manager",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "500", description = "Unexpected server error",

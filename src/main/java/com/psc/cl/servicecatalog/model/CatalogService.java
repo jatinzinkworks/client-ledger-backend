@@ -87,8 +87,12 @@ public class CatalogService {
     /**
      * How many companies currently subscribe to this service. Maintained by the assignment flow,
      * never accepted from an API caller.
+     *
+     * <p>Not updatable through the entity: saving an edited service would otherwise write back the
+     * count it read, losing any assignment made in the meantime. The assignment flow changes it
+     * with {@code CatalogServiceRepository#incrementUsedByCompanies} instead.
      */
-    @Column(name = "used_by_companies", nullable = false)
+    @Column(name = "used_by_companies", nullable = false, updatable = false)
     private Integer usedByCompanies;
 
     @Column(name = "created_at", nullable = false, updatable = false)
