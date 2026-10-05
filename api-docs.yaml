@@ -11,8 +11,13 @@ servers:
 tags:
 - name: Global Settings
   description: "Tenant-wide configuration for the Client Ledger, such as payment terms"
+- name: Client Services
+  description: Services from the Service Catalog delivered to a client's companies
 - name: Service Catalog
   description: "Billable services the firm offers, with their fees and billing schedules"
+- name: Clients
+  description: "People the firm works for, the manager who looks after them and the\
+    \ companies they hold"
 - name: Manager Catalog
   description: "Staff who can be assigned to client work, with their roles and contact\
     \ details"
@@ -255,7 +260,8 @@ paths:
       tags:
       - Manager Catalog
       summary: Delete a manager
-      description: Removes a manager from the catalog.
+      description: Removes a manager from the catalog. A manager who still has clients
+        assigned cannot be deleted; reassign those clients first.
       operationId: deleteManager
       parameters:
       - name: id
@@ -277,6 +283,335 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: No manager carries this identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Clients are still assigned to the manager
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/clients/{id}:
+    get:
+      tags:
+      - Clients
+      summary: Fetch a client
+      description: "Returns one client by identifier, with their companies in full\
+        \ and the name of the manager who looks after them."
+      operationId: getClient
+      parameters:
+      - name: id
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      responses:
+        "200":
+          description: Client found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClientResponse"
+        "400":
+          description: The identifier is not a valid UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No client carries this identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      tags:
+      - Clients
+      summary: Update a client
+      description: "Replaces a client wholesale, together with their full set of companies.\
+        \ A company carrying an id is updated in place and keeps that id, a company\
+        \ without an id is added, and any existing company left out is removed. An\
+        \ omitted client discount resets to zero, and companies without a discount\
+        \ of their own take the client's."
+      operationId: updateClient
+      parameters:
+      - name: id
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      requestBody:
+        description: New content for the client and their full set of companies
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClientUpdateRequest"
+        required: true
+      responses:
+        "200":
+          description: Client updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClientResponse"
+        "400":
+          description: "Request body failed validation, or the identifier is not a\
+            \ valid UUID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "No client carries this identifier, the assigned manager does\
+            \ not exist, or a company id is not one of this client's companies"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      tags:
+      - Clients
+      summary: Delete a client
+      description: Removes a client together with their companies. A client with services
+        assigned to any of their companies cannot be deleted; remove those services
+        first.
+      operationId: deleteClient
+      parameters:
+      - name: id
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      responses:
+        "204":
+          description: Client deleted
+        "400":
+          description: The identifier is not a valid UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No client carries this identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Services are still assigned to one or more of the client's
+            companies
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/clients/{clientId}/companies/{companyId}/services/{assignmentId}:
+    get:
+      tags:
+      - Client Services
+      summary: Fetch a service of a company
+      description: Returns one service assigned to a company of the client.
+      operationId: getService_1
+      parameters:
+      - name: clientId
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: companyId
+        in: path
+        description: Identifier of the company
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+      - name: assignmentId
+        in: path
+        description: Identifier of the assigned service
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 9d2a7c40-6e1b-4f53-b8a9-0c3e5d7f1a62
+      responses:
+        "200":
+          description: Assigned service found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceAssignmentResponse"
+        "400":
+          description: An identifier is not a valid UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "No client carries this identifier, the client holds no such\
+            \ company, or the company holds no such assigned service"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      tags:
+      - Client Services
+      summary: Update a service of a company
+      description: "Replaces the delivery date, discount and comment of a service\
+        \ assigned to a company of the client. The catalog service itself cannot change;\
+        \ remove this assignment and assign the other service instead. An omitted\
+        \ discount resets to the company's, and an omitted comment is cleared. The\
+        \ service type and next due date are worked out again from the catalog service's\
+        \ current schedule."
+      operationId: updateService_1
+      parameters:
+      - name: clientId
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: companyId
+        in: path
+        description: Identifier of the company
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+      - name: assignmentId
+        in: path
+        description: Identifier of the assigned service
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 9d2a7c40-6e1b-4f53-b8a9-0c3e5d7f1a62
+      requestBody:
+        description: New details for the assigned service
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ServiceAssignmentUpdateRequest"
+        required: true
+      responses:
+        "200":
+          description: Assigned service updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceAssignmentResponse"
+        "400":
+          description: "Request body failed validation, or an identifier is not a\
+            \ valid UUID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "No client carries this identifier, the client holds no such\
+            \ company, or the company holds no such assigned service"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      tags:
+      - Client Services
+      summary: Remove a service from a company
+      description: "Removes one assigned service from a company of the client. When\
+        \ it was the company's last assignment of that service, the company no longer\
+        \ counts towards the catalog service's usedByCompanies."
+      operationId: removeService
+      parameters:
+      - name: clientId
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: companyId
+        in: path
+        description: Identifier of the company
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+      - name: assignmentId
+        in: path
+        description: Identifier of the assigned service
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 9d2a7c40-6e1b-4f53-b8a9-0c3e5d7f1a62
+      responses:
+        "204":
+          description: Assigned service removed
+        "400":
+          description: An identifier is not a valid UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "No client carries this identifier, the client holds no such\
+            \ company, or the company holds no such assigned service"
           content:
             application/json:
               schema:
@@ -557,6 +892,336 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: A concurrent save conflicted; retry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/clients:
+    get:
+      tags:
+      - Clients
+      summary: List clients
+      description: "Returns every client, ordered by last name then first name. Each\
+        \ entry names the client's companies only; fetch a client by id for the full\
+        \ company details. The list is returned whole; it is not paged."
+      operationId: listClients
+      responses:
+        "200":
+          description: "Every client, empty when none has been added yet"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ClientSummaryResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      tags:
+      - Clients
+      summary: Create a client
+      description: "Adds a client together with the companies they hold. Every field\
+        \ is mandatory, at least one company must be supplied, and the assigned manager\
+        \ must already exist in the Manager Catalog."
+      operationId: createClient
+      requestBody:
+        description: "Client to add, with their companies"
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClientRequest"
+        required: true
+      responses:
+        "201":
+          description: Client created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClientResponse"
+        "400":
+          description: Request body failed validation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The assigned manager does not exist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/clients/{clientId}/companies/{companyId}/services:
+    get:
+      tags:
+      - Client Services
+      summary: List the services of a company
+      description: "Returns every service assigned to one company of the client, most\
+        \ recent delivery first. The list is returned whole; it is not paged."
+      operationId: listServices_1
+      parameters:
+      - name: clientId
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: companyId
+        in: path
+        description: Identifier of the company
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+      responses:
+        "200":
+          description: "The company's services, empty when none has been assigned"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ServiceAssignmentResponse"
+        "400":
+          description: An identifier is not a valid UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "No client carries this identifier, or the client holds no\
+            \ such company"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      tags:
+      - Client Services
+      summary: Assign a service to a company
+      description: "Assigns a service from the Service Catalog to one company of the\
+        \ client. A company can take many services, and the same service more than\
+        \ once, for example on different delivery dates. When no discount is given,\
+        \ the service takes the company's discount. The service type (the catalog\
+        \ billing frequency) and the next due date (the first scheduled invoice date\
+        \ on or after the delivery date; the delivery date itself for ONE_OFF) are\
+        \ worked out from the catalog service."
+      operationId: assignService
+      parameters:
+      - name: clientId
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: companyId
+        in: path
+        description: Identifier of the company receiving the service
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+      requestBody:
+        description: Service to assign to the company
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ServiceAssignmentRequest"
+        required: true
+      responses:
+        "201":
+          description: Service assigned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceAssignmentResponse"
+        "400":
+          description: "Request body failed validation, or an identifier is not a\
+            \ valid UUID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "No client carries this identifier, the client holds no such\
+            \ company, or the service does not exist in the Service Catalog"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/clients/{id}/companies:
+    get:
+      tags:
+      - Clients
+      summary: List the companies of a client
+      description: "Returns every company the client holds, in full, ordered by company\
+        \ name."
+      operationId: listCompanies
+      parameters:
+      - name: id
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      responses:
+        "200":
+          description: The client's companies
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CompanyResponse"
+        "400":
+          description: The identifier is not a valid UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No client carries this identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/clients/{id}/companies/{companyId}:
+    get:
+      tags:
+      - Clients
+      summary: Fetch a company of a client
+      description: Returns one company of the client. A company that exists but belongs
+        to a different client is reported as not found.
+      operationId: getCompany
+      parameters:
+      - name: id
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: companyId
+        in: path
+        description: Identifier of the company
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+      responses:
+        "200":
+          description: Company found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyResponse"
+        "400":
+          description: An identifier is not a valid UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "No client carries this identifier, or the client holds no\
+            \ such company"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      tags:
+      - Clients
+      summary: Delete a company of a client
+      description: "Removes one company of the client. A client must keep at least\
+        \ one company, so their only company cannot be deleted; delete the client\
+        \ instead. A company with services assigned cannot be deleted; remove those\
+        \ services first."
+      operationId: deleteCompany
+      parameters:
+      - name: id
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: companyId
+        in: path
+        description: Identifier of the company
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+      responses:
+        "204":
+          description: Company deleted
+        "400":
+          description: An identifier is not a valid UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "No client carries this identifier, or the client holds no\
+            \ such company"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "It is the client's only company (BUSINESS_RULE_VIOLATION),\
+            \ or services are still assigned to it (RESOURCE_IN_USE)"
           content:
             application/json:
               schema:
@@ -858,6 +1523,290 @@ components:
           format: date-time
           description: When the manager was last updated
           example: 2026-10-01T10:15:30Z
+    ClientUpdateRequest:
+      type: object
+      description: New content for a client and their full set of companies
+      properties:
+        firstName:
+          type: string
+          description: Given name of the client
+          example: Rohan
+          maxLength: 100
+          minLength: 0
+        lastName:
+          type: string
+          description: Family name of the client
+          example: Mehta
+          maxLength: 100
+          minLength: 0
+        phone:
+          type: string
+          description: Contact phone number
+          example: +91 98200 12345
+          maxLength: 20
+          minLength: 0
+          pattern: "^[+]?[0-9 ()-]{6,20}$"
+        email:
+          type: string
+          format: email
+          description: Contact email address
+          example: rohan.mehta@example.com
+          maxLength: 254
+          minLength: 0
+        managerId:
+          type: string
+          format: uuid
+          description: Identifier of the manager from the Manager Catalog who looks
+            after the client
+          example: e9b2c4d1-7f35-4a68-91c0-3d8a5e2f6b47
+        discountPercent:
+          type: number
+          default: "0.00"
+          description: "Discount granted to the client, as a percentage. Also applied\
+            \ to every company that does not set its own"
+          example: 10.0
+          maximum: 100.00
+          minimum: 0.00
+        companies:
+          type: array
+          description: The client's complete set of companies. Existing companies
+            left out are removed
+          items:
+            $ref: "#/components/schemas/CompanyUpdateRequest"
+          maxItems: 50
+          minItems: 0
+      required:
+      - companies
+      - email
+      - firstName
+      - lastName
+      - managerId
+      - phone
+    CompanyUpdateRequest:
+      type: object
+      description: "Company of the client: an existing one when it carries an id,\
+        \ otherwise a new one"
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identifier of an existing company of this client to update.
+            Omit to add a new company
+          example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+        companyName:
+          type: string
+          description: Registered name of the company
+          example: Mehta Textiles Pvt Ltd
+          maxLength: 200
+          minLength: 0
+        companyType:
+          type: string
+          description: Legal form of the company
+          enum:
+          - PRIVATE_LIMITED
+          - PUBLIC_LIMITED
+          - LLP
+          - PARTNERSHIP
+          - PROPRIETORSHIP
+          - TRUST
+          - HUF
+          - INDIVIDUAL
+          example: PRIVATE_LIMITED
+        address:
+          type: string
+          description: Registered address of the company
+          example: "12 MG Road, Bengaluru, Karnataka 560001"
+          maxLength: 500
+          minLength: 0
+        discountPercent:
+          type: number
+          description: "Discount granted on this company's work, as a percentage.\
+            \ When omitted, the company takes the client's discount"
+          example: 5.0
+          maximum: 100.00
+          minimum: 0.00
+      required:
+      - address
+      - companyName
+      - companyType
+    ClientResponse:
+      type: object
+      description: A client held in the ledger
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identifier of the client
+          example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+        firstName:
+          type: string
+          description: Given name of the client
+          example: Rohan
+        lastName:
+          type: string
+          description: Family name of the client
+          example: Mehta
+        phone:
+          type: string
+          description: Contact phone number
+          example: +91 98200 12345
+        email:
+          type: string
+          description: Contact email address
+          example: rohan.mehta@example.com
+        managerId:
+          type: string
+          format: uuid
+          description: Identifier of the manager who looks after the client
+          example: e9b2c4d1-7f35-4a68-91c0-3d8a5e2f6b47
+        managerName:
+          type: string
+          description: Full name of the manager who looks after the client
+          example: Pranay Singhal
+        discountPercent:
+          type: number
+          description: "Discount granted to the client, as a percentage"
+          example: 10.0
+        companies:
+          type: array
+          description: "Companies the client holds, ordered by name"
+          items:
+            $ref: "#/components/schemas/CompanyResponse"
+        createdAt:
+          type: string
+          format: date-time
+          description: When the client was added
+          example: 2026-10-04T10:15:30Z
+        updatedAt:
+          type: string
+          format: date-time
+          description: When the client was last updated
+          example: 2026-10-04T10:15:30Z
+    CompanyResponse:
+      type: object
+      description: A company held against a client
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identifier of the company
+          example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+        companyName:
+          type: string
+          description: Registered name of the company
+          example: Mehta Textiles Pvt Ltd
+        companyType:
+          type: string
+          description: Legal form of the company
+          enum:
+          - PRIVATE_LIMITED
+          - PUBLIC_LIMITED
+          - LLP
+          - PARTNERSHIP
+          - PROPRIETORSHIP
+          - TRUST
+          - HUF
+          - INDIVIDUAL
+          example: PRIVATE_LIMITED
+        address:
+          type: string
+          description: Registered address of the company
+          example: "12 MG Road, Bengaluru, Karnataka 560001"
+        discountPercent:
+          type: number
+          description: "Discount granted on this company's work, as a percentage"
+          example: 5.0
+    ServiceAssignmentUpdateRequest:
+      type: object
+      description: New details for a service assigned to a company
+      properties:
+        deliveryDate:
+          type: string
+          format: date
+          description: "Date the service is, or was, delivered"
+          example: 2026-10-15
+        discountPercent:
+          type: number
+          description: "Discount granted on this service, as a percentage. When omitted,\
+            \ the service takes the company's discount"
+          example: 5.0
+          maximum: 100.00
+          minimum: 0.00
+        comment:
+          type: string
+          description: "Free-text note about this delivery. When omitted, any existing\
+            \ comment is cleared"
+          example: Filing for September 2026
+          maxLength: 1000
+          minLength: 0
+      required:
+      - deliveryDate
+    ServiceAssignmentResponse:
+      type: object
+      description: A catalog service assigned to a company
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identifier of this assignment
+          example: 9d2a7c40-6e1b-4f53-b8a9-0c3e5d7f1a62
+        clientId:
+          type: string
+          format: uuid
+          description: Identifier of the client
+          example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+        companyId:
+          type: string
+          format: uuid
+          description: Identifier of the company the service is delivered to
+          example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+        serviceId:
+          type: string
+          format: uuid
+          description: Identifier of the service in the Service Catalog
+          example: 3b8e5f21-9c4d-4a17-8e62-1f0d7a9c5b34
+        serviceName:
+          type: string
+          description: Name of the service in the Service Catalog
+          example: GST Monthly Return Filing
+        serviceType:
+          type: string
+          description: "How the service is billed, taken from the Service Catalog"
+          enum:
+          - ONE_OFF
+          - MONTHLY
+          - QUARTERLY
+          - ANNUAL
+          example: MONTHLY
+        deliveryDate:
+          type: string
+          format: date
+          description: "Date the service is, or was, delivered"
+          example: 2026-10-15
+        nextDueDate:
+          type: string
+          format: date
+          description: "First date the service's invoice schedule falls on, on or\
+            \ after the delivery date. A ONE_OFF service is due on its delivery date"
+          example: 2026-11-07
+        discountPercent:
+          type: number
+          description: "Discount granted on this service, as a percentage"
+          example: 5.0
+        comment:
+          type: string
+          description: "Free-text note about this delivery, absent when none was given"
+          example: Filing for September 2026
+        createdAt:
+          type: string
+          format: date-time
+          description: When the service was assigned
+          example: 2026-10-04T10:15:30Z
+        updatedAt:
+          type: string
+          format: date-time
+          description: When the assignment was last updated
+          example: 2026-10-04T10:15:30Z
     PaymentTermsRequest:
       type: object
       description: Payment terms to store under Global Settings
@@ -1021,6 +1970,178 @@ components:
           format: date-time
           description: When the record was last updated
           example: 2026-09-29T10:15:30Z
+    ClientRequest:
+      type: object
+      description: "Client to add, with the companies they hold"
+      properties:
+        firstName:
+          type: string
+          description: Given name of the client
+          example: Rohan
+          maxLength: 100
+          minLength: 0
+        lastName:
+          type: string
+          description: Family name of the client
+          example: Mehta
+          maxLength: 100
+          minLength: 0
+        phone:
+          type: string
+          description: Contact phone number
+          example: +91 98200 12345
+          maxLength: 20
+          minLength: 0
+          pattern: "^[+]?[0-9 ()-]{6,20}$"
+        email:
+          type: string
+          format: email
+          description: Contact email address
+          example: rohan.mehta@example.com
+          maxLength: 254
+          minLength: 0
+        managerId:
+          type: string
+          format: uuid
+          description: Identifier of the manager from the Manager Catalog who looks
+            after the client
+          example: e9b2c4d1-7f35-4a68-91c0-3d8a5e2f6b47
+        discountPercent:
+          type: number
+          default: "0.00"
+          description: "Discount granted to the client, as a percentage. Also applied\
+            \ to every company that does not set its own"
+          example: 10.0
+          maximum: 100.00
+          minimum: 0.00
+        companies:
+          type: array
+          description: Companies the client owns or acts for
+          items:
+            $ref: "#/components/schemas/CompanyRequest"
+          maxItems: 50
+          minItems: 0
+      required:
+      - companies
+      - email
+      - firstName
+      - lastName
+      - managerId
+      - phone
+    CompanyRequest:
+      type: object
+      description: "Company owned by, or acted for on behalf of, the client"
+      properties:
+        companyName:
+          type: string
+          description: Registered name of the company
+          example: Mehta Textiles Pvt Ltd
+          maxLength: 200
+          minLength: 0
+        companyType:
+          type: string
+          description: Legal form of the company
+          enum:
+          - PRIVATE_LIMITED
+          - PUBLIC_LIMITED
+          - LLP
+          - PARTNERSHIP
+          - PROPRIETORSHIP
+          - TRUST
+          - HUF
+          - INDIVIDUAL
+          example: PRIVATE_LIMITED
+        address:
+          type: string
+          description: Registered address of the company
+          example: "12 MG Road, Bengaluru, Karnataka 560001"
+          maxLength: 500
+          minLength: 0
+        discountPercent:
+          type: number
+          description: "Discount granted on this company's work, as a percentage.\
+            \ When omitted, the company takes the client's discount"
+          example: 5.0
+          maximum: 100.00
+          minimum: 0.00
+      required:
+      - address
+      - companyName
+      - companyType
+    ServiceAssignmentRequest:
+      type: object
+      description: Catalog service to deliver to the company
+      properties:
+        serviceId:
+          type: string
+          format: uuid
+          description: Identifier of the service in the Service Catalog
+          example: 3b8e5f21-9c4d-4a17-8e62-1f0d7a9c5b34
+        deliveryDate:
+          type: string
+          format: date
+          description: "Date the service is, or was, delivered"
+          example: 2026-10-15
+        discountPercent:
+          type: number
+          description: "Discount granted on this service, as a percentage. When omitted,\
+            \ the service takes the company's discount"
+          example: 5.0
+          maximum: 100.00
+          minimum: 0.00
+        comment:
+          type: string
+          description: Free-text note about this delivery
+          example: Filing for September 2026
+          maxLength: 1000
+          minLength: 0
+      required:
+      - deliveryDate
+      - serviceId
+    ClientSummaryResponse:
+      type: object
+      description: A client as shown in the client list
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identifier of the client
+          example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+        firstName:
+          type: string
+          description: Given name of the client
+          example: Rohan
+        lastName:
+          type: string
+          description: Family name of the client
+          example: Mehta
+        phone:
+          type: string
+          description: Contact phone number
+          example: +91 98200 12345
+        email:
+          type: string
+          description: Contact email address
+          example: rohan.mehta@example.com
+        managerId:
+          type: string
+          format: uuid
+          description: Identifier of the manager who looks after the client
+          example: e9b2c4d1-7f35-4a68-91c0-3d8a5e2f6b47
+        managerName:
+          type: string
+          description: Full name of the manager who looks after the client
+          example: Pranay Singhal
+        discountPercent:
+          type: number
+          description: "Discount granted to the client, as a percentage"
+          example: 10.0
+        companyNames:
+          type: array
+          description: "Names of the companies the client holds, ordered by name"
+          items:
+            type: string
+            example: Mehta Textiles Pvt Ltd
   securitySchemes:
     bearerAuth:
       type: http

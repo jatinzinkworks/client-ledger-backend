@@ -385,6 +385,46 @@ class ClientIT extends AbstractPostgresIT {
     }
 
     @Test
+    @DisplayName("filters the client list by manager")
+    void filtersClientsByManager() throws Exception {
+        Manager other = new Manager();
+        other.setFirstName("Aarti");
+        other.setLastName("Desai");
+        other.setEmail("aarti.desai@pranaysinghal.in");
+        other.setRole(ManagerRole.MANAGER);
+        other.setMobileNumber("+91 99887 66554");
+        UUID otherManagerId = managerRepository.saveAndFlush(other).getId();
+
+        createClient("Rohan", "Mehta", "rohan.mehta@example.com");
+        createClient("Anil", "Mehta", "anil.mehta@example.com");
+        mockMvc.perform(post(CLIENTS_URL)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(clientJson("Asha", "Kapoor", "asha.kapoor@example.com", otherManagerId)))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get(CLIENTS_URL).param("managerId", managerId.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].firstName").value("Anil"))
+                .andExpect(jsonPath("$[1].firstName").value("Rohan"))
+                .andExpect(jsonPath("$[0].managerName").value("Pranay Singhal"))
+                .andExpect(jsonPath("$[0].companyNames.length()").value(2));
+
+        mockMvc.perform(get(CLIENTS_URL).param("managerId", otherManagerId.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].lastName").value("Kapoor"))
+                .andExpect(jsonPath("$[0].managerName").value("Aarti Desai"));
+
+        mockMvc.perform(get(CLIENTS_URL).param("managerId", UUID.randomUUID().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+
+        mockMvc.perform(get(CLIENTS_URL))
+                .andExpect(jsonPath("$.length()").value(3));
+    }
+
+    @Test
     @DisplayName("deleting a client removes their companies too")
     void deletesClientWithCompanies() throws Exception {
         String created = mockMvc.perform(post(CLIENTS_URL)

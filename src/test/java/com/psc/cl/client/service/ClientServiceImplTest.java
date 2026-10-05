@@ -3,6 +3,7 @@ package com.psc.cl.client.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -573,7 +574,7 @@ class ClientServiceImplTest {
         when(clientRepository.findAll(any(Sort.class))).thenReturn(List.of(asha, rohan));
         when(managerRepository.findAllById(any())).thenReturn(List.of(manager()));
 
-        List<ClientSummaryResponse> clients = clientService.listClients();
+        List<ClientSummaryResponse> clients = clientService.listClients(null);
 
         assertThat(clients).extracting("lastName").containsExactly("Kapoor", "Mehta");
         assertThat(clients.get(1).getCompanyNames())
@@ -592,7 +593,32 @@ class ClientServiceImplTest {
     void listsNoClients() {
         when(clientRepository.findAll(any(Sort.class))).thenReturn(List.of());
 
-        assertThat(clientService.listClients()).isEmpty();
+        assertThat(clientService.listClients(null)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("lists only the clients of the given manager, by name")
+    void listsClientsOfManager() {
+        Client rohan = stored("Rohan", "Mehta", "Rohan Mehta HUF");
+        when(clientRepository.findByManagerId(eq(MANAGER_ID), any(Sort.class))).thenReturn(List.of(rohan));
+        when(managerRepository.findAllById(any())).thenReturn(List.of(manager()));
+
+        List<ClientSummaryResponse> clients = clientService.listClients(MANAGER_ID);
+
+        assertThat(clients).extracting("id").containsExactly(rohan.getId());
+        assertThat(clients.getFirst().getManagerName()).isEqualTo("Pranay Singhal");
+        verify(clientRepository).findByManagerId(MANAGER_ID,
+                Sort.by(Sort.Direction.ASC, "lastName", "firstName"));
+        verify(clientRepository, never()).findAll(any(Sort.class));
+    }
+
+    @Test
+    @DisplayName("returns an empty list for a manager without clients, or one that does not exist")
+    void listsNoClientsOfManager() {
+        UUID unknown = UUID.randomUUID();
+        when(clientRepository.findByManagerId(eq(unknown), any(Sort.class))).thenReturn(List.of());
+
+        assertThat(clientService.listClients(unknown)).isEmpty();
     }
 
     private Client stored(String firstName, String lastName, String... companyNames) {

@@ -253,7 +253,7 @@ class ClientControllerTest {
     @Test
     @DisplayName("returns 200 with company names only on list")
     void listsClients() throws Exception {
-        when(clientService.listClients()).thenReturn(List.of(ClientSummaryResponse.builder()
+        when(clientService.listClients(null)).thenReturn(List.of(ClientSummaryResponse.builder()
                 .id(UUID.randomUUID())
                 .firstName("Rohan")
                 .lastName("Mehta")
@@ -276,12 +276,33 @@ class ClientControllerTest {
     @Test
     @DisplayName("returns 200 with an empty array when no client has been added")
     void listsNoClients() throws Exception {
-        when(clientService.listClients()).thenReturn(List.of());
+        when(clientService.listClients(null)).thenReturn(List.of());
 
         mockMvc.perform(get(CLIENTS_URL))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$.length()").value(0));
+    }
+
+    @Test
+    @DisplayName("passes the manager filter through to the service")
+    void listsClientsOfManager() throws Exception {
+        when(clientService.listClients(UUID.fromString(MANAGER_ID))).thenReturn(List.of());
+
+        mockMvc.perform(get(CLIENTS_URL).param("managerId", MANAGER_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray());
+
+        verify(clientService).listClients(UUID.fromString(MANAGER_ID));
+    }
+
+    @Test
+    @DisplayName("returns 400 when the manager filter is not a UUID")
+    void listRejectsMalformedManagerId() throws Exception {
+        mockMvc.perform(get(CLIENTS_URL).param("managerId", "not-a-uuid"))
+                .andExpect(status().isBadRequest());
+
+        verify(clientService, never()).listClients(any());
     }
 
     @Test

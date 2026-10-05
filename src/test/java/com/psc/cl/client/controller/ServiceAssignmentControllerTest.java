@@ -25,6 +25,7 @@ import com.psc.cl.client.exception.AssignedServiceNotFoundException;
 import com.psc.cl.client.exception.CompanyNotFoundException;
 import com.psc.cl.client.exception.ServiceAssignmentNotFoundException;
 import com.psc.cl.client.service.ServiceAssignmentService;
+import com.psc.cl.servicecatalog.model.BillingFrequency;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -77,7 +78,9 @@ class ServiceAssignmentControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(header().string(HttpHeaders.LOCATION, endsWith(SERVICES_URL + "/" + assignmentId)))
                 .andExpect(jsonPath("$.serviceName").value("GST Monthly Return Filing"))
-                .andExpect(jsonPath("$.deliveryDate").value("2026-10-15"));
+                .andExpect(jsonPath("$.serviceType").value("MONTHLY"))
+                .andExpect(jsonPath("$.deliveryDate").value("2026-10-15"))
+                .andExpect(jsonPath("$.nextDueDate").value("2026-11-07"));
 
         ArgumentCaptor<ServiceAssignmentRequest> captor = ArgumentCaptor.forClass(ServiceAssignmentRequest.class);
         verify(serviceAssignmentService).assignService(eq(CLIENT_ID), eq(COMPANY_ID), captor.capture());
@@ -347,7 +350,9 @@ class ServiceAssignmentControllerTest {
                 .companyId(COMPANY_ID)
                 .serviceId(SERVICE_ID)
                 .serviceName("GST Monthly Return Filing")
+                .serviceType(BillingFrequency.MONTHLY)
                 .deliveryDate(LocalDate.of(2026, 10, 15))
+                .nextDueDate(LocalDate.of(2026, 11, 7))
                 .discountPercent(new BigDecimal("5.00"))
                 .comment("Filing for September 2026")
                 .createdAt(now)

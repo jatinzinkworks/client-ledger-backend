@@ -21,7 +21,9 @@ import com.psc.cl.client.model.ServiceAssignment;
 import com.psc.cl.client.repository.ClientCompanyRepository;
 import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.client.repository.ServiceAssignmentRepository;
+import com.psc.cl.servicecatalog.model.BillingFrequency;
 import com.psc.cl.servicecatalog.model.CatalogService;
+import com.psc.cl.servicecatalog.model.QuarterInvoiceMonth;
 import com.psc.cl.servicecatalog.repository.CatalogServiceRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -99,6 +101,8 @@ class ServiceAssignmentServiceImplTest {
         assertThat(saved.getCompany()).isSameAs(company);
         assertThat(saved.getCatalogServiceId()).isEqualTo(SERVICE_ID);
         assertThat(saved.getDeliveryDate()).isEqualTo(DELIVERY_DATE);
+        assertThat(saved.getServiceType()).isEqualTo(BillingFrequency.MONTHLY);
+        assertThat(saved.getNextDueDate()).isEqualTo(LocalDate.of(2026, 11, 7));
         assertThat(saved.getDiscountPercent()).isEqualTo(new BigDecimal("5.00"));
         assertThat(saved.getComment()).isEqualTo("Filing for September 2026");
 
@@ -106,6 +110,25 @@ class ServiceAssignmentServiceImplTest {
         assertThat(response.getClientId()).isEqualTo(CLIENT_ID);
         assertThat(response.getCompanyId()).isEqualTo(COMPANY_ID);
         assertThat(response.getServiceName()).isEqualTo("GST Monthly Return Filing");
+        assertThat(response.getServiceType()).isEqualTo(BillingFrequency.MONTHLY);
+        assertThat(response.getNextDueDate()).isEqualTo(LocalDate.of(2026, 11, 7));
+    }
+
+    @Test
+    @DisplayName("a one-off service is stored as due on its delivery date")
+    void oneOffServiceIsDueOnDelivery() {
+        stubCompany();
+        CatalogService oneOff = catalogService();
+        oneOff.setBillingFrequency(BillingFrequency.ONE_OFF);
+        oneOff.setInvoiceDayOfMonth(null);
+        when(catalogServiceRepository.findByIdForUpdate(SERVICE_ID)).thenReturn(Optional.of(oneOff));
+        stubSave();
+
+        serviceAssignmentService.assignService(CLIENT_ID, COMPANY_ID, request().build());
+
+        verify(serviceAssignmentRepository).save(assignmentCaptor.capture());
+        assertThat(assignmentCaptor.getValue().getServiceType()).isEqualTo(BillingFrequency.ONE_OFF);
+        assertThat(assignmentCaptor.getValue().getNextDueDate()).isEqualTo(DELIVERY_DATE);
     }
 
     @Test
@@ -287,9 +310,12 @@ class ServiceAssignmentServiceImplTest {
         assertThat(stored.getDiscountPercent()).isEqualTo(new BigDecimal("12.00"));
         assertThat(stored.getComment()).isEqualTo("Delivered late");
         assertThat(stored.getCatalogServiceId()).isEqualTo(SERVICE_ID);
+        // Delivered after the 7th of November, so next due on the 7th of December.
+        assertThat(stored.getNextDueDate()).isEqualTo(LocalDate.of(2026, 12, 7));
         verify(serviceAssignmentRepository).flush();
         assertThat(response.getServiceName()).isEqualTo("GST Monthly Return Filing");
         assertThat(response.getDeliveryDate()).isEqualTo(LocalDate.of(2026, 11, 20));
+        assertThat(response.getNextDueDate()).isEqualTo(LocalDate.of(2026, 12, 7));
         verify(catalogServiceRepository, never()).findByIdForUpdate(any());
         verify(catalogServiceRepository, never()).incrementUsedByCompanies(any());
         verify(catalogServiceRepository, never()).decrementUsedByCompanies(any());
@@ -311,6 +337,30 @@ class ServiceAssignmentServiceImplTest {
 
         assertThat(stored.getDiscountPercent()).isEqualTo(new BigDecimal("7.50"));
         assertThat(stored.getComment()).isNull();
+    }
+
+    @Test
+    @DisplayName("on update, takes the service type and due date from the catalog's current schedule")
+    void updateFollowsCurrentCatalogSchedule() {
+        stubCompany();
+        ServiceAssignment stored = assignment(DELIVERY_DATE);
+        stored.setServiceType(BillingFrequency.MONTHLY);
+        stored.setNextDueDate(LocalDate.of(2026, 11, 7));
+        when(serviceAssignmentRepository.findByIdAndCompanyId(stored.getId(), COMPANY_ID))
+                .thenReturn(Optional.of(stored));
+        // The catalog service has since moved to quarterly billing, in the first month, on the 10th.
+        CatalogService quarterly = catalogService();
+        quarterly.setBillingFrequency(BillingFrequency.QUARTERLY);
+        quarterly.setInvoiceDayOfMonth(10);
+        quarterly.setInvoiceMonthOfQuarter(QuarterInvoiceMonth.FIRST_MONTH);
+        when(catalogServiceRepository.findById(SERVICE_ID)).thenReturn(Optional.of(quarterly));
+
+        ServiceAssignmentResponse response = serviceAssignmentService.updateService(CLIENT_ID, COMPANY_ID,
+                stored.getId(), ServiceAssignmentUpdateRequest.builder().deliveryDate(DELIVERY_DATE).build());
+
+        assertThat(stored.getServiceType()).isEqualTo(BillingFrequency.QUARTERLY);
+        assertThat(stored.getNextDueDate()).isEqualTo(LocalDate.of(2027, 1, 10));
+        assertThat(response.getServiceType()).isEqualTo(BillingFrequency.QUARTERLY);
     }
 
     @Test
@@ -389,10 +439,13 @@ class ServiceAssignmentServiceImplTest {
         return assignment;
     }
 
+    /** Billed monthly on the 7th, so a delivery on 15 October 2026 is next due on 7 November. */
     private CatalogService catalogService() {
         CatalogService service = new CatalogService();
         service.setId(SERVICE_ID);
         service.setServiceName("GST Monthly Return Filing");
+        service.setBillingFrequency(BillingFrequency.MONTHLY);
+        service.setInvoiceDayOfMonth(7);
         return service;
     }
 

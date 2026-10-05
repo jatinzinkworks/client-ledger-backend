@@ -84,11 +84,13 @@ public interface ClientService {
     ClientResponse getClient(UUID id);
 
     /**
-     * Lists every client, ordered by last name then first name, naming their companies only.
+     * Lists clients, ordered by last name then first name, naming their companies only.
      *
-     * @return every client, empty when none has been added yet
+     * @param managerId when given, only the clients assigned to this manager; when null, every
+     *                  client
+     * @return the matching clients, empty when there are none
      */
-    List<ClientSummaryResponse> listClients();
+    List<ClientSummaryResponse> listClients(UUID managerId);
 
     /**
      * Lists every company a client holds, in full, ordered by company name.

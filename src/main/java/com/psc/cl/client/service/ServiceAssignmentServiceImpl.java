@@ -64,6 +64,7 @@ public class ServiceAssignmentServiceImpl implements ServiceAssignmentService {
         assignment.setCompany(company);
         assignment.setCatalogServiceId(serviceId);
         assignment.setDeliveryDate(request.deliveryDate());
+        applySchedule(service, assignment);
         assignment.setDiscountPercent(Percentages.orElse(request.discountPercent(), company.getDiscountPercent()));
         assignment.setComment(trimToNull(request.comment()));
 
@@ -114,18 +115,20 @@ public class ServiceAssignmentServiceImpl implements ServiceAssignmentService {
                                                    ServiceAssignmentUpdateRequest request) {
         ClientCompany company = requireCompany(clientId, companyId);
         ServiceAssignment assignment = requireAssignment(companyId, assignmentId);
+        UUID serviceId = assignment.getCatalogServiceId();
+        CatalogService service = catalogService(catalogServiceRepository.findById(serviceId).orElse(null), serviceId);
 
         assignment.setDeliveryDate(request.deliveryDate());
+        applySchedule(service, assignment);
         assignment.setDiscountPercent(Percentages.orElse(request.discountPercent(), company.getDiscountPercent()));
         assignment.setComment(trimToNull(request.comment()));
 
         // Flushing here stamps updatedAt before it is returned.
         serviceAssignmentRepository.flush();
-        log.info("Updated service assignment {} of company {} of client {}", assignmentId, companyId, clientId);
+        log.info("Updated service assignment {} of company {} of client {}, next due {}",
+                assignmentId, companyId, clientId, assignment.getNextDueDate());
 
-        UUID serviceId = assignment.getCatalogServiceId();
-        return ServiceAssignmentResponse.from(assignment, clientId,
-                catalogService(catalogServiceRepository.findById(serviceId).orElse(null), serviceId));
+        return ServiceAssignmentResponse.from(assignment, clientId, service);
     }
 
     @Override
@@ -147,6 +150,15 @@ public class ServiceAssignmentServiceImpl implements ServiceAssignmentService {
         }
         log.info("Removed service assignment {} of service {} from company {} of client {}{}",
                 assignmentId, serviceId, companyId, clientId, lastOfService ? " (no longer a subscriber)" : "");
+    }
+
+    /**
+     * Takes the service type and next due date from the catalog's current configuration, so a
+     * write always reflects how the service is billed now. Call after setting the delivery date.
+     */
+    private void applySchedule(CatalogService service, ServiceAssignment assignment) {
+        assignment.setServiceType(service.getBillingFrequency());
+        assignment.setNextDueDate(NextDueDates.onOrAfter(service, assignment.getDeliveryDate()));
     }
 
     private ClientCompany requireCompany(UUID clientId, UUID companyId) {

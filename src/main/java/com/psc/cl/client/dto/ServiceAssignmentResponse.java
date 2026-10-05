@@ -2,6 +2,7 @@ package com.psc.cl.client.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.psc.cl.client.model.ServiceAssignment;
+import com.psc.cl.servicecatalog.model.BillingFrequency;
 import com.psc.cl.servicecatalog.model.CatalogService;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
@@ -38,8 +39,15 @@ public class ServiceAssignmentResponse {
     @Schema(description = "Name of the service in the Service Catalog", example = "GST Monthly Return Filing")
     String serviceName;
 
+    @Schema(description = "How the service is billed, taken from the Service Catalog", example = "MONTHLY")
+    BillingFrequency serviceType;
+
     @Schema(description = "Date the service is, or was, delivered", example = "2026-10-15")
     LocalDate deliveryDate;
+
+    @Schema(description = "First date the service's invoice schedule falls on, on or after the "
+            + "delivery date. A ONE_OFF service is due on its delivery date", example = "2026-11-07")
+    LocalDate nextDueDate;
 
     @Schema(description = "Discount granted on this service, as a percentage", example = "5.00")
     BigDecimal discountPercent;
@@ -70,7 +78,9 @@ public class ServiceAssignmentResponse {
                 .companyId(entity.getCompany().getId())
                 .serviceId(entity.getCatalogServiceId())
                 .serviceName(service.getServiceName())
+                .serviceType(entity.getServiceType())
                 .deliveryDate(entity.getDeliveryDate())
+                .nextDueDate(entity.getNextDueDate())
                 .discountPercent(entity.getDiscountPercent())
                 .comment(entity.getComment())
                 .createdAt(entity.getCreatedAt())

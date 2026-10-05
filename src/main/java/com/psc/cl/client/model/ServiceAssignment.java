@@ -1,7 +1,10 @@
 package com.psc.cl.client.model;
 
+import com.psc.cl.servicecatalog.model.BillingFrequency;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -48,8 +51,23 @@ public class ServiceAssignment {
     @Column(name = "catalog_service_id", nullable = false, updatable = false)
     private UUID catalogServiceId;
 
+    /**
+     * Billing frequency of the catalog service, taken from the catalog each time the assignment is
+     * written so it always agrees with {@link #nextDueDate}.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "service_type", nullable = false, length = 20)
+    private BillingFrequency serviceType;
+
     @Column(name = "delivery_date", nullable = false)
     private LocalDate deliveryDate;
+
+    /**
+     * First date the catalog service's invoice schedule falls on, on or after the delivery date.
+     * A {@link BillingFrequency#ONE_OFF} service is due on its delivery date.
+     */
+    @Column(name = "next_due_date", nullable = false)
+    private LocalDate nextDueDate;
 
     /** Copied from the company when the service is not given a discount of its own. */
     @Column(name = "discount_percent", nullable = false, precision = 5, scale = 2)

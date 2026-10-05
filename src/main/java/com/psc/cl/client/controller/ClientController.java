@@ -62,9 +62,9 @@ public class ClientController implements ClientApi {
     }
 
     @Override
-    public ResponseEntity<List<ClientSummaryResponse>> listClients() {
-        log.debug("Received request to list clients");
-        return ResponseEntity.ok(clientService.listClients());
+    public ResponseEntity<List<ClientSummaryResponse>> listClients(UUID managerId) {
+        log.debug("Received request to list clients{}", managerId == null ? "" : " of manager " + managerId);
+        return ResponseEntity.ok(clientService.listClients(managerId));
     }
 
     @Override

@@ -45,7 +45,10 @@ public interface ServiceAssignmentApi {
             description = "Assigns a service from the Service Catalog to one company of the client. "
                     + "A company can take many services, and the same service more than once, for "
                     + "example on different delivery dates. When no discount is given, the service "
-                    + "takes the company's discount.")
+                    + "takes the company's discount. The service type (the catalog billing frequency) "
+                    + "and the next due date (the first scheduled invoice date on or after the "
+                    + "delivery date; the delivery date itself for ONE_OFF) are worked out from the "
+                    + "catalog service.")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Service assigned",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
@@ -137,7 +140,8 @@ public interface ServiceAssignmentApi {
             description = "Replaces the delivery date, discount and comment of a service assigned to a "
                     + "company of the client. The catalog service itself cannot change; remove this "
                     + "assignment and assign the other service instead. An omitted discount resets to "
-                    + "the company's, and an omitted comment is cleared.")
+                    + "the company's, and an omitted comment is cleared. The service type and next due "
+                    + "date are worked out again from the catalog service's current schedule.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Assigned service updated",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,

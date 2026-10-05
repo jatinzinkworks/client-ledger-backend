@@ -25,6 +25,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 
 import java.util.List;
 import java.util.UUID;
@@ -156,20 +157,28 @@ public interface ClientApi {
 
     @Operation(
             summary = "List clients",
-            description = "Returns every client, ordered by last name then first name. Each entry "
-                    + "names the client's companies only; fetch a client by id for the full company "
-                    + "details. The list is returned whole; it is not paged.")
+            description = "Returns every client, or only the clients of one manager when managerId is "
+                    + "given, ordered by last name then first name. Each entry names the client's "
+                    + "companies only; fetch a client by id for the full company details. The list is "
+                    + "returned whole; it is not paged.")
     @ApiResponses({
             @ApiResponse(responseCode = "200",
-                    description = "Every client, empty when none has been added yet",
+                    description = "The matching clients, empty when there are none",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             array = @ArraySchema(
                                     schema = @Schema(implementation = ClientSummaryResponse.class)))),
+            @ApiResponse(responseCode = "400", description = "managerId is not a valid UUID",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "500", description = "Unexpected server error",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ErrorResponse.class)))})
     @GetMapping
-    ResponseEntity<List<ClientSummaryResponse>> listClients();
+    ResponseEntity<List<ClientSummaryResponse>> listClients(
+            @Parameter(description = "Only return clients assigned to this manager. Omit to return "
+                    + "every client. An unknown manager returns an empty list",
+                    example = "e9b2c4d1-7f35-4a68-91c0-3d8a5e2f6b47")
+            @RequestParam(required = false) UUID managerId);
 
     @Operation(
             summary = "List the companies of a client",

@@ -32,6 +32,17 @@ public interface ClientRepository extends JpaRepository<Client, UUID> {
     List<Client> findAll(Sort sort);
 
     /**
+     * Loads the clients of one manager together with their companies in one query. Served by the
+     * index on {@code manager_id}.
+     *
+     * @param managerId the manager whose clients to load
+     * @param sort      the order to return clients in
+     * @return the manager's clients, with companies initialised; empty when there are none
+     */
+    @EntityGraph(attributePaths = "companies")
+    List<Client> findByManagerId(UUID managerId, Sort sort);
+
+    /**
      * Reads a client and locks its row until the transaction ends, so concurrent deletions of the
      * client's companies take turns and cannot together remove the last one.
      *

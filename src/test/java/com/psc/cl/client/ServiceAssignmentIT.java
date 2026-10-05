@@ -127,6 +127,47 @@ class ServiceAssignmentIT extends AbstractPostgresIT {
     }
 
     @Test
+    @DisplayName("stores the service type and next due date for each billing frequency")
+    void storesServiceTypeAndNextDueDate() throws Exception {
+        String quarterly = createCatalogService("TDS Quarterly Return", "\"billingFrequency\": \"QUARTERLY\", "
+                + "\"invoiceSchedule\": { \"dayOfMonth\": 31, \"monthOfQuarter\": \"THIRD_MONTH\" }");
+        String annual = createCatalogService("Annual ROC Filing", "\"billingFrequency\": \"ANNUAL\", "
+                + "\"invoiceSchedule\": { \"dayOfMonth\": 30, \"month\": \"APRIL\" }");
+        String oneOff = createCatalogService("Company Incorporation", "\"billingFrequency\": \"ONE_OFF\"");
+
+        // The service from setUp is billed monthly on the 7th.
+        String monthly = assign(textilesId, "2026-10-15");
+        mockMvc.perform(get(servicesUrl(textilesId) + "/" + monthly))
+                .andExpect(jsonPath("$.serviceType").value("MONTHLY"))
+                .andExpect(jsonPath("$.nextDueDate").value("2026-11-07"));
+
+        assertDue(quarterly, "2026-10-15", "QUARTERLY", "2026-12-31");
+        assertDue(annual, "2026-10-15", "ANNUAL", "2027-04-30");
+        assertDue(oneOff, "2026-10-15", "ONE_OFF", "2026-10-15");
+
+        // Moving the delivery date past the 7th of November moves the due date to December.
+        mockMvc.perform(put(servicesUrl(textilesId) + "/" + monthly)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "deliveryDate": "2026-11-10" }"""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nextDueDate").value("2026-12-07"));
+        mockMvc.perform(get(servicesUrl(textilesId) + "/" + monthly))
+                .andExpect(jsonPath("$.nextDueDate").value("2026-12-07"));
+    }
+
+    private void assertDue(String catalogServiceId, String deliveryDate, String serviceType, String nextDueDate)
+            throws Exception {
+        mockMvc.perform(post(servicesUrl(hufId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{ \"serviceId\": \"%s\", \"deliveryDate\": \"%s\" }"
+                                .formatted(catalogServiceId, deliveryDate)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.serviceType").value(serviceType))
+                .andExpect(jsonPath("$.nextDueDate").value(nextDueDate));
+    }
+
+    @Test
     @DisplayName("a service without a discount takes the company's, inherited or its own")
     void serviceInheritsCompanyDiscount() throws Exception {
         mockMvc.perform(post(servicesUrl(textilesId))
@@ -467,23 +508,37 @@ class ServiceAssignmentIT extends AbstractPostgresIT {
         return managerRepository.saveAndFlush(manager).getId();
     }
 
+    /** Billed monthly on the 7th. */
+    private static final String MONTHLY_ON_THE_7TH =
+            "\"billingFrequency\": \"MONTHLY\", \"invoiceSchedule\": { \"dayOfMonth\": 7 }";
+
     private String createCatalogService(String name) throws Exception {
+        return createCatalogService(name, MONTHLY_ON_THE_7TH);
+    }
+
+    /**
+     * @param billing the billingFrequency and invoiceSchedule members of the catalog payload
+     */
+    private String createCatalogService(String name, String billing) throws Exception {
         String created = mockMvc.perform(post(ServiceCatalogApi.BASE_PATH)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(catalogServiceJson(name)))
+                        .content(catalogServiceJson(name, billing)))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
         return JsonPath.read(created, "$.id");
     }
 
     private String catalogServiceJson(String name) {
+        return catalogServiceJson(name, MONTHLY_ON_THE_7TH);
+    }
+
+    private String catalogServiceJson(String name, String billing) {
         return """
                 {
                   "serviceName": "%s",
                   "category": "COMPLIANCE",
-                  "billingFrequency": "MONTHLY",
                   "standardFee": 5000.00,
-                  "invoiceSchedule": { "dayOfMonth": 7 }
-                }""".formatted(name);
+                  %s
+                }""".formatted(name, billing);
     }
 }

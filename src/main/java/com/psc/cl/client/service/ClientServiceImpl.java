@@ -179,8 +179,10 @@ public class ClientServiceImpl implements ClientService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<ClientSummaryResponse> listClients() {
-        List<Client> clients = clientRepository.findAll(BY_NAME);
+    public List<ClientSummaryResponse> listClients(UUID managerId) {
+        List<Client> clients = managerId == null
+                ? clientRepository.findAll(BY_NAME)
+                : clientRepository.findByManagerId(managerId, BY_NAME);
 
         // One query for every manager involved, rather than one per client.
         Set<UUID> managerIds = clients.stream().map(Client::getManagerId).collect(Collectors.toSet());
