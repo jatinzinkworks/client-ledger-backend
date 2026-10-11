@@ -143,7 +143,7 @@ class ClientServiceImplTest {
     }
 
     @Test
-    @DisplayName("defaults the client discount to zero and gives it to every company when none is set")
+    @DisplayName("defaults the client discount to zero, which companies without their own take")
     void defaultsDiscountToZero() {
         when(managerRepository.findById(MANAGER_ID)).thenReturn(Optional.of(manager()));
         stubSave();
@@ -153,13 +153,19 @@ class ClientServiceImplTest {
         verify(clientRepository).save(clientCaptor.capture());
         Client saved = clientCaptor.getValue();
         assertThat(saved.getDiscountPercent()).isEqualTo(new BigDecimal("0.00"));
-        assertThat(saved.getCompanies())
-                .allSatisfy(company -> assertThat(company.getDiscountPercent()).isEqualTo(new BigDecimal("0.00")));
+        assertThat(saved.getCompanies()).allSatisfy(company -> {
+            assertThat(company.getDiscountPercent()).isNull();
+            assertThat(company.effectiveDiscountPercent()).isEqualTo(new BigDecimal("0.00"));
+        });
         assertThat(response.getDiscountPercent()).isEqualTo(new BigDecimal("0.00"));
+        assertThat(response.getCompanies()).allSatisfy(company -> {
+            assertThat(company.getDiscountPercent()).isEqualTo(new BigDecimal("0.00"));
+            assertThat(company.getDiscountInherited()).isTrue();
+        });
     }
 
     @Test
-    @DisplayName("copies the client discount onto companies that do not set their own")
+    @DisplayName("stores no discount on companies that do not set their own, so they take the client's")
     void companiesInheritClientDiscount() {
         when(managerRepository.findById(MANAGER_ID)).thenReturn(Optional.of(manager()));
         stubSave();
@@ -169,8 +175,10 @@ class ClientServiceImplTest {
         verify(clientRepository).save(clientCaptor.capture());
         Client saved = clientCaptor.getValue();
         assertThat(saved.getDiscountPercent()).isEqualTo(new BigDecimal("10.00"));
-        assertThat(saved.getCompanies())
-                .allSatisfy(company -> assertThat(company.getDiscountPercent()).isEqualTo(new BigDecimal("10.00")));
+        assertThat(saved.getCompanies()).allSatisfy(company -> {
+            assertThat(company.getDiscountPercent()).isNull();
+            assertThat(company.effectiveDiscountPercent()).isEqualTo(new BigDecimal("10.00"));
+        });
     }
 
     @Test
@@ -191,7 +199,9 @@ class ClientServiceImplTest {
         List<ClientCompany> companies = clientCaptor.getValue().getCompanies();
         assertThat(companies.get(0).getDiscountPercent()).isEqualTo(new BigDecimal("2.50"));
         assertThat(companies.get(1).getDiscountPercent()).isEqualTo(new BigDecimal("0.00"));
-        assertThat(companies.get(2).getDiscountPercent()).isEqualTo(new BigDecimal("10.00"));
+        assertThat(companies.get(1).isDiscountInherited()).isFalse();
+        assertThat(companies.get(2).getDiscountPercent()).isNull();
+        assertThat(companies.get(2).effectiveDiscountPercent()).isEqualTo(new BigDecimal("10.00"));
     }
 
     @Test
@@ -219,19 +229,26 @@ class ClientServiceImplTest {
     }
 
     @Test
-    @DisplayName("on update, a new client discount leaves the companies' discounts as they are")
-    void updateKeepsCompanyDiscounts() {
-        Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF");
-        stored.getCompanies().getFirst().setDiscountPercent(new BigDecimal("3.00"));
+    @DisplayName("on update, companies without their own discount take the new client discount, the rest keep theirs")
+    void updateAppliesClientDiscountToInheritingCompanies() {
+        Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF", "Mehta Textiles Pvt Ltd");
+        ClientCompany own = stored.getCompanies().get(0);
+        ClientCompany inheriting = stored.getCompanies().get(1);
+        own.setDiscountPercent(new BigDecimal("3.00"));
         when(clientRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
         when(managerRepository.findById(MANAGER_ID)).thenReturn(Optional.of(manager()));
 
-        clientService.updateClient(stored.getId(), updateRequest()
+        ClientResponse response = clientService.updateClient(stored.getId(), updateRequest()
                 .discountPercent(new BigDecimal("12.5"))
                 .build());
 
         assertThat(stored.getDiscountPercent()).isEqualTo(new BigDecimal("12.50"));
-        assertThat(stored.getCompanies().getFirst().getDiscountPercent()).isEqualTo(new BigDecimal("3.00"));
+        assertThat(own.effectiveDiscountPercent()).isEqualTo(new BigDecimal("3.00"));
+        assertThat(inheriting.getDiscountPercent()).isNull();
+        assertThat(inheriting.effectiveDiscountPercent()).isEqualTo(new BigDecimal("12.50"));
+        // Ordered by name: [0] is Mehta Textiles Pvt Ltd, [1] is Rohan Mehta HUF.
+        assertThat(response.getCompanies()).extracting("discountPercent")
+                .containsExactly(new BigDecimal("12.50"), new BigDecimal("3.00"));
     }
 
     @Test
@@ -417,6 +434,7 @@ class ClientServiceImplTest {
         client.setPhone("+91 98200 12345");
         client.setEmail(firstName.toLowerCase() + "@example.com");
         client.setManagerId(MANAGER_ID);
+        client.setDiscountPercent(Client.DEFAULT_DISCOUNT_PERCENT);
         for (String companyName : companyNames) {
             ClientCompany company = new ClientCompany();
             company.setId(UUID.randomUUID());

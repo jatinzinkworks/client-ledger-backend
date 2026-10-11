@@ -21,6 +21,7 @@ import com.psc.cl.client.model.ClientCompany;
 import com.psc.cl.client.model.CompanyType;
 import com.psc.cl.client.repository.ClientCompanyRepository;
 import com.psc.cl.client.repository.ClientRepository;
+import com.psc.cl.client.repository.CompanyServiceCount;
 import com.psc.cl.client.repository.ServiceAssignmentRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -53,15 +54,26 @@ class ClientCompanyServiceImplTest {
     private ClientCompanyServiceImpl clientCompanyService;
 
     @Test
-    @DisplayName("lists a client's companies in full, ordered by name")
+    @DisplayName("lists a client's companies by name, with discounts in force and service counts from one query")
     void listsCompanies() {
         Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF", "Mehta Textiles Pvt Ltd");
+        UUID hufId = stored.getCompanies().get(0).getId();
+        UUID textilesId = stored.getCompanies().get(1).getId();
+        stored.setDiscountPercent(new BigDecimal("10.00"));
+        stored.getCompanies().get(1).setDiscountPercent(new BigDecimal("7.50"));
         when(clientRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
+        // The HUF has no services, so the query returns no row for it.
+        when(serviceAssignmentRepository.countByCompanyIdIn(Set.of(hufId, textilesId)))
+                .thenReturn(List.of(serviceCount(textilesId, 3)));
 
         List<CompanyResponse> companies = clientCompanyService.listCompanies(stored.getId());
 
         assertThat(companies).extracting("companyName")
                 .containsExactly("Mehta Textiles Pvt Ltd", "Rohan Mehta HUF");
+        assertThat(companies).extracting("serviceCount").containsExactly(3L, 0L);
+        assertThat(companies).extracting("discountPercent")
+                .containsExactly(new BigDecimal("7.50"), new BigDecimal("10.00"));
+        assertThat(companies).extracting("discountInherited").containsExactly(false, true);
         assertThat(companies).allSatisfy(company -> assertThat(company.getAddress()).isNotBlank());
     }
 
@@ -119,7 +131,10 @@ class ClientCompanyServiceImplTest {
                 company("Mehta Textiles Pvt Ltd", BigDecimal.ZERO));
 
         assertThat(inherited.getDiscountPercent()).isEqualTo(new BigDecimal("10.00"));
+        assertThat(inherited.getDiscountInherited()).isTrue();
         assertThat(own.getDiscountPercent()).isEqualTo(new BigDecimal("0.00"));
+        assertThat(own.getDiscountInherited()).isFalse();
+        assertThat(stored.getCompanies().get(1).getDiscountPercent()).isNull();
     }
 
     @Test
@@ -222,7 +237,7 @@ class ClientCompanyServiceImplTest {
     }
 
     @Test
-    @DisplayName("on company update, an omitted discount gives the company the client's")
+    @DisplayName("on company update, an omitted discount clears the company's own, so it takes the client's")
     void updateCompanyTakesClientDiscountWhenOmitted() {
         Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF");
         stored.setDiscountPercent(new BigDecimal("10.00"));
@@ -230,9 +245,12 @@ class ClientCompanyServiceImplTest {
         company.setDiscountPercent(new BigDecimal("3.00"));
         when(clientRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
 
-        clientCompanyService.updateCompany(stored.getId(), company.getId(), company("Rohan Mehta HUF", null));
+        CompanyResponse response = clientCompanyService.updateCompany(stored.getId(), company.getId(),
+                company("Rohan Mehta HUF", null));
 
-        assertThat(company.getDiscountPercent()).isEqualTo(new BigDecimal("10.00"));
+        assertThat(company.getDiscountPercent()).isNull();
+        assertThat(response.getDiscountPercent()).isEqualTo(new BigDecimal("10.00"));
+        assertThat(response.getDiscountInherited()).isTrue();
     }
 
     @Test
@@ -342,6 +360,7 @@ class ClientCompanyServiceImplTest {
         client.setPhone("+91 98200 12345");
         client.setEmail(firstName.toLowerCase() + "@example.com");
         client.setManagerId(MANAGER_ID);
+        client.setDiscountPercent(Client.DEFAULT_DISCOUNT_PERCENT);
         for (String companyName : companyNames) {
             ClientCompany company = new ClientCompany();
             company.setId(UUID.randomUUID());
@@ -351,6 +370,20 @@ class ClientCompanyServiceImplTest {
             client.addCompany(company);
         }
         return client;
+    }
+
+    private CompanyServiceCount serviceCount(UUID companyId, long count) {
+        return new CompanyServiceCount() {
+            @Override
+            public UUID getCompanyId() {
+                return companyId;
+            }
+
+            @Override
+            public long getServiceCount() {
+                return count;
+            }
+        };
     }
 
     private CompanyRequest company(String name, BigDecimal discountPercent) {

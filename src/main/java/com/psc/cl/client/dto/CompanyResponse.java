@@ -32,8 +32,17 @@ public class CompanyResponse {
             example = "12 MG Road, Bengaluru, Karnataka 560001")
     String address;
 
-    @Schema(description = "Discount granted on this company's work, as a percentage", example = "5.00")
+    @Schema(description = "Discount granted on this company's work, as a percentage: the company's "
+            + "own, or the client's current discount when the company has none of its own", example = "5.00")
     BigDecimal discountPercent;
+
+    @Schema(description = "True when the company has no discount of its own, so discountPercent is "
+            + "the client's and follows any change to it", example = "false")
+    Boolean discountInherited;
+
+    @Schema(description = "Number of services assigned to the company. Only returned when listing a "
+            + "client's companies", example = "3")
+    Long serviceCount;
 
     /**
      * Maps a persisted entity onto its API representation.
@@ -42,12 +51,27 @@ public class CompanyResponse {
      * @return the response payload
      */
     public static CompanyResponse from(ClientCompany entity) {
+        return builderFrom(entity).build();
+    }
+
+    /**
+     * Maps a persisted entity onto its API representation, together with its service count.
+     *
+     * @param entity       the stored company
+     * @param serviceCount the number of services assigned to the company
+     * @return the response payload
+     */
+    public static CompanyResponse from(ClientCompany entity, long serviceCount) {
+        return builderFrom(entity).serviceCount(serviceCount).build();
+    }
+
+    private static CompanyResponseBuilder builderFrom(ClientCompany entity) {
         return CompanyResponse.builder()
                 .id(entity.getId())
                 .companyName(entity.getCompanyName())
                 .companyType(entity.getCompanyType())
                 .address(entity.getAddress())
-                .discountPercent(entity.getDiscountPercent())
-                .build();
+                .discountPercent(entity.effectiveDiscountPercent())
+                .discountInherited(entity.isDiscountInherited());
     }
 }

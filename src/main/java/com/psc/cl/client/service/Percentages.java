@@ -25,4 +25,14 @@ final class Percentages {
     static BigDecimal orElse(BigDecimal supplied, BigDecimal fallback) {
         return Objects.requireNonNullElse(supplied, fallback).setScale(2, RoundingMode.UNNECESSARY);
     }
+
+    /**
+     * Brings an optional percentage to the two decimal places the discount columns hold.
+     *
+     * @param supplied the percentage the caller sent, or null
+     * @return the percentage to store, or null when none was sent
+     */
+    static BigDecimal orNull(BigDecimal supplied) {
+        return supplied == null ? null : supplied.setScale(2, RoundingMode.UNNECESSARY);
+    }
 }

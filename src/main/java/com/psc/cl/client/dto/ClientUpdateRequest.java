@@ -63,9 +63,8 @@ public record ClientUpdateRequest(
         @DecimalMin(value = "0.00", message = "must not be negative")
         @DecimalMax(value = "100.00", message = "must not exceed 100")
         @Digits(integer = 3, fraction = 2, message = "must have at most 2 decimal places")
-        @Schema(description = "Discount granted to the client, as a percentage. Companies already "
-                + "held keep their discount; companies added later without one of their own take "
-                + "this", example = "10.00",
+        @Schema(description = "Discount granted to the client, as a percentage. Also applied to "
+                + "every company that does not set its own", example = "10.00",
                 defaultValue = "0.00", minimum = "0", maximum = "100")
         BigDecimal discountPercent) implements ClientDetails {
 }

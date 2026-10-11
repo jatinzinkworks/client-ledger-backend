@@ -42,6 +42,10 @@ public class ServiceAssignmentResponse {
     @Schema(description = "How the service is billed, taken from the Service Catalog", example = "MONTHLY")
     BillingFrequency serviceType;
 
+    @Schema(description = "Standard fee of the service, excluding GST and before this assignment's "
+            + "discount, taken from the Service Catalog", example = "5000.00")
+    BigDecimal serviceFee;
+
     @Schema(description = "Date the service is, or was, delivered", example = "2026-10-15")
     LocalDate deliveryDate;
 
@@ -79,6 +83,7 @@ public class ServiceAssignmentResponse {
                 .serviceId(entity.getCatalogServiceId())
                 .serviceName(service.getServiceName())
                 .serviceType(entity.getServiceType())
+                .serviceFee(service.getStandardFee())
                 .deliveryDate(entity.getDeliveryDate())
                 .nextDueDate(entity.getNextDueDate())
                 .discountPercent(entity.getDiscountPercent())

@@ -66,13 +66,22 @@ class ClientCompanyControllerTest {
     @DisplayName("returns 200 with the client's companies on list companies")
     void listsCompanies() throws Exception {
         UUID id = UUID.randomUUID();
-        when(clientCompanyService.listCompanies(id)).thenReturn(List.of(company()));
+        CompanyResponse listed = CompanyResponse.builder()
+                .id(UUID.randomUUID())
+                .companyName("Mehta Textiles Pvt Ltd")
+                .companyType(CompanyType.PRIVATE_LIMITED)
+                .address("12 MG Road, Bengaluru, Karnataka 560001")
+                .discountPercent(new BigDecimal("5.00"))
+                .serviceCount(3L)
+                .build();
+        when(clientCompanyService.listCompanies(id)).thenReturn(List.of(listed));
 
         mockMvc.perform(get(CLIENTS_URL + "/" + id + "/companies"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].companyName").value("Mehta Textiles Pvt Ltd"))
-                .andExpect(jsonPath("$[0].discountPercent").value(5.0));
+                .andExpect(jsonPath("$[0].discountPercent").value(5.0))
+                .andExpect(jsonPath("$[0].serviceCount").value(3));
     }
 
     @Test

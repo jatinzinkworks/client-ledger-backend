@@ -24,7 +24,7 @@ import java.util.UUID;
 public class ClientResponse {
 
     /** Companies are listed by name so the order is the same however the client was loaded. */
-    private static final Comparator<CompanyResponse> BY_COMPANY_NAME =
+    public static final Comparator<CompanyResponse> BY_COMPANY_NAME =
             Comparator.comparing(CompanyResponse::getCompanyName, String.CASE_INSENSITIVE_ORDER);
 
     @Schema(description = "Identifier of the client", example = "7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35")

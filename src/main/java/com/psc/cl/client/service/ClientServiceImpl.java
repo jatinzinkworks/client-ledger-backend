@@ -53,7 +53,7 @@ public class ClientServiceImpl implements ClientService {
 
         Client client = new Client();
         applyClient(request, client);
-        request.companies().forEach(company -> client.addCompany(Companies.newCompany(company, client)));
+        request.companies().forEach(company -> client.addCompany(Companies.newCompany(company)));
 
         Client saved = clientRepository.save(client);
         log.info("Created client {} assigned to manager {} with {} company(ies)",

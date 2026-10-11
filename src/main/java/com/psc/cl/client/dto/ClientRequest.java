@@ -24,7 +24,7 @@ import java.util.UUID;
  *
  * <p>Every field except the discount is mandatory, and at least one company must be supplied.
  * Values are trimmed before storage, and the assigned manager must exist in the Manager Catalog.
- * The discount defaults to zero, and is copied onto every company that does not set its own.
+ * The discount defaults to zero, and applies to every company that does not set its own.
  */
 @Builder
 @Schema(name = "ClientRequest", description = "Client to add, with the companies they hold")

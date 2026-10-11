@@ -264,6 +264,24 @@ class ServiceAssignmentIT extends AbstractPostgresIT {
     }
 
     @Test
+    @DisplayName("the client's company list counts the services assigned to each company")
+    void companyListCountsServices() throws Exception {
+        assign(textilesId, "2026-09-15");
+        assign(textilesId, "2026-10-15");
+        String removed = assign(textilesId, "2026-11-15");
+        mockMvc.perform(delete(servicesUrl(textilesId) + "/" + removed))
+                .andExpect(status().isNoContent());
+
+        // Ordered by name: [0] is Mehta Textiles Pvt Ltd, [1] is Rohan Mehta HUF.
+        mockMvc.perform(get(ClientApi.BASE_PATH + "/" + clientId + "/companies"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(textilesId))
+                .andExpect(jsonPath("$[0].serviceCount").value(2))
+                .andExpect(jsonPath("$[1].id").value(hufId))
+                .andExpect(jsonPath("$[1].serviceCount").value(0));
+    }
+
+    @Test
     @DisplayName("lists a company's services most recent delivery first, and fetches one by id")
     void listsAndFetchesServices() throws Exception {
         String september = assign(textilesId, "2026-09-15");
@@ -277,7 +295,8 @@ class ServiceAssignmentIT extends AbstractPostgresIT {
                 .andExpect(jsonPath("$[0].id").value(november))
                 .andExpect(jsonPath("$[1].id").value(october))
                 .andExpect(jsonPath("$[2].id").value(september))
-                .andExpect(jsonPath("$[0].serviceName").value("GST Monthly Return Filing"));
+                .andExpect(jsonPath("$[0].serviceName").value("GST Monthly Return Filing"))
+                .andExpect(jsonPath("$[0].serviceFee").value(5000.0));
 
         mockMvc.perform(get(servicesUrl(textilesId) + "/" + october))
                 .andExpect(status().isOk())

@@ -144,6 +144,20 @@ class ServiceAssignmentServiceImplTest {
     }
 
     @Test
+    @DisplayName("gives the service the client's current discount when neither it nor the company sets one")
+    void inheritsClientDiscountThroughCompany() {
+        company.setDiscountPercent(null);
+        company.getClient().setDiscountPercent(new BigDecimal("12.00"));
+        stubLookups();
+        stubSave();
+
+        serviceAssignmentService.assignService(CLIENT_ID, COMPANY_ID, request().build());
+
+        verify(serviceAssignmentRepository).save(assignmentCaptor.capture());
+        assertThat(assignmentCaptor.getValue().getDiscountPercent()).isEqualTo(new BigDecimal("12.00"));
+    }
+
+    @Test
     @DisplayName("stores a blank comment as no comment")
     void blankCommentIsStoredAsNull() {
         stubLookups();
@@ -222,7 +236,7 @@ class ServiceAssignmentServiceImplTest {
     }
 
     @Test
-    @DisplayName("lists a company's services with names looked up in one call")
+    @DisplayName("lists a company's services with names and fees looked up in one call")
     void listsServices() {
         stubCompany();
         ServiceAssignment october = assignment(LocalDate.of(2026, 10, 15));
@@ -236,6 +250,7 @@ class ServiceAssignmentServiceImplTest {
         assertThat(services).extracting("id").containsExactly(october.getId(), september.getId());
         assertThat(services).allSatisfy(service -> {
             assertThat(service.getServiceName()).isEqualTo("GST Monthly Return Filing");
+            assertThat(service.getServiceFee()).isEqualTo(new BigDecimal("5000.00"));
             assertThat(service.getClientId()).isEqualTo(CLIENT_ID);
             assertThat(service.getCompanyId()).isEqualTo(COMPANY_ID);
         });
@@ -444,6 +459,7 @@ class ServiceAssignmentServiceImplTest {
         CatalogService service = new CatalogService();
         service.setId(SERVICE_ID);
         service.setServiceName("GST Monthly Return Filing");
+        service.setStandardFee(new BigDecimal("5000.00"));
         service.setBillingFrequency(BillingFrequency.MONTHLY);
         service.setInvoiceDayOfMonth(7);
         return service;

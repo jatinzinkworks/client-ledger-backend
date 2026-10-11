@@ -93,7 +93,8 @@ public interface ClientApi {
             summary = "Update a client",
             description = "Replaces a client's own fields wholesale. The client's companies are left "
                     + "as they are; add or delete them through the company endpoints. An omitted "
-                    + "client discount resets to zero, and companies already held keep their discount.")
+                    + "client discount resets to zero. Companies without a discount of their own take the "
+                    + "new client discount.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Client updated",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,

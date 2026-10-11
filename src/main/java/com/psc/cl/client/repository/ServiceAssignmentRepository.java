@@ -2,6 +2,8 @@ package com.psc.cl.client.repository;
 
 import com.psc.cl.client.model.ServiceAssignment;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.Collection;
@@ -53,4 +55,15 @@ public interface ServiceAssignmentRepository extends JpaRepository<ServiceAssign
      * @return true when at least one of them has a service assigned
      */
     boolean existsByCompanyIdIn(Collection<UUID> companyIds);
+
+    /**
+     * Counts the services assigned to each of the given companies in one query. Served by the
+     * (company_id, catalog_service_id) index.
+     *
+     * @param companyIds the companies to count for
+     * @return one entry per company that has services; companies without any are left out
+     */
+    @Query("select a.company.id as companyId, count(a) as serviceCount from ServiceAssignment a "
+            + "where a.company.id in :companyIds group by a.company.id")
+    List<CompanyServiceCount> countByCompanyIdIn(@Param("companyIds") Collection<UUID> companyIds);
 }

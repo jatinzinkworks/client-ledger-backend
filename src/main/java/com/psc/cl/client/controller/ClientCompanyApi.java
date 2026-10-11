@@ -41,7 +41,8 @@ public interface ClientCompanyApi {
 
     @Operation(
             summary = "List the companies of a client",
-            description = "Returns every company the client holds, in full, ordered by company name.")
+            description = "Returns every company the client holds, in full, ordered by company name, "
+                    + "each with the number of services assigned to it.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "The client's companies",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,

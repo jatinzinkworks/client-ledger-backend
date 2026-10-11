@@ -65,7 +65,7 @@ public class Client {
     @Column(name = "manager_id", nullable = false)
     private UUID managerId;
 
-    /** Also the default for each company that does not carry a discount of its own. */
+    /** Also applies to each company that does not carry a discount of its own. */
     @Column(name = "discount_percent", nullable = false, precision = 5, scale = 2)
     private BigDecimal discountPercent;
 

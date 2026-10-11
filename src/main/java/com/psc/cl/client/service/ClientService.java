@@ -29,7 +29,8 @@ public interface ClientService {
     /**
      * Replaces a client's own fields wholesale, leaving their companies as they are.
      *
-     * <p>An omitted client discount resets to zero. Companies already held keep their discount.
+     * <p>An omitted client discount resets to zero. Companies without a discount of their own
+     * take the new client discount.
      *
      * @param id      the client to replace
      * @param request the new content

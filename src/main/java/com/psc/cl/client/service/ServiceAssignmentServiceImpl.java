@@ -65,7 +65,8 @@ public class ServiceAssignmentServiceImpl implements ServiceAssignmentService {
         assignment.setCatalogServiceId(serviceId);
         assignment.setDeliveryDate(request.deliveryDate());
         applySchedule(service, assignment);
-        assignment.setDiscountPercent(Percentages.orElse(request.discountPercent(), company.getDiscountPercent()));
+        assignment.setDiscountPercent(
+                Percentages.orElse(request.discountPercent(), company.effectiveDiscountPercent()));
         assignment.setComment(trimToNull(request.comment()));
 
         ServiceAssignment saved = serviceAssignmentRepository.save(assignment);
@@ -120,7 +121,8 @@ public class ServiceAssignmentServiceImpl implements ServiceAssignmentService {
 
         assignment.setDeliveryDate(request.deliveryDate());
         applySchedule(service, assignment);
-        assignment.setDiscountPercent(Percentages.orElse(request.discountPercent(), company.getDiscountPercent()));
+        assignment.setDiscountPercent(
+                Percentages.orElse(request.discountPercent(), company.effectiveDiscountPercent()));
         assignment.setComment(trimToNull(request.comment()));
 
         // Flushing here stamps updatedAt before it is returned.

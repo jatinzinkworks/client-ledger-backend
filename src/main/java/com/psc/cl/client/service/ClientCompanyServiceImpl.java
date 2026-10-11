@@ -13,6 +13,7 @@ import com.psc.cl.client.model.Client;
 import com.psc.cl.client.model.ClientCompany;
 import com.psc.cl.client.repository.ClientCompanyRepository;
 import com.psc.cl.client.repository.ClientRepository;
+import com.psc.cl.client.repository.CompanyServiceCount;
 import com.psc.cl.client.repository.ServiceAssignmentRepository;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -23,8 +24,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Default {@link ClientCompanyService}. Companies are reached through their client, whose row is
@@ -45,7 +48,19 @@ public class ClientCompanyServiceImpl implements ClientCompanyService {
     @Override
     @Transactional(readOnly = true)
     public List<CompanyResponse> listCompanies(UUID clientId) {
-        return ClientResponse.companiesOf(requireClient(clientId));
+        Client client = requireClient(clientId);
+        Set<UUID> companyIds = client.getCompanies().stream()
+                .map(ClientCompany::getId)
+                .collect(Collectors.toSet());
+
+        // One query for every company of the client, rather than one per company.
+        Map<UUID, Long> serviceCounts = serviceAssignmentRepository.countByCompanyIdIn(companyIds).stream()
+                .collect(Collectors.toMap(CompanyServiceCount::getCompanyId, CompanyServiceCount::getServiceCount));
+
+        return client.getCompanies().stream()
+                .map(company -> CompanyResponse.from(company, serviceCounts.getOrDefault(company.getId(), 0L)))
+                .sorted(ClientResponse.BY_COMPANY_NAME)
+                .toList();
     }
 
     @Override
@@ -58,7 +73,7 @@ public class ClientCompanyServiceImpl implements ClientCompanyService {
             throw new CompanyLimitExceededException(clientId, ClientRequest.MAX_COMPANIES);
         }
 
-        ClientCompany company = Companies.newCompany(request, client);
+        ClientCompany company = Companies.newCompany(request);
         client.addCompany(company);
         client.setUpdatedAt(Instant.now());
 
@@ -86,7 +101,7 @@ public class ClientCompanyServiceImpl implements ClientCompanyService {
         Client client = requireClient(clientId);
         ClientCompany company = requireCompany(client, companyId);
 
-        Companies.apply(request, client, company);
+        Companies.apply(request, company);
         // A change to a company alone would not otherwise make the client row dirty.
         client.setUpdatedAt(Instant.now());
 

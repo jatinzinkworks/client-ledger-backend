@@ -53,7 +53,22 @@ public class ClientCompany {
     @Column(name = "address", nullable = false, length = MAX_ADDRESS_LENGTH)
     private String address;
 
-    /** Copied from the client when the company is not given a discount of its own. */
-    @Column(name = "discount_percent", nullable = false, precision = 5, scale = 2)
+    /** The company's own discount, or null when it takes its client's. */
+    @Column(name = "discount_percent", precision = 5, scale = 2)
     private BigDecimal discountPercent;
+
+    /**
+     * The discount in force for the company: its own, or its client's current discount when it has
+     * none of its own.
+     *
+     * @return the percentage to apply
+     */
+    public BigDecimal effectiveDiscountPercent() {
+        return discountPercent != null ? discountPercent : client.getDiscountPercent();
+    }
+
+    /** @return true when the company has no discount of its own and takes its client's */
+    public boolean isDiscountInherited() {
+        return discountPercent == null;
+    }
 }
