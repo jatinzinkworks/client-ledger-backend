@@ -5,18 +5,11 @@ import com.psc.cl.client.dto.ClientRequest;
 import com.psc.cl.client.dto.ClientResponse;
 import com.psc.cl.client.dto.ClientSummaryResponse;
 import com.psc.cl.client.dto.ClientUpdateRequest;
-import com.psc.cl.client.dto.CompanyDetails;
-import com.psc.cl.client.dto.CompanyResponse;
-import com.psc.cl.client.dto.CompanyUpdateRequest;
 import com.psc.cl.client.exception.AssignedManagerNotFoundException;
 import com.psc.cl.client.exception.ClientHasServicesException;
 import com.psc.cl.client.exception.ClientNotFoundException;
-import com.psc.cl.client.exception.CompanyHasServicesException;
-import com.psc.cl.client.exception.CompanyNotFoundException;
-import com.psc.cl.client.exception.LastCompanyRemovalException;
 import com.psc.cl.client.model.Client;
 import com.psc.cl.client.model.ClientCompany;
-import com.psc.cl.client.repository.ClientCompanyRepository;
 import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.client.repository.ServiceAssignmentRepository;
 import com.psc.cl.managercatalog.model.Manager;
@@ -29,10 +22,8 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -51,8 +42,6 @@ public class ClientServiceImpl implements ClientService {
 
     private final ClientRepository clientRepository;
 
-    private final ClientCompanyRepository clientCompanyRepository;
-
     private final ServiceAssignmentRepository serviceAssignmentRepository;
 
     private final ManagerRepository managerRepository;
@@ -64,7 +53,7 @@ public class ClientServiceImpl implements ClientService {
 
         Client client = new Client();
         applyClient(request, client);
-        request.companies().forEach(company -> client.addCompany(newCompany(company, client)));
+        request.companies().forEach(company -> client.addCompany(Companies.newCompany(company, client)));
 
         Client saved = clientRepository.save(client);
         log.info("Created client {} assigned to manager {} with {} company(ies)",
@@ -79,41 +68,9 @@ public class ClientServiceImpl implements ClientService {
         Client client = clientRepository.findById(id).orElseThrow(() -> new ClientNotFoundException(id));
         Manager manager = requireAssignableManager(request.managerId());
 
-        Map<UUID, ClientCompany> existing = client.getCompanies().stream()
-                .collect(Collectors.toMap(ClientCompany::getId, Function.identity()));
-        Set<UUID> keptIds = request.companies().stream()
-                .map(CompanyUpdateRequest::id)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
-        // Checked before anything changes, so a rejected update leaves the client untouched.
-        for (UUID companyId : keptIds) {
-            if (!existing.containsKey(companyId)) {
-                throw new CompanyNotFoundException(id, companyId);
-            }
-        }
-        Set<UUID> removedIds = existing.keySet().stream()
-                .filter(companyId -> !keptIds.contains(companyId))
-                .collect(Collectors.toSet());
-        if (!removedIds.isEmpty() && serviceAssignmentRepository.existsByCompanyIdIn(removedIds)) {
-            throw new CompanyHasServicesException(id);
-        }
-
         applyClient(request, client);
-        client.getCompanies().removeIf(company -> !keptIds.contains(company.getId()));
-        for (CompanyUpdateRequest companyRequest : request.companies()) {
-            if (companyRequest.id() == null) {
-                client.addCompany(newCompany(companyRequest, client));
-            } else {
-                applyCompany(companyRequest, client, existing.get(companyRequest.id()));
-            }
-        }
-        // A change to the companies alone would not otherwise make the client row dirty.
-        client.setUpdatedAt(Instant.now());
-
-        // Flushing here assigns identifiers to added companies before they are returned.
         clientRepository.flush();
-        log.info("Updated client {} assigned to manager {} with {} company(ies)",
-                id, client.getManagerId(), client.getCompanies().size());
+        log.info("Updated client {} assigned to manager {}", id, client.getManagerId());
 
         return ClientResponse.from(client, manager);
     }
@@ -142,35 +99,6 @@ public class ClientServiceImpl implements ClientService {
     }
 
     @Override
-    @Transactional
-    public void deleteCompany(UUID clientId, UUID companyId) {
-        Client client = clientRepository.findByIdForUpdate(clientId)
-                .orElseThrow(() -> new ClientNotFoundException(clientId));
-        ClientCompany company = client.getCompanies().stream()
-                .filter(candidate -> candidate.getId().equals(companyId))
-                .findFirst()
-                .orElseThrow(() -> new CompanyNotFoundException(clientId, companyId));
-
-        if (client.getCompanies().size() == 1) {
-            throw new LastCompanyRemovalException(clientId, companyId);
-        }
-        if (serviceAssignmentRepository.existsByCompanyIdIn(Set.of(companyId))) {
-            throw new CompanyHasServicesException(clientId, companyId);
-        }
-
-        client.getCompanies().remove(company);
-        client.setUpdatedAt(Instant.now());
-        try {
-            clientRepository.flush();
-        } catch (DataIntegrityViolationException ex) {
-            // The foreign key caught a service assigned concurrently, after the check above.
-            log.warn("Delete of company {} was rejected by the database: services are assigned", companyId, ex);
-            throw new CompanyHasServicesException(clientId, companyId);
-        }
-        log.info("Deleted company {} of client {}", companyId, clientId);
-    }
-
-    @Override
     @Transactional(readOnly = true)
     public ClientResponse getClient(UUID id) {
         Client client = clientRepository.findById(id).orElseThrow(() -> new ClientNotFoundException(id));
@@ -195,25 +123,6 @@ public class ClientServiceImpl implements ClientService {
                 .toList();
     }
 
-    @Override
-    @Transactional(readOnly = true)
-    public List<CompanyResponse> listCompanies(UUID clientId) {
-        Client client = clientRepository.findById(clientId)
-                .orElseThrow(() -> new ClientNotFoundException(clientId));
-        return ClientResponse.companiesOf(client);
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public CompanyResponse getCompany(UUID clientId, UUID companyId) {
-        if (!clientRepository.existsById(clientId)) {
-            throw new ClientNotFoundException(clientId);
-        }
-        return clientCompanyRepository.findByIdAndClientId(companyId, clientId)
-                .map(CompanyResponse::from)
-                .orElseThrow(() -> new CompanyNotFoundException(clientId, companyId));
-    }
-
     /** An omitted discount resets to the default, so nothing is left behind from a previous version. */
     private void applyClient(ClientDetails request, Client client) {
         client.setFirstName(request.firstName().trim());
@@ -222,20 +131,6 @@ public class ClientServiceImpl implements ClientService {
         client.setEmail(request.email().trim());
         client.setManagerId(request.managerId());
         client.setDiscountPercent(Percentages.orElse(request.discountPercent(), Client.DEFAULT_DISCOUNT_PERCENT));
-    }
-
-    private ClientCompany newCompany(CompanyDetails request, Client client) {
-        ClientCompany company = new ClientCompany();
-        applyCompany(request, client, company);
-        return company;
-    }
-
-    /** A company without a discount of its own takes the client's. */
-    private void applyCompany(CompanyDetails request, Client client, ClientCompany company) {
-        company.setCompanyName(request.companyName().trim());
-        company.setCompanyType(request.companyType());
-        company.setAddress(request.address().trim());
-        company.setDiscountPercent(Percentages.orElse(request.discountPercent(), client.getDiscountPercent()));
     }
 
     private Manager requireAssignableManager(UUID managerId) {

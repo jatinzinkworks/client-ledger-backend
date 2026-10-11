@@ -4,7 +4,6 @@ import com.psc.cl.client.dto.ClientRequest;
 import com.psc.cl.client.dto.ClientResponse;
 import com.psc.cl.client.dto.ClientSummaryResponse;
 import com.psc.cl.client.dto.ClientUpdateRequest;
-import com.psc.cl.client.dto.CompanyResponse;
 import com.psc.cl.config.ApiPaths;
 import com.psc.cl.dto.ErrorResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -33,8 +32,7 @@ import java.util.UUID;
 /**
  * Contract for every Client endpoint.
  */
-@Tag(name = "Clients",
-        description = "People the firm works for, the manager who looks after them and the companies they hold")
+@Tag(name = "Clients", description = "People the firm works for and the manager who looks after them")
 @RequestMapping(value = ClientApi.BASE_PATH, produces = MediaType.APPLICATION_JSON_VALUE)
 public interface ClientApi {
 
@@ -43,12 +41,6 @@ public interface ClientApi {
 
     /** Path of a single client, relative to {@link #BASE_PATH}. */
     String BY_ID_PATH = "/{id}";
-
-    /** Path of the companies of a client, relative to {@link #BASE_PATH}. */
-    String COMPANIES_PATH = BY_ID_PATH + "/companies";
-
-    /** Path of a single company of a client, relative to {@link #BASE_PATH}. */
-    String COMPANY_BY_ID_PATH = COMPANIES_PATH + "/{companyId}";
 
     @Operation(
             summary = "Create a client",
@@ -99,11 +91,9 @@ public interface ClientApi {
 
     @Operation(
             summary = "Update a client",
-            description = "Replaces a client wholesale, together with their full set of companies. "
-                    + "A company carrying an id is updated in place and keeps that id, a company "
-                    + "without an id is added, and any existing company left out is removed. An "
-                    + "omitted client discount resets to zero, and companies without a discount of "
-                    + "their own take the client's.")
+            description = "Replaces a client's own fields wholesale. The client's companies are left "
+                    + "as they are; add or delete them through the company endpoints. An omitted "
+                    + "client discount resets to zero, and companies already held keep their discount.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Client updated",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
@@ -113,8 +103,7 @@ public interface ClientApi {
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "404",
-                    description = "No client carries this identifier, the assigned manager does not "
-                            + "exist, or a company id is not one of this client's companies",
+                    description = "No client carries this identifier, or the assigned manager does not exist",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "500", description = "Unexpected server error",
@@ -126,7 +115,7 @@ public interface ClientApi {
                     example = "7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35")
             @PathVariable UUID id,
             @io.swagger.v3.oas.annotations.parameters.RequestBody(
-                    description = "New content for the client and their full set of companies",
+                    description = "New content for the client, excluding their companies",
                     required = true)
             @Valid @RequestBody ClientUpdateRequest request);
 
@@ -179,85 +168,4 @@ public interface ClientApi {
                     + "every client. An unknown manager returns an empty list",
                     example = "e9b2c4d1-7f35-4a68-91c0-3d8a5e2f6b47")
             @RequestParam(required = false) UUID managerId);
-
-    @Operation(
-            summary = "List the companies of a client",
-            description = "Returns every company the client holds, in full, ordered by company name.")
-    @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "The client's companies",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                            array = @ArraySchema(
-                                    schema = @Schema(implementation = CompanyResponse.class)))),
-            @ApiResponse(responseCode = "400", description = "The identifier is not a valid UUID",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                            schema = @Schema(implementation = ErrorResponse.class))),
-            @ApiResponse(responseCode = "404", description = "No client carries this identifier",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                            schema = @Schema(implementation = ErrorResponse.class))),
-            @ApiResponse(responseCode = "500", description = "Unexpected server error",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                            schema = @Schema(implementation = ErrorResponse.class)))})
-    @GetMapping(COMPANIES_PATH)
-    ResponseEntity<List<CompanyResponse>> listCompanies(
-            @Parameter(description = "Identifier of the client", required = true,
-                    example = "7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35")
-            @PathVariable UUID id);
-
-    @Operation(
-            summary = "Fetch a company of a client",
-            description = "Returns one company of the client. A company that exists but belongs "
-                    + "to a different client is reported as not found.")
-    @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Company found",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                            schema = @Schema(implementation = CompanyResponse.class))),
-            @ApiResponse(responseCode = "400", description = "An identifier is not a valid UUID",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                            schema = @Schema(implementation = ErrorResponse.class))),
-            @ApiResponse(responseCode = "404",
-                    description = "No client carries this identifier, or the client holds no such company",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                            schema = @Schema(implementation = ErrorResponse.class))),
-            @ApiResponse(responseCode = "500", description = "Unexpected server error",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                            schema = @Schema(implementation = ErrorResponse.class)))})
-    @GetMapping(COMPANY_BY_ID_PATH)
-    ResponseEntity<CompanyResponse> getCompany(
-            @Parameter(description = "Identifier of the client", required = true,
-                    example = "7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35")
-            @PathVariable UUID id,
-            @Parameter(description = "Identifier of the company", required = true,
-                    example = "4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28")
-            @PathVariable UUID companyId);
-
-    @Operation(
-            summary = "Delete a company of a client",
-            description = "Removes one company of the client. A client must keep at least one company, "
-                    + "so their only company cannot be deleted; delete the client instead. A company "
-                    + "with services assigned cannot be deleted; remove those services first.")
-    @ApiResponses({
-            @ApiResponse(responseCode = "204", description = "Company deleted"),
-            @ApiResponse(responseCode = "400", description = "An identifier is not a valid UUID",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                            schema = @Schema(implementation = ErrorResponse.class))),
-            @ApiResponse(responseCode = "404",
-                    description = "No client carries this identifier, or the client holds no such company",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                            schema = @Schema(implementation = ErrorResponse.class))),
-            @ApiResponse(responseCode = "409",
-                    description = "It is the client's only company (BUSINESS_RULE_VIOLATION), or services "
-                            + "are still assigned to it (RESOURCE_IN_USE)",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                            schema = @Schema(implementation = ErrorResponse.class))),
-            @ApiResponse(responseCode = "500", description = "Unexpected server error",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                            schema = @Schema(implementation = ErrorResponse.class)))})
-    @DeleteMapping(COMPANY_BY_ID_PATH)
-    ResponseEntity<Void> deleteCompany(
-            @Parameter(description = "Identifier of the client", required = true,
-                    example = "7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35")
-            @PathVariable UUID id,
-            @Parameter(description = "Identifier of the company", required = true,
-                    example = "4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28")
-            @PathVariable UUID companyId);
 }

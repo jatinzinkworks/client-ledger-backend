@@ -14,18 +14,12 @@ import com.psc.cl.client.dto.ClientResponse;
 import com.psc.cl.client.dto.ClientSummaryResponse;
 import com.psc.cl.client.dto.ClientUpdateRequest;
 import com.psc.cl.client.dto.CompanyRequest;
-import com.psc.cl.client.dto.CompanyResponse;
-import com.psc.cl.client.dto.CompanyUpdateRequest;
 import com.psc.cl.client.exception.AssignedManagerNotFoundException;
 import com.psc.cl.client.exception.ClientHasServicesException;
 import com.psc.cl.client.exception.ClientNotFoundException;
-import com.psc.cl.client.exception.CompanyHasServicesException;
-import com.psc.cl.client.exception.CompanyNotFoundException;
-import com.psc.cl.client.exception.LastCompanyRemovalException;
 import com.psc.cl.client.model.Client;
 import com.psc.cl.client.model.ClientCompany;
 import com.psc.cl.client.model.CompanyType;
-import com.psc.cl.client.repository.ClientCompanyRepository;
 import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.client.repository.ServiceAssignmentRepository;
 import com.psc.cl.managercatalog.model.Manager;
@@ -54,9 +48,6 @@ class ClientServiceImplTest {
 
     @Mock
     private ClientRepository clientRepository;
-
-    @Mock
-    private ClientCompanyRepository clientCompanyRepository;
 
     @Mock
     private ServiceAssignmentRepository serviceAssignmentRepository;
@@ -204,53 +195,43 @@ class ClientServiceImplTest {
     }
 
     @Test
-    @DisplayName("on update, keeps listed companies in place, adds new ones and removes the rest")
-    void updatesClientAndReconcilesCompanies() {
+    @DisplayName("on update, replaces the client's fields and leaves their companies untouched")
+    void updatesClientWithoutTouchingCompanies() {
         Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF", "Mehta Textiles Pvt Ltd");
-        ClientCompany kept = stored.getCompanies().get(0);
-        ClientCompany dropped = stored.getCompanies().get(1);
+        List<ClientCompany> companiesBefore = List.copyOf(stored.getCompanies());
         when(clientRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
         when(managerRepository.findById(MANAGER_ID)).thenReturn(Optional.of(manager()));
 
         ClientResponse response = clientService.updateClient(stored.getId(), updateRequest()
                 .firstName("  Rohit  ")
-                .companies(List.of(
-                        updateCompany(kept.getId(), "Rohan Mehta HUF (Renamed)", null),
-                        updateCompany(null, "Mehta Exports LLP", null)))
+                .email("  rohit.mehta@example.com  ")
                 .build());
 
         verify(clientRepository).flush();
         assertThat(stored.getFirstName()).isEqualTo("Rohit");
-        assertThat(stored.getCompanies()).hasSize(2).doesNotContain(dropped);
-        assertThat(stored.getCompanies().get(0)).isSameAs(kept);
-        assertThat(kept.getCompanyName()).isEqualTo("Rohan Mehta HUF (Renamed)");
-        ClientCompany added = stored.getCompanies().get(1);
-        assertThat(added.getCompanyName()).isEqualTo("Mehta Exports LLP");
-        assertThat(added.getClient()).isSameAs(stored);
-        assertThat(stored.getUpdatedAt()).isNotNull();
+        assertThat(stored.getEmail()).isEqualTo("rohit.mehta@example.com");
+        assertThat(stored.getCompanies()).containsExactlyElementsOf(companiesBefore);
+        assertThat(stored.getCompanies().get(0).getCompanyName()).isEqualTo("Rohan Mehta HUF");
         assertThat(response.getFirstName()).isEqualTo("Rohit");
         assertThat(response.getManagerName()).isEqualTo("Pranay Singhal");
+        assertThat(response.getCompanies()).hasSize(2);
+        verify(serviceAssignmentRepository, never()).existsByCompanyIdIn(any());
     }
 
     @Test
-    @DisplayName("on update, companies without their own discount take the new client discount")
-    void updateAppliesClientDiscountToCompanies() {
-        Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF", "Mehta Textiles Pvt Ltd");
-        UUID firstId = stored.getCompanies().get(0).getId();
-        UUID secondId = stored.getCompanies().get(1).getId();
+    @DisplayName("on update, a new client discount leaves the companies' discounts as they are")
+    void updateKeepsCompanyDiscounts() {
+        Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF");
+        stored.getCompanies().getFirst().setDiscountPercent(new BigDecimal("3.00"));
         when(clientRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
         when(managerRepository.findById(MANAGER_ID)).thenReturn(Optional.of(manager()));
 
         clientService.updateClient(stored.getId(), updateRequest()
                 .discountPercent(new BigDecimal("12.5"))
-                .companies(List.of(
-                        updateCompany(firstId, "Rohan Mehta HUF", null),
-                        updateCompany(secondId, "Mehta Textiles Pvt Ltd", new BigDecimal("3"))))
                 .build());
 
         assertThat(stored.getDiscountPercent()).isEqualTo(new BigDecimal("12.50"));
-        assertThat(stored.getCompanies().get(0).getDiscountPercent()).isEqualTo(new BigDecimal("12.50"));
-        assertThat(stored.getCompanies().get(1).getDiscountPercent()).isEqualTo(new BigDecimal("3.00"));
+        assertThat(stored.getCompanies().getFirst().getDiscountPercent()).isEqualTo(new BigDecimal("3.00"));
     }
 
     @Test
@@ -258,16 +239,12 @@ class ClientServiceImplTest {
     void updateResetsOmittedDiscount() {
         Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF");
         stored.setDiscountPercent(new BigDecimal("10.00"));
-        UUID companyId = stored.getCompanies().getFirst().getId();
         when(clientRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
         when(managerRepository.findById(MANAGER_ID)).thenReturn(Optional.of(manager()));
 
-        clientService.updateClient(stored.getId(), updateRequest()
-                .companies(List.of(updateCompany(companyId, "Rohan Mehta HUF", null)))
-                .build());
+        clientService.updateClient(stored.getId(), updateRequest().build());
 
         assertThat(stored.getDiscountPercent()).isEqualTo(new BigDecimal("0.00"));
-        assertThat(stored.getCompanies().getFirst().getDiscountPercent()).isEqualTo(new BigDecimal("0.00"));
     }
 
     @Test
@@ -295,62 +272,6 @@ class ClientServiceImplTest {
 
         assertThat(stored.getFirstName()).isEqualTo("Rohan");
         verify(clientRepository, never()).flush();
-    }
-
-    @Test
-    @DisplayName("rejects a company id the client does not hold and leaves the client untouched")
-    void updateRejectsForeignCompanyId() {
-        Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF");
-        UUID foreign = UUID.randomUUID();
-        when(clientRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
-        when(managerRepository.findById(MANAGER_ID)).thenReturn(Optional.of(manager()));
-
-        assertThatThrownBy(() -> clientService.updateClient(stored.getId(), updateRequest()
-                .firstName("Rohit")
-                .companies(List.of(updateCompany(foreign, "Someone Else's Company", null)))
-                .build()))
-                .isInstanceOf(CompanyNotFoundException.class)
-                .hasMessageContaining(foreign.toString());
-
-        assertThat(stored.getFirstName()).isEqualTo("Rohan");
-        assertThat(stored.getCompanies()).hasSize(1);
-        verify(clientRepository, never()).flush();
-    }
-
-    @Test
-    @DisplayName("refuses an update that would remove a company with services, and changes nothing")
-    void updateRejectsRemovingCompanyWithServices() {
-        Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF", "Mehta Textiles Pvt Ltd");
-        ClientCompany kept = stored.getCompanies().get(0);
-        ClientCompany dropped = stored.getCompanies().get(1);
-        when(clientRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
-        when(managerRepository.findById(MANAGER_ID)).thenReturn(Optional.of(manager()));
-        when(serviceAssignmentRepository.existsByCompanyIdIn(Set.of(dropped.getId()))).thenReturn(true);
-
-        assertThatThrownBy(() -> clientService.updateClient(stored.getId(), updateRequest()
-                .firstName("Rohit")
-                .companies(List.of(updateCompany(kept.getId(), "Rohan Mehta HUF", null)))
-                .build()))
-                .isInstanceOf(CompanyHasServicesException.class);
-
-        assertThat(stored.getFirstName()).isEqualTo("Rohan");
-        assertThat(stored.getCompanies()).hasSize(2);
-        verify(clientRepository, never()).flush();
-    }
-
-    @Test
-    @DisplayName("does not look for services when the update removes no company")
-    void updateSkipsServiceCheckWhenNothingRemoved() {
-        Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF");
-        UUID companyId = stored.getCompanies().getFirst().getId();
-        when(clientRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
-        when(managerRepository.findById(MANAGER_ID)).thenReturn(Optional.of(manager()));
-
-        clientService.updateClient(stored.getId(), updateRequest()
-                .companies(List.of(updateCompany(companyId, "Rohan Mehta HUF", null)))
-                .build());
-
-        verify(serviceAssignmentRepository, never()).existsByCompanyIdIn(any());
     }
 
     @Test
@@ -404,139 +325,6 @@ class ClientServiceImplTest {
                 .isInstanceOf(ClientNotFoundException.class);
 
         verify(clientRepository, never()).delete(any());
-    }
-
-    @Test
-    @DisplayName("deletes one company of a client, under a lock on the client")
-    void deletesCompany() {
-        Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF", "Mehta Textiles Pvt Ltd");
-        ClientCompany doomed = stored.getCompanies().get(1);
-        when(clientRepository.findByIdForUpdate(stored.getId())).thenReturn(Optional.of(stored));
-        when(serviceAssignmentRepository.existsByCompanyIdIn(Set.of(doomed.getId()))).thenReturn(false);
-
-        clientService.deleteCompany(stored.getId(), doomed.getId());
-
-        assertThat(stored.getCompanies()).hasSize(1).doesNotContain(doomed);
-        assertThat(stored.getUpdatedAt()).isNotNull();
-        verify(clientRepository).flush();
-        verify(clientRepository, never()).findById(any());
-    }
-
-    @Test
-    @DisplayName("refuses to delete a client's only company")
-    void deleteCompanyRejectsLastCompany() {
-        Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF");
-        UUID onlyId = stored.getCompanies().getFirst().getId();
-        when(clientRepository.findByIdForUpdate(stored.getId())).thenReturn(Optional.of(stored));
-
-        assertThatThrownBy(() -> clientService.deleteCompany(stored.getId(), onlyId))
-                .isInstanceOf(LastCompanyRemovalException.class)
-                .hasMessageContaining(onlyId.toString());
-
-        assertThat(stored.getCompanies()).hasSize(1);
-        verify(clientRepository, never()).flush();
-    }
-
-    @Test
-    @DisplayName("refuses to delete a company that has services")
-    void deleteCompanyRejectsCompanyWithServices() {
-        Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF", "Mehta Textiles Pvt Ltd");
-        ClientCompany busy = stored.getCompanies().get(0);
-        when(clientRepository.findByIdForUpdate(stored.getId())).thenReturn(Optional.of(stored));
-        when(serviceAssignmentRepository.existsByCompanyIdIn(Set.of(busy.getId()))).thenReturn(true);
-
-        assertThatThrownBy(() -> clientService.deleteCompany(stored.getId(), busy.getId()))
-                .isInstanceOf(CompanyHasServicesException.class)
-                .hasMessageContaining(busy.getId().toString());
-
-        assertThat(stored.getCompanies()).hasSize(2);
-        verify(clientRepository, never()).flush();
-    }
-
-    @Test
-    @DisplayName("raises company not found when the client does not hold the company")
-    void deleteCompanyFailsForCompanyOfAnotherClient() {
-        Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF", "Mehta Textiles Pvt Ltd");
-        UUID foreign = UUID.randomUUID();
-        when(clientRepository.findByIdForUpdate(stored.getId())).thenReturn(Optional.of(stored));
-
-        assertThatThrownBy(() -> clientService.deleteCompany(stored.getId(), foreign))
-                .isInstanceOf(CompanyNotFoundException.class);
-
-        assertThat(stored.getCompanies()).hasSize(2);
-    }
-
-    @Test
-    @DisplayName("raises client not found when deleting a company of an unknown client")
-    void deleteCompanyFailsForUnknownClient() {
-        UUID missing = UUID.randomUUID();
-        when(clientRepository.findByIdForUpdate(missing)).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() -> clientService.deleteCompany(missing, UUID.randomUUID()))
-                .isInstanceOf(ClientNotFoundException.class);
-    }
-
-    @Test
-    @DisplayName("lists a client's companies in full, ordered by name")
-    void listsCompanies() {
-        Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF", "Mehta Textiles Pvt Ltd");
-        when(clientRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
-
-        List<CompanyResponse> companies = clientService.listCompanies(stored.getId());
-
-        assertThat(companies).extracting("companyName")
-                .containsExactly("Mehta Textiles Pvt Ltd", "Rohan Mehta HUF");
-        assertThat(companies).allSatisfy(company -> assertThat(company.getAddress()).isNotBlank());
-    }
-
-    @Test
-    @DisplayName("raises not found when listing companies of an unknown client")
-    void listCompaniesFailsForUnknownClient() {
-        UUID missing = UUID.randomUUID();
-        when(clientRepository.findById(missing)).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() -> clientService.listCompanies(missing))
-                .isInstanceOf(ClientNotFoundException.class);
-    }
-
-    @Test
-    @DisplayName("returns one company of a client")
-    void readsCompany() {
-        Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF");
-        ClientCompany company = stored.getCompanies().getFirst();
-        when(clientRepository.existsById(stored.getId())).thenReturn(true);
-        when(clientCompanyRepository.findByIdAndClientId(company.getId(), stored.getId()))
-                .thenReturn(Optional.of(company));
-
-        CompanyResponse response = clientService.getCompany(stored.getId(), company.getId());
-
-        assertThat(response.getId()).isEqualTo(company.getId());
-        assertThat(response.getCompanyName()).isEqualTo("Rohan Mehta HUF");
-    }
-
-    @Test
-    @DisplayName("raises client not found when the client is unknown")
-    void readCompanyFailsForUnknownClient() {
-        UUID missing = UUID.randomUUID();
-        when(clientRepository.existsById(missing)).thenReturn(false);
-
-        assertThatThrownBy(() -> clientService.getCompany(missing, UUID.randomUUID()))
-                .isInstanceOf(ClientNotFoundException.class);
-
-        verify(clientCompanyRepository, never()).findByIdAndClientId(any(), any());
-    }
-
-    @Test
-    @DisplayName("raises company not found when the client does not hold the company")
-    void readCompanyFailsForCompanyOfAnotherClient() {
-        UUID clientId = UUID.randomUUID();
-        UUID companyId = UUID.randomUUID();
-        when(clientRepository.existsById(clientId)).thenReturn(true);
-        when(clientCompanyRepository.findByIdAndClientId(companyId, clientId)).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() -> clientService.getCompany(clientId, companyId))
-                .isInstanceOf(CompanyNotFoundException.class)
-                .hasMessageContaining(companyId.toString());
     }
 
     @Test
@@ -666,18 +454,7 @@ class ClientServiceImplTest {
                 .lastName("Mehta")
                 .phone("+91 98200 12345")
                 .email("rohan.mehta@example.com")
-                .managerId(MANAGER_ID)
-                .companies(List.of(updateCompany(null, "Rohan Mehta HUF", null)));
-    }
-
-    private CompanyUpdateRequest updateCompany(UUID id, String name, BigDecimal discountPercent) {
-        return CompanyUpdateRequest.builder()
-                .id(id)
-                .companyName(name)
-                .companyType(CompanyType.HUF)
-                .address("4 Park Street, Kolkata, West Bengal 700016")
-                .discountPercent(discountPercent)
-                .build();
+                .managerId(MANAGER_ID);
     }
 
     private CompanyRequest company(String name, BigDecimal discountPercent) {

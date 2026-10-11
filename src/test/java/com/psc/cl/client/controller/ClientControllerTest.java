@@ -2,6 +2,7 @@ package com.psc.cl.client.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
@@ -24,9 +25,6 @@ import com.psc.cl.client.dto.CompanyResponse;
 import com.psc.cl.client.exception.AssignedManagerNotFoundException;
 import com.psc.cl.client.exception.ClientHasServicesException;
 import com.psc.cl.client.exception.ClientNotFoundException;
-import com.psc.cl.client.exception.CompanyHasServicesException;
-import com.psc.cl.client.exception.CompanyNotFoundException;
-import com.psc.cl.client.exception.LastCompanyRemovalException;
 import com.psc.cl.client.model.CompanyType;
 import com.psc.cl.client.service.ClientService;
 import org.junit.jupiter.api.DisplayName;
@@ -71,6 +69,17 @@ class ClientControllerTest {
                   "address": "4 Park Street, Kolkata, West Bengal 700016"
                 }
               ]
+            }""".formatted(MANAGER_ID);
+
+    /** A complete, valid client update payload; it carries no companies. */
+    private static final String UPDATE_JSON = """
+            {
+              "firstName": "Rohit",
+              "lastName": "Mehta",
+              "phone": "+91 98200 12345",
+              "email": "rohit.mehta@example.com",
+              "managerId": "%s",
+              "discountPercent": 15
             }""".formatted(MANAGER_ID);
 
     @Autowired
@@ -365,88 +374,14 @@ class ClientControllerTest {
     }
 
     @Test
-    @DisplayName("returns 200 with the client's companies on list companies")
-    void listsCompanies() throws Exception {
-        UUID id = UUID.randomUUID();
-        when(clientService.listCompanies(id)).thenReturn(response().getCompanies());
-
-        mockMvc.perform(get(CLIENTS_URL + "/" + id + "/companies"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].companyName").value("Mehta Textiles Pvt Ltd"))
-                .andExpect(jsonPath("$[0].discountPercent").value(5.0));
-    }
-
-    @Test
-    @DisplayName("returns 404 when listing companies of an unknown client")
-    void listCompaniesReturnsNotFound() throws Exception {
-        UUID id = UUID.randomUUID();
-        when(clientService.listCompanies(id)).thenThrow(new ClientNotFoundException(id));
-
-        mockMvc.perform(get(CLIENTS_URL + "/" + id + "/companies"))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
-    }
-
-    @Test
-    @DisplayName("returns 200 with one company of the client and passes both ids through")
-    void fetchesCompany() throws Exception {
-        UUID clientId = UUID.randomUUID();
-        UUID companyId = UUID.randomUUID();
-        when(clientService.getCompany(clientId, companyId)).thenReturn(response().getCompanies().getFirst());
-
-        mockMvc.perform(get(CLIENTS_URL + "/" + clientId + "/companies/" + companyId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.companyType").value("PRIVATE_LIMITED"))
-                .andExpect(jsonPath("$.address").value("12 MG Road, Bengaluru, Karnataka 560001"));
-    }
-
-    @Test
-    @DisplayName("returns 404 when the client does not hold the company")
-    void fetchCompanyReturnsNotFound() throws Exception {
-        UUID clientId = UUID.randomUUID();
-        UUID companyId = UUID.randomUUID();
-        when(clientService.getCompany(clientId, companyId))
-                .thenThrow(new CompanyNotFoundException(clientId, companyId));
-
-        mockMvc.perform(get(CLIENTS_URL + "/" + clientId + "/companies/" + companyId))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
-    }
-
-    @Test
-    @DisplayName("returns 400 when the company identifier is not a UUID")
-    void fetchCompanyRejectsMalformedId() throws Exception {
-        mockMvc.perform(get(CLIENTS_URL + "/" + UUID.randomUUID() + "/companies/not-a-uuid"))
-                .andExpect(status().isBadRequest());
-
-        verify(clientService, never()).getCompany(any(), any());
-    }
-
-    @Test
-    @DisplayName("returns 200 on update and passes the id, company ids and body through")
+    @DisplayName("returns 200 on update and passes the id and body through")
     void updatesClient() throws Exception {
         UUID id = UUID.randomUUID();
-        UUID companyId = UUID.randomUUID();
         when(clientService.updateClient(any(), any())).thenReturn(response());
 
         mockMvc.perform(put(CLIENTS_URL + "/" + id)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(updateJson("""
-                                [
-                                  {
-                                    "id": "%s",
-                                    "companyName": "Mehta Textiles Pvt Ltd",
-                                    "companyType": "PRIVATE_LIMITED",
-                                    "address": "12 MG Road, Bengaluru, Karnataka 560001",
-                                    "discountPercent": 5
-                                  },
-                                  {
-                                    "companyName": "Mehta Exports LLP",
-                                    "companyType": "LLP",
-                                    "address": "8 Nariman Point, Mumbai, Maharashtra 400021"
-                                  }
-                                ]""".formatted(companyId))))
+                        .content(UPDATE_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.firstName").value("Rohan"));
 
@@ -456,14 +391,13 @@ class ClientControllerTest {
         assertThat(idCaptor.getValue()).isEqualTo(id);
         ClientUpdateRequest received = bodyCaptor.getValue();
         assertThat(received.firstName()).isEqualTo("Rohit");
+        assertThat(received.email()).isEqualTo("rohit.mehta@example.com");
+        assertThat(received.managerId()).isEqualTo(UUID.fromString(MANAGER_ID));
         assertThat(received.discountPercent()).isEqualByComparingTo("15");
-        assertThat(received.companies().get(0).id()).isEqualTo(companyId);
-        assertThat(received.companies().get(1).id()).isNull();
-        assertThat(received.companies().get(1).companyType()).isEqualTo(CompanyType.LLP);
     }
 
     @Test
-    @DisplayName("applies the same validation on update as on create")
+    @DisplayName("applies the same validation to the client fields on update as on create")
     void updateRejectsInvalidBody() throws Exception {
         mockMvc.perform(put(CLIENTS_URL + "/" + UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON)
@@ -471,28 +405,7 @@ class ClientControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errors[*].field", hasItem("firstName")))
                 .andExpect(jsonPath("$.errors[*].field", hasItem("managerId")))
-                .andExpect(jsonPath("$.errors[*].field", hasItem("companies")));
-
-        verify(clientService, never()).updateClient(any(), any());
-    }
-
-    @Test
-    @DisplayName("returns 400 when the same company id is listed twice")
-    void updateRejectsDuplicateCompanyIds() throws Exception {
-        UUID companyId = UUID.randomUUID();
-        String company = """
-                {
-                  "id": "%s",
-                  "companyName": "Mehta Textiles Pvt Ltd",
-                  "companyType": "PRIVATE_LIMITED",
-                  "address": "12 MG Road, Bengaluru, Karnataka 560001"
-                }""".formatted(companyId);
-
-        mockMvc.perform(put(CLIENTS_URL + "/" + UUID.randomUUID())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(updateJson("[" + company + "," + company + "]")))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.errors[*].field", hasItem("companyIdsUnique")));
+                .andExpect(jsonPath("$.errors[*].field", not(hasItem("companies"))));
 
         verify(clientService, never()).updateClient(any(), any());
     }
@@ -505,7 +418,7 @@ class ClientControllerTest {
 
         mockMvc.perform(put(CLIENTS_URL + "/" + id)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(updateJson(oneCompany())))
+                        .content(UPDATE_JSON))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
     }
@@ -542,71 +455,6 @@ class ClientControllerTest {
         mockMvc.perform(delete(CLIENTS_URL + "/" + id))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("RESOURCE_IN_USE"));
-    }
-
-    @Test
-    @DisplayName("returns 204 with no body on delete company and passes both ids through")
-    void deletesCompany() throws Exception {
-        UUID clientId = UUID.randomUUID();
-        UUID companyId = UUID.randomUUID();
-
-        mockMvc.perform(delete(CLIENTS_URL + "/" + clientId + "/companies/" + companyId))
-                .andExpect(status().isNoContent())
-                .andExpect(content().string(""));
-
-        verify(clientService).deleteCompany(clientId, companyId);
-    }
-
-    @Test
-    @DisplayName("returns 409 BUSINESS_RULE_VIOLATION when deleting the client's only company")
-    void deleteCompanyReturnsConflictForLastCompany() throws Exception {
-        UUID clientId = UUID.randomUUID();
-        UUID companyId = UUID.randomUUID();
-        doThrow(new LastCompanyRemovalException(clientId, companyId))
-                .when(clientService).deleteCompany(clientId, companyId);
-
-        mockMvc.perform(delete(CLIENTS_URL + "/" + clientId + "/companies/" + companyId))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("BUSINESS_RULE_VIOLATION"));
-    }
-
-    @Test
-    @DisplayName("returns 409 RESOURCE_IN_USE when deleting a company that has services")
-    void deleteCompanyReturnsConflictWhenServicesAssigned() throws Exception {
-        UUID clientId = UUID.randomUUID();
-        UUID companyId = UUID.randomUUID();
-        doThrow(new CompanyHasServicesException(clientId, companyId))
-                .when(clientService).deleteCompany(clientId, companyId);
-
-        mockMvc.perform(delete(CLIENTS_URL + "/" + clientId + "/companies/" + companyId))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("RESOURCE_IN_USE"));
-    }
-
-    @Test
-    @DisplayName("returns 404 when the client does not hold the company to delete")
-    void deleteCompanyReturnsNotFound() throws Exception {
-        UUID clientId = UUID.randomUUID();
-        UUID companyId = UUID.randomUUID();
-        doThrow(new CompanyNotFoundException(clientId, companyId))
-                .when(clientService).deleteCompany(clientId, companyId);
-
-        mockMvc.perform(delete(CLIENTS_URL + "/" + clientId + "/companies/" + companyId))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
-    }
-
-    private String updateJson(String companies) {
-        return """
-                {
-                  "firstName": "Rohit",
-                  "lastName": "Mehta",
-                  "phone": "+91 98200 12345",
-                  "email": "rohit.mehta@example.com",
-                  "managerId": "%s",
-                  "discountPercent": 15,
-                  "companies": %s
-                }""".formatted(MANAGER_ID, companies);
     }
 
     private String discountJson(String clientDiscount, String companies) {

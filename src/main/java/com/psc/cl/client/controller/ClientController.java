@@ -4,7 +4,6 @@ import com.psc.cl.client.dto.ClientRequest;
 import com.psc.cl.client.dto.ClientResponse;
 import com.psc.cl.client.dto.ClientSummaryResponse;
 import com.psc.cl.client.dto.ClientUpdateRequest;
-import com.psc.cl.client.dto.CompanyResponse;
 import com.psc.cl.client.service.ClientService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -17,7 +16,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Single entry point for every Client endpoint.
+ * Single entry point for every Client endpoint other than those over their companies.
  */
 @RestController
 @RequiredArgsConstructor
@@ -49,13 +48,6 @@ public class ClientController implements ClientApi {
     }
 
     @Override
-    public ResponseEntity<Void> deleteCompany(UUID id, UUID companyId) {
-        log.debug("Received request to delete company {} of client {}", companyId, id);
-        clientService.deleteCompany(id, companyId);
-        return ResponseEntity.noContent().build();
-    }
-
-    @Override
     public ResponseEntity<ClientResponse> getClient(UUID id) {
         log.debug("Received request to fetch client {}", id);
         return ResponseEntity.ok(clientService.getClient(id));
@@ -65,17 +57,5 @@ public class ClientController implements ClientApi {
     public ResponseEntity<List<ClientSummaryResponse>> listClients(UUID managerId) {
         log.debug("Received request to list clients{}", managerId == null ? "" : " of manager " + managerId);
         return ResponseEntity.ok(clientService.listClients(managerId));
-    }
-
-    @Override
-    public ResponseEntity<List<CompanyResponse>> listCompanies(UUID id) {
-        log.debug("Received request to list companies of client {}", id);
-        return ResponseEntity.ok(clientService.listCompanies(id));
-    }
-
-    @Override
-    public ResponseEntity<CompanyResponse> getCompany(UUID id, UUID companyId) {
-        log.debug("Received request to fetch company {} of client {}", companyId, id);
-        return ResponseEntity.ok(clientService.getCompany(id, companyId));
     }
 }

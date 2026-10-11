@@ -279,8 +279,8 @@ class ClientIT extends AbstractPostgresIT {
     }
 
     @Test
-    @DisplayName("update keeps a listed company's id, adds a new one, removes the rest and stores it all")
-    void updatesClientAndCompanies() throws Exception {
+    @DisplayName("update replaces the client's fields, stores them and leaves the companies as they were")
+    void updatesClientWithoutTouchingCompanies() throws Exception {
         String created = mockMvc.perform(post(CLIENTS_URL)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(clientJson(managerId)))
@@ -288,8 +288,8 @@ class ClientIT extends AbstractPostgresIT {
                 .andReturn().getResponse().getContentAsString();
         String id = JsonPath.read(created, "$.id");
         // Ordered by name: [0] is Mehta Textiles Pvt Ltd, [1] is Rohan Mehta HUF.
-        String keptId = JsonPath.read(created, "$.companies[1].id");
-        String droppedId = JsonPath.read(created, "$.companies[0].id");
+        String textilesId = JsonPath.read(created, "$.companies[0].id");
+        String hufId = JsonPath.read(created, "$.companies[1].id");
 
         mockMvc.perform(put(CLIENTS_URL + "/" + id)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -300,54 +300,125 @@ class ClientIT extends AbstractPostgresIT {
                                   "phone": "+91 98200 99999",
                                   "email": "rohit.mehta@example.com",
                                   "managerId": "%s",
-                                  "discountPercent": 7.5,
-                                  "companies": [
-                                    {
-                                      "id": "%s",
-                                      "companyName": "Rohit Mehta HUF",
-                                      "companyType": "HUF",
-                                      "address": "4 Park Street, Kolkata, West Bengal 700016"
-                                    },
-                                    {
-                                      "companyName": "Mehta Exports LLP",
-                                      "companyType": "LLP",
-                                      "address": "8 Nariman Point, Mumbai, Maharashtra 400021",
-                                      "discountPercent": 2
-                                    }
-                                  ]
-                                }""".formatted(managerId, keptId)))
+                                  "discountPercent": 7.5
+                                }""".formatted(managerId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(id))
                 .andExpect(jsonPath("$.firstName").value("Rohit"))
                 .andExpect(jsonPath("$.discountPercent").value(7.5))
                 .andExpect(jsonPath("$.companies.length()").value(2))
-                .andExpect(jsonPath("$.companies[0].companyName").value("Mehta Exports LLP"))
-                .andExpect(jsonPath("$.companies[0].id").exists())
-                .andExpect(jsonPath("$.companies[0].discountPercent").value(2.0))
-                .andExpect(jsonPath("$.companies[1].id").value(keptId))
-                .andExpect(jsonPath("$.companies[1].discountPercent").value(7.5));
+                .andExpect(jsonPath("$.companies[0].id").value(textilesId))
+                .andExpect(jsonPath("$.companies[1].id").value(hufId))
+                // Companies keep the discount they were given when added.
+                .andExpect(jsonPath("$.companies[0].discountPercent").value(0.0));
 
         // Read back from the database.
         mockMvc.perform(get(CLIENTS_URL + "/" + id))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.phone").value("+91 98200 99999"))
+                .andExpect(jsonPath("$.email").value("rohit.mehta@example.com"))
                 .andExpect(jsonPath("$.companies.length()").value(2))
-                .andExpect(jsonPath("$.companies[1].id").value(keptId))
-                .andExpect(jsonPath("$.companies[1].companyName").value("Rohit Mehta HUF"));
-
-        mockMvc.perform(get(CLIENTS_URL + "/" + id + "/companies/" + droppedId))
-                .andExpect(status().isNotFound());
+                .andExpect(jsonPath("$.companies[1].companyName").value("Rohan Mehta HUF"));
     }
 
     @Test
-    @DisplayName("update rejects another client's company id and changes nothing")
-    void updateRejectsAnotherClientsCompany() throws Exception {
+    @DisplayName("adds a company to an existing client, taking the client's discount, and stores it")
+    void addsCompanyToClient() throws Exception {
+        String created = mockMvc.perform(post(CLIENTS_URL)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(clientJson(managerId)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String id = JsonPath.read(created, "$.id");
+
+        String added = mockMvc.perform(post(CLIENTS_URL + "/" + id + "/companies")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "companyName": "  Mehta Exports LLP  ",
+                                  "companyType": "LLP",
+                                  "address": "8 Nariman Point, Mumbai, Maharashtra 400021"
+                                }"""))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").exists())
+                .andExpect(jsonPath("$.companyName").value("Mehta Exports LLP"))
+                .andExpect(jsonPath("$.companyType").value("LLP"))
+                .andExpect(jsonPath("$.discountPercent").value(0.0))
+                .andReturn().getResponse().getContentAsString();
+        String addedId = JsonPath.read(added, "$.id");
+
+        // Read back from the database.
+        mockMvc.perform(get(CLIENTS_URL + "/" + id + "/companies/" + addedId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.companyName").value("Mehta Exports LLP"));
+        mockMvc.perform(get(CLIENTS_URL + "/" + id))
+                .andExpect(jsonPath("$.companies.length()").value(3));
+        assertThat(clientCompanyRepository.count()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("adding a company to an unknown client, or with an invalid body, stores nothing")
+    void addCompanyRejectsUnknownClientAndInvalidBody() throws Exception {
+        String created = mockMvc.perform(post(CLIENTS_URL)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(clientJson(managerId)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String id = JsonPath.read(created, "$.id");
+        String company = """
+                {
+                  "companyName": "Mehta Exports LLP",
+                  "companyType": "LLP",
+                  "address": "8 Nariman Point, Mumbai, Maharashtra 400021"
+                }""";
+
+        mockMvc.perform(post(CLIENTS_URL + "/" + UUID.randomUUID() + "/companies")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(company))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+
+        mockMvc.perform(post(CLIENTS_URL + "/" + id + "/companies")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"companyName\": \"Mehta Exports LLP\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        assertThat(clientCompanyRepository.count()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("updates a company of a client in place and stores it, but not under another client")
+    void updatesCompanyOfClient() throws Exception {
         String first = mockMvc.perform(post(CLIENTS_URL)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(clientJson(managerId)))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
-        String companyOfFirst = JsonPath.read(first, "$.companies[0].id");
+        String id = JsonPath.read(first, "$.id");
+        // Ordered by name: [1] is Rohan Mehta HUF.
+        String hufId = JsonPath.read(first, "$.companies[1].id");
+
+        mockMvc.perform(put(CLIENTS_URL + "/" + id + "/companies/" + hufId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "companyName": "  Rohit Mehta HUF  ",
+                                  "companyType": "HUF",
+                                  "address": "9 Park Street, Kolkata, West Bengal 700016",
+                                  "discountPercent": 6.5
+                                }"""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(hufId))
+                .andExpect(jsonPath("$.companyName").value("Rohit Mehta HUF"))
+                .andExpect(jsonPath("$.discountPercent").value(6.5));
+
+        // Read back from the database.
+        mockMvc.perform(get(CLIENTS_URL + "/" + id + "/companies/" + hufId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.companyName").value("Rohit Mehta HUF"))
+                .andExpect(jsonPath("$.address").value("9 Park Street, Kolkata, West Bengal 700016"));
+        assertThat(clientCompanyRepository.count()).isEqualTo(2);
 
         String second = mockMvc.perform(post(CLIENTS_URL)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -356,32 +427,18 @@ class ClientIT extends AbstractPostgresIT {
                 .andReturn().getResponse().getContentAsString();
         String secondId = JsonPath.read(second, "$.id");
 
-        mockMvc.perform(put(CLIENTS_URL + "/" + secondId)
+        mockMvc.perform(put(CLIENTS_URL + "/" + secondId + "/companies/" + hufId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "firstName": "Changed",
-                                  "lastName": "Kapoor",
-                                  "phone": "+91 98200 12345",
-                                  "email": "asha.kapoor@example.com",
-                                  "managerId": "%s",
-                                  "companies": [
-                                    {
-                                      "id": "%s",
-                                      "companyName": "Hijacked",
-                                      "companyType": "HUF",
-                                      "address": "Nowhere"
-                                    }
-                                  ]
-                                }""".formatted(managerId, companyOfFirst)))
+                                  "companyName": "Hijacked",
+                                  "companyType": "HUF",
+                                  "address": "Nowhere"
+                                }"""))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
-
-        mockMvc.perform(get(CLIENTS_URL + "/" + secondId))
-                .andExpect(jsonPath("$.firstName").value("Asha"))
-                .andExpect(jsonPath("$.companies.length()").value(2));
-        mockMvc.perform(get(CLIENTS_URL + "/" + JsonPath.read(first, "$.id") + "/companies/" + companyOfFirst))
-                .andExpect(jsonPath("$.companyName").value("Mehta Textiles Pvt Ltd"));
+        mockMvc.perform(get(CLIENTS_URL + "/" + id + "/companies/" + hufId))
+                .andExpect(jsonPath("$.companyName").value("Rohit Mehta HUF"));
     }
 
     @Test
