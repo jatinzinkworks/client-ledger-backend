@@ -53,14 +53,20 @@ public class ClientSummaryResponse {
             schema = @Schema(example = "Mehta Textiles Pvt Ltd"))
     List<String> companyNames;
 
+    @Schema(description = "What the client still owes: everything billed to all of their companies less "
+            + "every payment received, across all financial years. Negative when they have paid more than "
+            + "billed", example = "19630.00")
+    BigDecimal totalPending;
+
     /**
      * Maps a persisted entity onto its list representation.
      *
-     * @param entity  the stored client, with its companies loaded
-     * @param manager the manager assigned to the client
+     * @param entity       the stored client, with its companies loaded
+     * @param manager      the manager assigned to the client
+     * @param totalPending what the client still owes, across all companies and financial years
      * @return the summary payload
      */
-    public static ClientSummaryResponse from(Client entity, Manager manager) {
+    public static ClientSummaryResponse from(Client entity, Manager manager, BigDecimal totalPending) {
         return ClientSummaryResponse.builder()
                 .id(entity.getId())
                 .firstName(entity.getFirstName())
@@ -74,6 +80,7 @@ public class ClientSummaryResponse {
                         .map(ClientCompany::getCompanyName)
                         .sorted(String.CASE_INSENSITIVE_ORDER)
                         .toList())
+                .totalPending(totalPending)
                 .build();
     }
 }

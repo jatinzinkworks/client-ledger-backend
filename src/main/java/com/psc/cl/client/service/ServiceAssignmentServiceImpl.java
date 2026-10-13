@@ -12,6 +12,8 @@ import com.psc.cl.client.model.ServiceAssignment;
 import com.psc.cl.client.repository.ClientCompanyRepository;
 import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.client.repository.ServiceAssignmentRepository;
+import com.psc.cl.ledger.model.FinancialYear;
+import com.psc.cl.ledger.service.LedgerService;
 import com.psc.cl.servicecatalog.model.CatalogService;
 import com.psc.cl.servicecatalog.repository.CatalogServiceRepository;
 import lombok.RequiredArgsConstructor;
@@ -20,6 +22,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -40,6 +43,9 @@ public class ServiceAssignmentServiceImpl implements ServiceAssignmentService {
 
     private static final Logger log = LoggerFactory.getLogger(ServiceAssignmentServiceImpl.class);
 
+    /** What a service with no charges falling due in the year was billed, at the ledger's scale. */
+    private static final BigDecimal NOTHING_BILLED = new BigDecimal("0.00");
+
     private final ClientRepository clientRepository;
 
     private final ClientCompanyRepository clientCompanyRepository;
@@ -47,6 +53,8 @@ public class ServiceAssignmentServiceImpl implements ServiceAssignmentService {
     private final ServiceAssignmentRepository serviceAssignmentRepository;
 
     private final CatalogServiceRepository catalogServiceRepository;
+
+    private final LedgerService ledgerService;
 
     @Override
     @Transactional
@@ -81,7 +89,8 @@ public class ServiceAssignmentServiceImpl implements ServiceAssignmentService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<ServiceAssignmentResponse> listServices(UUID clientId, UUID companyId) {
+    public List<ServiceAssignmentResponse> listServices(UUID clientId, UUID companyId,
+                                                        FinancialYear financialYear) {
         requireCompany(clientId, companyId);
         List<ServiceAssignment> assignments =
                 serviceAssignmentRepository.findByCompanyIdOrderByDeliveryDateDescCreatedAtDesc(companyId);
@@ -93,10 +102,20 @@ public class ServiceAssignmentServiceImpl implements ServiceAssignmentService {
         Map<UUID, CatalogService> servicesById = catalogServiceRepository.findAllById(serviceIds).stream()
                 .collect(Collectors.toMap(CatalogService::getId, Function.identity()));
 
+        // Likewise one ledger query for every service's billed amount, and only when a year is asked for.
+        Map<UUID, BigDecimal> billed = financialYear == null
+                ? Map.of()
+                : ledgerService.billedByService(companyId, financialYear);
+
         return assignments.stream()
-                .map(assignment -> ServiceAssignmentResponse.from(assignment, clientId,
-                        catalogService(servicesById.get(assignment.getCatalogServiceId()),
-                                assignment.getCatalogServiceId())))
+                .map(assignment -> {
+                    CatalogService service = catalogService(servicesById.get(assignment.getCatalogServiceId()),
+                            assignment.getCatalogServiceId());
+                    return financialYear == null
+                            ? ServiceAssignmentResponse.from(assignment, clientId, service)
+                            : ServiceAssignmentResponse.from(assignment, clientId, service, financialYear.label(),
+                                    billed.getOrDefault(assignment.getId(), NOTHING_BILLED));
+                })
                 .toList();
     }
 

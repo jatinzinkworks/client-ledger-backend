@@ -9,8 +9,11 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.psc.cl.client.dto.ClientSummaryResponse;
 import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.client.repository.ClientRepository.ManagerClientCount;
+import com.psc.cl.client.service.ClientService;
+import com.psc.cl.ledger.service.LedgerService;
 import com.psc.cl.managercatalog.dto.ManagerRequest;
 import com.psc.cl.managercatalog.dto.ManagerResponse;
 import com.psc.cl.managercatalog.exception.ManagerEmailAlreadyExistsException;
@@ -30,7 +33,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Sort;
 
+import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -42,6 +47,12 @@ class ManagerCatalogServiceImplTest {
 
     @Mock
     private ClientRepository clientRepository;
+
+    @Mock
+    private LedgerService ledgerService;
+
+    @Mock
+    private ClientService clientService;
 
     @InjectMocks
     private ManagerCatalogServiceImpl managerCatalogService;
@@ -117,13 +128,19 @@ class ManagerCatalogServiceImplTest {
     void readsManagerById() {
         Manager stored = stored();
         when(managerRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
-        when(clientRepository.countByManagerId(stored.getId())).thenReturn(2L);
+        List<ClientSummaryResponse> clients = List.of(
+                ClientSummaryResponse.builder().id(UUID.randomUUID()).lastName("Kapoor").build(),
+                ClientSummaryResponse.builder().id(UUID.randomUUID()).lastName("Mehta").build());
+        when(clientService.listClients(stored.getId())).thenReturn(clients);
+        when(ledgerService.pendingForManager(stored.getId())).thenReturn(new BigDecimal("20630.00"));
 
         ManagerResponse response = managerCatalogService.getManager(stored.getId());
 
         assertThat(response.getId()).isEqualTo(stored.getId());
         assertThat(response.getLastName()).isEqualTo("Singhal");
+        assertThat(response.getClients()).isEqualTo(clients);
         assertThat(response.getClientCount()).isEqualTo(2L);
+        assertThat(response.getTotalPending()).isEqualTo(new BigDecimal("20630.00"));
     }
 
     @Test
@@ -135,6 +152,8 @@ class ManagerCatalogServiceImplTest {
         assertThatThrownBy(() -> managerCatalogService.getManager(missing))
                 .isInstanceOf(ManagerNotFoundException.class)
                 .hasMessageContaining(missing.toString());
+
+        verify(clientService, never()).listClients(any());
     }
 
     @Test
@@ -165,6 +184,20 @@ class ManagerCatalogServiceImplTest {
         List<ManagerResponse> managers = managerCatalogService.listManagers();
 
         assertThat(managers).extracting(ManagerResponse::getClientCount).containsExactly(4L, 0L);
+    }
+
+    @Test
+    @DisplayName("lists what each manager's clients still owe, zero for a manager whose clients have no entries")
+    void listsManagersWithPending() {
+        Manager withEntries = stored();
+        Manager withoutEntries = stored();
+        when(managerRepository.findAll(any(Sort.class))).thenReturn(List.of(withEntries, withoutEntries));
+        when(ledgerService.pendingByManager()).thenReturn(Map.of(withEntries.getId(), new BigDecimal("20630.00")));
+
+        List<ManagerResponse> managers = managerCatalogService.listManagers();
+
+        assertThat(managers).extracting(ManagerResponse::getTotalPending)
+                .containsExactly(new BigDecimal("20630.00"), new BigDecimal("0.00"));
     }
 
     @Test

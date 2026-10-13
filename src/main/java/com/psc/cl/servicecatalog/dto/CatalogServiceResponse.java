@@ -51,6 +51,17 @@ public class CatalogServiceResponse {
             example = "12", accessMode = Schema.AccessMode.READ_ONLY)
     Integer usedByCompanies;
 
+    @Schema(description = "Financial year totalBilled covers. Only returned when listing the catalog for "
+            + "a financial year; absent when totalBilled covers every year to date", example = "2026-27",
+            accessMode = Schema.AccessMode.READ_ONLY)
+    String financialYear;
+
+    @Schema(description = "Sum of this service's charges across every client, taxable amounts plus GST: "
+            + "those falling due in financialYear when listing for one, otherwise every charge due to date. "
+            + "Zero when nothing fell due. Only returned when listing the catalog",
+            example = "39235.00", accessMode = Schema.AccessMode.READ_ONLY)
+    BigDecimal totalBilled;
+
     @Schema(description = "When the service was created", example = "2026-10-01T10:15:30Z")
     Instant createdAt;
 
@@ -65,6 +76,26 @@ public class CatalogServiceResponse {
      * @return the response payload
      */
     public static CatalogServiceResponse from(CatalogService entity) {
+        return builderFrom(entity).build();
+    }
+
+    /**
+     * Maps a persisted entity onto its API representation, together with what it was billed.
+     *
+     * @param entity        the stored service
+     * @param financialYear the financial year the amount covers, such as 2026-27, or null when it
+     *                      covers every year to date
+     * @param totalBilled   what the service was billed in that year, across every client
+     * @return the response payload
+     */
+    public static CatalogServiceResponse from(CatalogService entity, String financialYear, BigDecimal totalBilled) {
+        return builderFrom(entity)
+                .financialYear(financialYear)
+                .totalBilled(totalBilled)
+                .build();
+    }
+
+    private static CatalogServiceResponseBuilder builderFrom(CatalogService entity) {
         return CatalogServiceResponse.builder()
                 .id(entity.getId())
                 .serviceName(entity.getServiceName())
@@ -76,8 +107,7 @@ public class CatalogServiceResponse {
                 .invoiceSchedule(scheduleOf(entity))
                 .usedByCompanies(entity.getUsedByCompanies())
                 .createdAt(entity.getCreatedAt())
-                .updatedAt(entity.getUpdatedAt())
-                .build();
+                .updatedAt(entity.getUpdatedAt());
     }
 
     private static InvoiceSchedule scheduleOf(CatalogService entity) {

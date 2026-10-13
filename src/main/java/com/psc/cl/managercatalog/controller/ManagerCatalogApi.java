@@ -63,7 +63,9 @@ public interface ManagerCatalogApi {
                     description = "Manager to add to the catalog", required = true)
             @Valid @RequestBody ManagerRequest request);
 
-    @Operation(summary = "Fetch a manager", description = "Returns one manager by identifier.")
+    @Operation(summary = "Fetch a manager",
+            description = "Returns one manager by identifier, with the clients assigned to them, as the "
+                    + "client list shows them, how many there are, and what they still owe in total.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Manager found",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,

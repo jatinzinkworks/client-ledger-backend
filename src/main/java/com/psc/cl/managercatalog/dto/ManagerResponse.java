@@ -1,13 +1,17 @@
 package com.psc.cl.managercatalog.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.psc.cl.client.dto.ClientSummaryResponse;
 import com.psc.cl.managercatalog.model.Manager;
 import com.psc.cl.managercatalog.model.ManagerRole;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.Value;
 
+import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -43,6 +47,17 @@ public class ManagerResponse {
             example = "12")
     Long clientCount;
 
+    @Schema(description = "What the manager's clients still owe: everything billed to all of their "
+            + "companies less every payment received, across all financial years. Negative when they "
+            + "have paid more than billed. Returned when listing managers and when fetching one by id",
+            example = "20630.00")
+    BigDecimal totalPending;
+
+    @ArraySchema(arraySchema = @Schema(description = "Clients assigned to the manager, ordered by last name "
+            + "then first name, as the client list shows them. Returned when fetching a manager by id"),
+            schema = @Schema(implementation = ClientSummaryResponse.class))
+    List<ClientSummaryResponse> clients;
+
     @Schema(description = "When the manager was added", example = "2026-10-01T10:15:30Z")
     Instant createdAt;
 
@@ -60,14 +75,34 @@ public class ManagerResponse {
     }
 
     /**
-     * Maps a persisted entity onto its API representation, including how many clients it has.
+     * Maps a persisted entity onto its API representation, including how many clients it has and
+     * what they still owe.
      *
-     * @param entity      the stored manager
-     * @param clientCount how many clients are assigned to the manager
+     * @param entity       the stored manager
+     * @param clientCount  how many clients are assigned to the manager
+     * @param totalPending what those clients still owe, across all financial years
      * @return the response payload
      */
-    public static ManagerResponse from(Manager entity, long clientCount) {
-        return builderFrom(entity).clientCount(clientCount).build();
+    public static ManagerResponse from(Manager entity, long clientCount, BigDecimal totalPending) {
+        return builderFrom(entity).clientCount(clientCount).totalPending(totalPending).build();
+    }
+
+    /**
+     * Maps a persisted entity onto its API representation, including its clients and what they
+     * still owe. The client count is the number of clients listed.
+     *
+     * @param entity       the stored manager
+     * @param clients      the clients assigned to the manager
+     * @param totalPending what those clients still owe, across all financial years
+     * @return the response payload
+     */
+    public static ManagerResponse from(Manager entity, List<ClientSummaryResponse> clients,
+                                       BigDecimal totalPending) {
+        return builderFrom(entity)
+                .clientCount((long) clients.size())
+                .totalPending(totalPending)
+                .clients(clients)
+                .build();
     }
 
     private static ManagerResponseBuilder builderFrom(Manager entity) {

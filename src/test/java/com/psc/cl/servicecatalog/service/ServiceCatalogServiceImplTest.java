@@ -8,10 +8,17 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.psc.cl.ledger.model.FinancialYear;
+import com.psc.cl.ledger.service.FinancialYears;
+import com.psc.cl.ledger.service.LedgerService;
 import com.psc.cl.servicecatalog.dto.CatalogServiceRequest;
 import com.psc.cl.servicecatalog.dto.CatalogServiceResponse;
 import com.psc.cl.servicecatalog.dto.InvoiceSchedule;
+import com.psc.cl.servicecatalog.dto.ServiceFeeBulkUpdateRequest;
+import com.psc.cl.servicecatalog.dto.ServiceFeeUpdate;
 import com.psc.cl.servicecatalog.exception.CatalogServiceNotFoundException;
+import com.psc.cl.servicecatalog.exception.CatalogServicesNotFoundException;
+import com.psc.cl.servicecatalog.exception.DuplicateServiceFeeUpdateException;
 import com.psc.cl.servicecatalog.exception.ServiceInUseException;
 import com.psc.cl.servicecatalog.exception.ServiceNameAlreadyExistsException;
 import com.psc.cl.servicecatalog.model.BillingFrequency;
@@ -33,7 +40,9 @@ import org.springframework.data.domain.Sort;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @ExtendWith(MockitoExtension.class)
@@ -41,6 +50,9 @@ class ServiceCatalogServiceImplTest {
 
     @Mock
     private CatalogServiceRepository catalogServiceRepository;
+
+    @Mock
+    private LedgerService ledgerService;
 
     @InjectMocks
     private ServiceCatalogServiceImpl serviceCatalogService;
@@ -241,7 +253,7 @@ class ServiceCatalogServiceImplTest {
     void listsCatalogOrderedByName() {
         when(catalogServiceRepository.findAll(any(Sort.class))).thenReturn(List.of(stored()));
 
-        List<CatalogServiceResponse> services = serviceCatalogService.listServices();
+        List<CatalogServiceResponse> services = serviceCatalogService.listServices(null);
 
         assertThat(services).hasSize(1);
         assertThat(services.getFirst().getServiceName()).isEqualTo("GST Monthly Return Filing");
@@ -256,7 +268,46 @@ class ServiceCatalogServiceImplTest {
     void listsEmptyCatalog() {
         when(catalogServiceRepository.findAll(any(Sort.class))).thenReturn(List.of());
 
-        assertThat(serviceCatalogService.listServices()).isEmpty();
+        assertThat(serviceCatalogService.listServices(null)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("without a financial year, adds what each service was billed across every year to date")
+    void listsCatalogWithBilledToDate() {
+        CatalogService monthly = stored();
+        CatalogService audit = stored();
+        audit.setServiceName("Annual Audit");
+        when(catalogServiceRepository.findAll(any(Sort.class))).thenReturn(List.of(audit, monthly));
+        when(ledgerService.billedByCatalogServiceToDate())
+                .thenReturn(Map.of(monthly.getId(), new BigDecimal("61650.00")));
+
+        List<CatalogServiceResponse> services = serviceCatalogService.listServices(null);
+
+        assertThat(services).extracting(CatalogServiceResponse::getTotalBilled)
+                .containsExactly(new BigDecimal("0.00"), new BigDecimal("61650.00"));
+        // No single year is covered.
+        assertThat(services).extracting(CatalogServiceResponse::getFinancialYear).containsOnlyNulls();
+        verify(ledgerService, never()).billedByCatalogService(any());
+    }
+
+    @Test
+    @DisplayName("adds what each service was billed in a financial year across every client, zero when nothing")
+    void listsCatalogWithFinancialYearBilled() {
+        CatalogService monthly = stored();
+        CatalogService audit = stored();
+        audit.setServiceName("Annual Audit");
+        when(catalogServiceRepository.findAll(any(Sort.class))).thenReturn(List.of(audit, monthly));
+        FinancialYear year = FinancialYears.parse("2026-27");
+        // Nothing fell due for the audit, so the ledger has no amount for it.
+        when(ledgerService.billedByCatalogService(year))
+                .thenReturn(Map.of(monthly.getId(), new BigDecimal("39235.00")));
+
+        List<CatalogServiceResponse> services = serviceCatalogService.listServices(year);
+
+        assertThat(services).extracting(CatalogServiceResponse::getFinancialYear)
+                .containsExactly("2026-27", "2026-27");
+        assertThat(services).extracting(CatalogServiceResponse::getTotalBilled)
+                .containsExactly(new BigDecimal("0.00"), new BigDecimal("39235.00"));
     }
 
     @Test
@@ -385,6 +436,66 @@ class ServiceCatalogServiceImplTest {
                 .isInstanceOf(CatalogServiceNotFoundException.class);
 
         verify(catalogServiceRepository, never()).delete(any());
+    }
+
+    @Test
+    @DisplayName("changes only the fees of the services named, returning them in the order named")
+    void updatesFees() {
+        CatalogService monthly = stored();
+        CatalogService audit = stored();
+        audit.setServiceName("Annual Audit");
+        audit.setStandardFee(new BigDecimal("25000.00"));
+        when(catalogServiceRepository.findAllById(Set.of(monthly.getId(), audit.getId())))
+                .thenReturn(List.of(monthly, audit));
+
+        List<CatalogServiceResponse> updated = serviceCatalogService.updateFees(new ServiceFeeBulkUpdateRequest(
+                List.of(feeUpdate(audit.getId(), "27500.00"), feeUpdate(monthly.getId(), "5500.00"))));
+
+        assertThat(updated).extracting(CatalogServiceResponse::getId).containsExactly(audit.getId(), monthly.getId());
+        assertThat(updated).extracting(CatalogServiceResponse::getStandardFee)
+                .containsExactly(new BigDecimal("27500.00"), new BigDecimal("5500.00"));
+        assertThat(monthly.getStandardFee()).isEqualTo(new BigDecimal("5500.00"));
+        // Nothing else about the service changes.
+        assertThat(monthly.getServiceName()).isEqualTo("GST Monthly Return Filing");
+        assertThat(monthly.getGstRatePercent()).isEqualTo(new BigDecimal("18.00"));
+        assertThat(monthly.getBillingFrequency()).isEqualTo(BillingFrequency.MONTHLY);
+        verify(catalogServiceRepository).flush();
+    }
+
+    @Test
+    @DisplayName("changes no fee when any service named is unknown, reporting every unknown id")
+    void updateFeesRejectsUnknownServices() {
+        CatalogService monthly = stored();
+        UUID firstMissing = UUID.randomUUID();
+        UUID secondMissing = UUID.randomUUID();
+        when(catalogServiceRepository.findAllById(any())).thenReturn(List.of(monthly));
+
+        assertThatThrownBy(() -> serviceCatalogService.updateFees(new ServiceFeeBulkUpdateRequest(List.of(
+                feeUpdate(firstMissing, "100.00"), feeUpdate(monthly.getId(), "5500.00"),
+                feeUpdate(secondMissing, "200.00")))))
+                .isInstanceOf(CatalogServicesNotFoundException.class)
+                .hasMessageContaining(firstMissing.toString())
+                .hasMessageContaining(secondMissing.toString());
+
+        assertThat(monthly.getStandardFee()).isEqualTo(new BigDecimal("5000.00"));
+        verify(catalogServiceRepository, never()).flush();
+    }
+
+    @Test
+    @DisplayName("rejects a fee update naming the same service twice, before reading anything")
+    void updateFeesRejectsRepeatedService() {
+        UUID id = UUID.randomUUID();
+
+        assertThatThrownBy(() -> serviceCatalogService.updateFees(new ServiceFeeBulkUpdateRequest(List.of(
+                feeUpdate(id, "100.00"), feeUpdate(id, "200.00")))))
+                .isInstanceOf(DuplicateServiceFeeUpdateException.class)
+                .hasMessageContaining(id.toString());
+
+        verify(catalogServiceRepository, never()).findAllById(any());
+    }
+
+    private static ServiceFeeUpdate feeUpdate(UUID serviceId, String fee) {
+        return new ServiceFeeUpdate(serviceId, new BigDecimal(fee));
     }
 
     private CatalogService stored() {

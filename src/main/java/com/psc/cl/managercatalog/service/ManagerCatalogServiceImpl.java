@@ -2,6 +2,8 @@ package com.psc.cl.managercatalog.service;
 
 import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.client.repository.ClientRepository.ManagerClientCount;
+import com.psc.cl.client.service.ClientService;
+import com.psc.cl.ledger.service.LedgerService;
 import com.psc.cl.managercatalog.dto.ManagerRequest;
 import com.psc.cl.managercatalog.dto.ManagerResponse;
 import com.psc.cl.managercatalog.exception.ManagerEmailAlreadyExistsException;
@@ -17,6 +19,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -33,9 +36,16 @@ public class ManagerCatalogServiceImpl implements ManagerCatalogService {
 
     private static final Sort BY_NAME = Sort.by(Sort.Direction.ASC, "lastName", "firstName");
 
+    /** What the clients of a manager with no ledger entries owe, at the ledger's scale. */
+    private static final BigDecimal NOTHING_PENDING = new BigDecimal("0.00");
+
     private final ManagerRepository managerRepository;
 
     private final ClientRepository clientRepository;
+
+    private final LedgerService ledgerService;
+
+    private final ClientService clientService;
 
     @Override
     @Transactional
@@ -57,18 +67,22 @@ public class ManagerCatalogServiceImpl implements ManagerCatalogService {
     @Override
     @Transactional(readOnly = true)
     public ManagerResponse getManager(UUID id) {
-        return ManagerResponse.from(require(id), clientRepository.countByManagerId(id));
+        Manager manager = require(id);
+        // The client list's own entries, so they read the same here as there.
+        return ManagerResponse.from(manager, clientService.listClients(id), ledgerService.pendingForManager(id));
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<ManagerResponse> listManagers() {
-        // One grouped query for every manager's client count, rather than one per manager.
+        // One grouped query each for every manager's client count and pending, rather than one per manager.
         Map<UUID, Long> clientCounts = clientRepository.countClientsByManager().stream()
                 .collect(Collectors.toMap(ManagerClientCount::getManagerId, ManagerClientCount::getClientCount));
+        Map<UUID, BigDecimal> pending = ledgerService.pendingByManager();
 
         return managerRepository.findAll(BY_NAME).stream()
-                .map(manager -> ManagerResponse.from(manager, clientCounts.getOrDefault(manager.getId(), 0L)))
+                .map(manager -> ManagerResponse.from(manager, clientCounts.getOrDefault(manager.getId(), 0L),
+                        pending.getOrDefault(manager.getId(), NOTHING_PENDING)))
                 .toList();
     }
 

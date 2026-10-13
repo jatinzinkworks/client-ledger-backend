@@ -15,10 +15,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.psc.cl.ledger.service.FinancialYears;
 import com.psc.cl.servicecatalog.dto.CatalogServiceRequest;
 import com.psc.cl.servicecatalog.dto.CatalogServiceResponse;
 import com.psc.cl.servicecatalog.dto.InvoiceSchedule;
+import com.psc.cl.servicecatalog.dto.ServiceFeeBulkUpdateRequest;
+import com.psc.cl.servicecatalog.dto.ServiceFeeUpdate;
 import com.psc.cl.servicecatalog.exception.CatalogServiceNotFoundException;
+import com.psc.cl.servicecatalog.exception.CatalogServicesNotFoundException;
+import com.psc.cl.servicecatalog.exception.DuplicateServiceFeeUpdateException;
 import com.psc.cl.servicecatalog.exception.ServiceInUseException;
 import com.psc.cl.servicecatalog.exception.ServiceNameAlreadyExistsException;
 import com.psc.cl.servicecatalog.model.BillingFrequency;
@@ -360,7 +365,7 @@ class ServiceCatalogControllerTest {
     @Test
     @DisplayName("returns 200 with the catalog on list")
     void listsServices() throws Exception {
-        when(serviceCatalogService.listServices()).thenReturn(List.of(monthlyResponse()));
+        when(serviceCatalogService.listServices(null)).thenReturn(List.of(monthlyResponse()));
 
         mockMvc.perform(get(SERVICES_URL))
                 .andExpect(status().isOk())
@@ -371,9 +376,52 @@ class ServiceCatalogControllerTest {
     }
 
     @Test
+    @DisplayName("passes the financial year through and returns what each service was billed in it")
+    void listsServicesForFinancialYear() throws Exception {
+        CatalogServiceResponse listed = CatalogServiceResponse.builder()
+                .id(UUID.randomUUID())
+                .serviceName("GST Monthly Return Filing")
+                .financialYear("2026-27")
+                .totalBilled(new BigDecimal("39235.00"))
+                .build();
+        when(serviceCatalogService.listServices(FinancialYears.parse("2026-27"))).thenReturn(List.of(listed));
+
+        mockMvc.perform(get(SERVICES_URL).param("financialYear", "2026-27"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].financialYear").value("2026-27"))
+                .andExpect(jsonPath("$[0].totalBilled").value(39235.0));
+    }
+
+    @Test
+    @DisplayName("returns 400 when the catalog's financial year is not written as yyyy-yy")
+    void listServicesRejectsMalformedFinancialYear() throws Exception {
+        mockMvc.perform(get(SERVICES_URL).param("financialYear", "2026"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+
+        verify(serviceCatalogService, never()).listServices(any());
+    }
+
+    @Test
+    @DisplayName("returns what each service was billed to date when no financial year is given")
+    void listsServicesBilledToDate() throws Exception {
+        CatalogServiceResponse listed = CatalogServiceResponse.builder()
+                .id(UUID.randomUUID())
+                .serviceName("GST Monthly Return Filing")
+                .totalBilled(new BigDecimal("61650.00"))
+                .build();
+        when(serviceCatalogService.listServices(null)).thenReturn(List.of(listed));
+
+        mockMvc.perform(get(SERVICES_URL))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].totalBilled").value(61650.0))
+                .andExpect(jsonPath("$[0].financialYear").doesNotExist());
+    }
+
+    @Test
     @DisplayName("returns 200 with an empty array when the catalog is empty")
     void listsEmptyCatalog() throws Exception {
-        when(serviceCatalogService.listServices()).thenReturn(List.of());
+        when(serviceCatalogService.listServices(null)).thenReturn(List.of());
 
         mockMvc.perform(get(SERVICES_URL))
                 .andExpect(status().isOk())
@@ -445,6 +493,88 @@ class ServiceCatalogControllerTest {
                                   "standardFee": 5000.00,
                                   "invoiceSchedule": { "dayOfMonth": 7 }
                                 }"""))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+    }
+
+    @Test
+    @DisplayName("returns 200 with the updated services on a bulk fee update, passing every fee through")
+    void updatesFees() throws Exception {
+        UUID first = UUID.randomUUID();
+        UUID second = UUID.randomUUID();
+        CatalogServiceResponse updated = monthlyResponse();
+        when(serviceCatalogService.updateFees(new ServiceFeeBulkUpdateRequest(List.of(
+                new ServiceFeeUpdate(first, new BigDecimal("5500.00")),
+                new ServiceFeeUpdate(second, new BigDecimal("0"))))))
+                .thenReturn(List.of(updated));
+
+        mockMvc.perform(put(SERVICES_URL + "/fees")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "updates": [
+                                    { "serviceId": "%s", "standardFee": 5500.00 },
+                                    { "serviceId": "%s", "standardFee": 0 }
+                                  ]
+                                }""".formatted(first, second)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value(updated.getId().toString()));
+    }
+
+    @Test
+    @DisplayName("returns 400 for a bulk fee update with no services, or with a missing, negative or over-precise fee")
+    void updateFeesRejectsInvalidBody() throws Exception {
+        mockMvc.perform(put(SERVICES_URL + "/fees")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{ \"updates\": [] }"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[*].field", hasItem("updates")));
+
+        mockMvc.perform(put(SERVICES_URL + "/fees")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "updates": [
+                                    { "serviceId": "%s" },
+                                    { "serviceId": "%s", "standardFee": -1 },
+                                    { "standardFee": 10.005 }
+                                  ]
+                                }""".formatted(UUID.randomUUID(), UUID.randomUUID())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[*].field", hasItem("updates[0].standardFee")))
+                .andExpect(jsonPath("$.errors[*].field", hasItem("updates[1].standardFee")))
+                .andExpect(jsonPath("$.errors[*].field", hasItem("updates[2].serviceId")))
+                .andExpect(jsonPath("$.errors[*].field", hasItem("updates[2].standardFee")));
+
+        verify(serviceCatalogService, never()).updateFees(any());
+    }
+
+    @Test
+    @DisplayName("returns 400 when a bulk fee update names a service twice")
+    void updateFeesRejectsRepeatedService() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(serviceCatalogService.updateFees(any())).thenThrow(new DuplicateServiceFeeUpdateException(List.of(id)));
+
+        mockMvc.perform(put(SERVICES_URL + "/fees")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "updates": [ { "serviceId": "%1$s", "standardFee": 1 },
+                                               { "serviceId": "%1$s", "standardFee": 2 } ] }""".formatted(id)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+    }
+
+    @Test
+    @DisplayName("returns 404 when a bulk fee update names an unknown service")
+    void updateFeesReturnsNotFound() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(serviceCatalogService.updateFees(any())).thenThrow(new CatalogServicesNotFoundException(List.of(id)));
+
+        mockMvc.perform(put(SERVICES_URL + "/fees")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "updates": [ { "serviceId": "%s", "standardFee": 1 } ] }""".formatted(id)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
     }

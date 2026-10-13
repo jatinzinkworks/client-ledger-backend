@@ -25,6 +25,7 @@ import com.psc.cl.client.exception.AssignedServiceNotFoundException;
 import com.psc.cl.client.exception.CompanyNotFoundException;
 import com.psc.cl.client.exception.ServiceAssignmentNotFoundException;
 import com.psc.cl.client.service.ServiceAssignmentService;
+import com.psc.cl.ledger.service.FinancialYears;
 import com.psc.cl.servicecatalog.model.BillingFrequency;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -193,7 +194,7 @@ class ServiceAssignmentControllerTest {
     void listsServices() throws Exception {
         UUID first = UUID.randomUUID();
         UUID second = UUID.randomUUID();
-        when(serviceAssignmentService.listServices(CLIENT_ID, COMPANY_ID))
+        when(serviceAssignmentService.listServices(CLIENT_ID, COMPANY_ID, null))
                 .thenReturn(List.of(response(first), response(second)));
 
         mockMvc.perform(get(SERVICES_URL))
@@ -207,9 +208,39 @@ class ServiceAssignmentControllerTest {
     }
 
     @Test
+    @DisplayName("passes the financial year through and returns what each service was billed in it")
+    void listsServicesForFinancialYear() throws Exception {
+        UUID id = UUID.randomUUID();
+        ServiceAssignmentResponse listed = ServiceAssignmentResponse.builder()
+                .id(id)
+                .serviceName("GST Monthly Return Filing")
+                .financialYear("2026-27")
+                .totalBilled(new BigDecimal("11210.00"))
+                .build();
+        when(serviceAssignmentService.listServices(CLIENT_ID, COMPANY_ID, FinancialYears.parse("2026-27")))
+                .thenReturn(List.of(listed));
+
+        mockMvc.perform(get(SERVICES_URL).param("financialYear", "2026-27"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(id.toString()))
+                .andExpect(jsonPath("$[0].financialYear").value("2026-27"))
+                .andExpect(jsonPath("$[0].totalBilled").value(11210.0));
+    }
+
+    @Test
+    @DisplayName("returns 400 when the services' financial year is not written as yyyy-yy")
+    void listServicesRejectsMalformedFinancialYear() throws Exception {
+        mockMvc.perform(get(SERVICES_URL).param("financialYear", "2026"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+
+        verify(serviceAssignmentService, never()).listServices(any(), any(), any());
+    }
+
+    @Test
     @DisplayName("returns 200 with an empty array when the company has no services")
     void listsNoServices() throws Exception {
-        when(serviceAssignmentService.listServices(CLIENT_ID, COMPANY_ID)).thenReturn(List.of());
+        when(serviceAssignmentService.listServices(CLIENT_ID, COMPANY_ID, null)).thenReturn(List.of());
 
         mockMvc.perform(get(SERVICES_URL))
                 .andExpect(status().isOk())
@@ -220,7 +251,7 @@ class ServiceAssignmentControllerTest {
     @Test
     @DisplayName("returns 404 when listing services of a company the client does not hold")
     void listReturnsNotFoundForUnknownCompany() throws Exception {
-        when(serviceAssignmentService.listServices(CLIENT_ID, COMPANY_ID))
+        when(serviceAssignmentService.listServices(CLIENT_ID, COMPANY_ID, null))
                 .thenThrow(new CompanyNotFoundException(CLIENT_ID, COMPANY_ID));
 
         mockMvc.perform(get(SERVICES_URL))

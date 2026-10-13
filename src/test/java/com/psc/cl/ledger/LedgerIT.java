@@ -2,6 +2,7 @@ package com.psc.cl.ledger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.everyItem;
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.is;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -18,6 +19,7 @@ import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.client.repository.ServiceAssignmentRepository;
 import com.psc.cl.config.ApiPaths;
 import com.psc.cl.ledger.repository.LedgerEntryRepository;
+import com.psc.cl.managercatalog.controller.ManagerCatalogApi;
 import com.psc.cl.managercatalog.model.Manager;
 import com.psc.cl.managercatalog.model.ManagerRole;
 import com.psc.cl.managercatalog.repository.ManagerRepository;
@@ -86,10 +88,12 @@ class LedgerIT extends AbstractPostgresIT {
     /** Billed once, for 25000.00 at the default 18% GST. */
     private String oneOffServiceId;
 
+    private UUID managerId;
+
     @BeforeEach
     void setUp() throws Exception {
         clearAll();
-        UUID managerId = createManager();
+        managerId = createManager();
         monthlyServiceId = createCatalogService("GST Monthly Return Filing", "5000.00",
                 "\"billingFrequency\": \"MONTHLY\", \"invoiceSchedule\": { \"dayOfMonth\": 7 }");
         oneOffServiceId = createCatalogService("Company Incorporation", "25000.00",
@@ -740,6 +744,68 @@ class LedgerIT extends AbstractPostgresIT {
                 .andExpect(jsonPath("$[0].totalBilled").doesNotExist())
                 .andExpect(jsonPath("$[0].financialYear").doesNotExist());
         mockMvc.perform(get(companies).param("financialYear", "26-27"))
+                .andExpect(status().isBadRequest());
+
+        // The client, fetched or listed, carries what they still owe across every company and year.
+        mockMvc.perform(get(ClientApi.BASE_PATH + "/" + clientId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalPending").value(19630.0));
+        mockMvc.perform(get(ClientApi.BASE_PATH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.id == '%s')].totalPending".formatted(clientId), hasItem(19630.0)));
+
+        // The manager carries what all their clients still owe, across every year: 39235.00 billed
+        // less 18605.00 received this year and the 1000.00 received in March.
+        mockMvc.perform(get(ManagerCatalogApi.BASE_PATH + "/" + managerId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.clientCount").value(1))
+                .andExpect(jsonPath("$.totalPending").value(19630.0))
+                .andExpect(jsonPath("$.clients.length()").value(1))
+                .andExpect(jsonPath("$.clients[0].id").value(clientId))
+                .andExpect(jsonPath("$.clients[0].companyNames.length()").value(2))
+                .andExpect(jsonPath("$.clients[0].totalPending").value(19630.0));
+        mockMvc.perform(get(ManagerCatalogApi.BASE_PATH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.id == '%s')].totalPending".formatted(managerId), hasItem(19630.0)));
+
+        // The catalog carries what each service was billed in the year across every client.
+        mockMvc.perform(get(ServiceCatalogApi.BASE_PATH).param("financialYear", "2026-27"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].financialYear", everyItem(is("2026-27"))))
+                .andExpect(jsonPath("$[?(@.id == '%s')].totalBilled".formatted(monthlyServiceId), hasItem(11210.0)))
+                .andExpect(jsonPath("$[?(@.id == '%s')].totalBilled".formatted(oneOffServiceId), hasItem(28025.0)));
+        mockMvc.perform(get(ServiceCatalogApi.BASE_PATH).param("financialYear", "2025-26"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.id == '%s')].totalBilled".formatted(monthlyServiceId), hasItem(0.0)));
+        // Without a year, every charge to date: no charges fell due before 2026-27 here.
+        mockMvc.perform(get(ServiceCatalogApi.BASE_PATH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].financialYear").doesNotExist())
+                .andExpect(jsonPath("$[?(@.id == '%s')].totalBilled".formatted(monthlyServiceId), hasItem(11210.0)))
+                .andExpect(jsonPath("$[?(@.id == '%s')].totalBilled".formatted(oneOffServiceId), hasItem(28025.0)));
+        mockMvc.perform(get(ServiceCatalogApi.BASE_PATH).param("financialYear", "26-27"))
+                .andExpect(status().isBadRequest());
+
+        // Each company's services carry what they were billed in the year asked for.
+        String textilesServices = ClientApi.BASE_PATH + "/" + clientId + "/companies/" + companyId + "/services";
+        mockMvc.perform(get(textilesServices).param("financialYear", "2026-27"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].financialYear").value("2026-27"))
+                // 7 September and 7 October, 5605.00 each; payments are not counted.
+                .andExpect(jsonPath("$[0].totalBilled").value(11210.0));
+        mockMvc.perform(get(ClientApi.BASE_PATH + "/" + clientId + "/companies/" + hufId + "/services")
+                        .param("financialYear", "2026-27"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].totalBilled").value(28025.0));
+        mockMvc.perform(get(textilesServices).param("financialYear", "2025-26"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].totalBilled").value(0.0));
+        mockMvc.perform(get(textilesServices))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].totalBilled").doesNotExist())
+                .andExpect(jsonPath("$[0].financialYear").doesNotExist());
+        mockMvc.perform(get(textilesServices).param("financialYear", "26-27"))
                 .andExpect(status().isBadRequest());
 
         // The export holds the same year: the summary's figures, and every entry with its totals.

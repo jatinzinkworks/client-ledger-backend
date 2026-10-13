@@ -16,6 +16,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.psc.cl.client.dto.ClientSummaryResponse;
 import com.psc.cl.managercatalog.dto.ManagerRequest;
 import com.psc.cl.managercatalog.dto.ManagerResponse;
 import com.psc.cl.managercatalog.exception.ManagerEmailAlreadyExistsException;
@@ -33,6 +34,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -173,12 +175,29 @@ class ManagerCatalogControllerTest {
     @DisplayName("returns 200 with the manager on fetch by id")
     void fetchesManagerById() throws Exception {
         UUID id = UUID.randomUUID();
-        when(managerCatalogService.getManager(id)).thenReturn(response());
+        when(managerCatalogService.getManager(id)).thenReturn(ManagerResponse.builder()
+                .id(id)
+                .email("pranay.singhal@pranaysinghal.in")
+                .clientCount(1L)
+                .totalPending(new BigDecimal("20630.00"))
+                .clients(List.of(ClientSummaryResponse.builder()
+                        .id(UUID.randomUUID())
+                        .firstName("Rohan")
+                        .lastName("Mehta")
+                        .companyNames(List.of("Mehta Textiles Pvt Ltd"))
+                        .totalPending(new BigDecimal("20630.00"))
+                        .build()))
+                .build());
 
         mockMvc.perform(get(MANAGERS_URL + "/" + id))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.email").value("pranay.singhal@pranaysinghal.in"))
-                .andExpect(jsonPath("$.clientCount").value(3));
+                .andExpect(jsonPath("$.clientCount").value(1))
+                .andExpect(jsonPath("$.totalPending").value(20630.0))
+                .andExpect(jsonPath("$.clients.length()").value(1))
+                .andExpect(jsonPath("$.clients[0].lastName").value("Mehta"))
+                .andExpect(jsonPath("$.clients[0].companyNames[0]").value("Mehta Textiles Pvt Ltd"))
+                .andExpect(jsonPath("$.clients[0].totalPending").value(20630.0));
     }
 
     @Test
@@ -211,7 +230,10 @@ class ManagerCatalogControllerTest {
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].lastName").value("Singhal"))
-                .andExpect(jsonPath("$[0].clientCount").value(3));
+                .andExpect(jsonPath("$[0].clientCount").value(3))
+                .andExpect(jsonPath("$[0].totalPending").value(20630.0))
+                // The client list is only returned when fetching one manager.
+                .andExpect(jsonPath("$[0].clients").doesNotExist());
     }
 
     @Test
@@ -334,6 +356,7 @@ class ManagerCatalogControllerTest {
                 .role(ManagerRole.SENIOR_MANAGER)
                 .mobileNumber("+91 98765 43210")
                 .clientCount(3L)
+                .totalPending(new BigDecimal("20630.00"))
                 .createdAt(now)
                 .updatedAt(now)
                 .build();

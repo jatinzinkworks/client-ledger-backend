@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 
 import java.util.List;
 import java.util.UUID;
@@ -80,14 +81,19 @@ public interface ServiceAssignmentApi {
     @Operation(
             summary = "List the services of a company",
             description = "Returns every service assigned to one company of the client, most recent "
-                    + "delivery first. The list is returned whole; it is not paged.")
+                    + "delivery first. The list is returned whole; it is not paged. Given a financialYear, "
+                    + "each service also carries what it was billed in that year (totalBilled): the sum of "
+                    + "its service charges in the ledger falling due in the year, GST included, or zero when "
+                    + "none did. Without one, those fields are left out.")
     @ApiResponses({
             @ApiResponse(responseCode = "200",
                     description = "The company's services, empty when none has been assigned",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             array = @ArraySchema(
                                     schema = @Schema(implementation = ServiceAssignmentResponse.class)))),
-            @ApiResponse(responseCode = "400", description = "An identifier is not a valid UUID",
+            @ApiResponse(responseCode = "400",
+                    description = "An identifier is not a valid UUID, or financialYear is not a year such "
+                            + "as 2026-27",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "404",
@@ -104,7 +110,10 @@ public interface ServiceAssignmentApi {
             @PathVariable UUID clientId,
             @Parameter(description = "Identifier of the company", required = true,
                     example = "4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28")
-            @PathVariable UUID companyId);
+            @PathVariable UUID companyId,
+            @Parameter(description = "Indian financial year (1 April to 31 March), written as yyyy-yy, to "
+                    + "add each service's billed amount for. Omit to leave it out", example = "2026-27")
+            @RequestParam(required = false) String financialYear);
 
     @Operation(summary = "Fetch a service of a company",
             description = "Returns one service assigned to a company of the client.")

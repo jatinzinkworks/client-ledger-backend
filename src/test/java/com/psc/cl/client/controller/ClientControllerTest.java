@@ -236,7 +236,8 @@ class ClientControllerTest {
                 .andExpect(jsonPath("$.email").value("rohan.mehta@example.com"))
                 .andExpect(jsonPath("$.managerName").value("Pranay Singhal"))
                 .andExpect(jsonPath("$.companies[0].companyType").value("PRIVATE_LIMITED"))
-                .andExpect(jsonPath("$.companies[0].address").value("12 MG Road, Bengaluru, Karnataka 560001"));
+                .andExpect(jsonPath("$.companies[0].address").value("12 MG Road, Bengaluru, Karnataka 560001"))
+                .andExpect(jsonPath("$.totalPending").value(19630.0));
     }
 
     @Test
@@ -271,6 +272,7 @@ class ClientControllerTest {
                 .managerId(UUID.fromString(MANAGER_ID))
                 .managerName("Pranay Singhal")
                 .companyNames(List.of("Mehta Textiles Pvt Ltd", "Rohan Mehta HUF"))
+                .totalPending(new BigDecimal("19630.00"))
                 .build()));
 
         mockMvc.perform(get(CLIENTS_URL))
@@ -279,6 +281,7 @@ class ClientControllerTest {
                 .andExpect(jsonPath("$[0].managerName").value("Pranay Singhal"))
                 .andExpect(jsonPath("$[0].companyNames[0]").value("Mehta Textiles Pvt Ltd"))
                 .andExpect(jsonPath("$[0].companyNames[1]").value("Rohan Mehta HUF"))
+                .andExpect(jsonPath("$[0].totalPending").value(19630.0))
                 .andExpect(jsonPath("$[0].companies").doesNotExist());
     }
 
@@ -510,6 +513,7 @@ class ClientControllerTest {
                         .address("12 MG Road, Bengaluru, Karnataka 560001")
                         .discountPercent(new BigDecimal("5.00"))
                         .build()))
+                .totalPending(new BigDecimal("19630.00"))
                 .createdAt(now)
                 .updatedAt(now)
                 .build();

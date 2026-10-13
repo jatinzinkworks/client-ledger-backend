@@ -3,15 +3,17 @@ package com.psc.cl.ledger.service;
 import com.psc.cl.ledger.dto.ClientLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.CompanyBalance;
 import com.psc.cl.ledger.dto.CompanyLedgerSummaryResponse;
-import com.psc.cl.ledger.dto.LedgerExport;
 import com.psc.cl.ledger.dto.LedgerEntryResponse;
 import com.psc.cl.ledger.dto.LedgerEntryUpdateRequest;
+import com.psc.cl.ledger.dto.LedgerExport;
 import com.psc.cl.ledger.dto.LedgerListQuery;
 import com.psc.cl.ledger.dto.LedgerListResponse;
 import com.psc.cl.ledger.dto.PaymentListResponse;
 import com.psc.cl.ledger.dto.PaymentRequest;
 import com.psc.cl.ledger.model.FinancialYear;
 
+import java.math.BigDecimal;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -154,6 +156,67 @@ public interface LedgerService {
      *         exports, with zero totals and an empty ledger
      */
     LedgerExport exportCompany(UUID clientId, UUID companyId, FinancialYear financialYear);
+
+    /**
+     * What each of the given clients still owes: billed less received across all of their companies
+     * and every financial year. For other modules that show it alongside their own figures, such as
+     * the client list. The clients are not checked for existence.
+     *
+     * @param clientIds the clients to total
+     * @return the pending amount by client identifier; clients with no ledger entries are left out,
+     *         so callers should treat them as zero
+     */
+    Map<UUID, BigDecimal> pendingByClient(Collection<UUID> clientIds);
+
+    /**
+     * What the clients of each manager still owe: billed less received across all of their companies
+     * and every financial year. For the Manager Catalog, which shows it alongside each manager.
+     *
+     * @return the pending amount by manager identifier; managers whose clients have no ledger
+     *         entries are left out, so callers should treat them as zero
+     */
+    Map<UUID, BigDecimal> pendingByManager();
+
+    /**
+     * What the clients of one manager still owe, as {@link #pendingByManager()} gives for all.
+     *
+     * @param managerId the manager; not checked for existence
+     * @return billed less received, zero when the manager's clients have no ledger entries
+     */
+    BigDecimal pendingForManager(UUID managerId);
+
+    /**
+     * What each catalog service was billed in one financial year across every client: the sum of
+     * its service charges falling due in the year, GST included. For the Service Catalog, which
+     * shows it alongside each service.
+     *
+     * @param financialYear the financial year
+     * @return the amount billed by catalog service identifier; services with nothing billed in the
+     *         year are left out, so callers should treat them as zero
+     */
+    Map<UUID, BigDecimal> billedByCatalogService(FinancialYear financialYear);
+
+    /**
+     * What each catalog service has been billed to date across every client and every financial
+     * year: the sum of its service charges falling due on or before today, GST included.
+     *
+     * @return the amount billed by catalog service identifier; services never billed are left out,
+     *         so callers should treat them as zero
+     */
+    Map<UUID, BigDecimal> billedByCatalogServiceToDate();
+
+    /**
+     * What each service of one company was billed in one financial year: the sum of its service
+     * charges falling due in the year, GST included. For other modules that show this alongside their
+     * own figures, such as a company's list of services. The company is not checked for existence;
+     * the caller has already done so.
+     *
+     * @param companyId     the company
+     * @param financialYear the financial year
+     * @return the amount billed by company service (assignment) identifier; services with nothing
+     *         billed in the year are left out, so callers should treat them as zero
+     */
+    Map<UUID, BigDecimal> billedByService(UUID companyId, FinancialYear financialYear);
 
     /**
      * The balance of each company of a client for one financial year: billed, received and pending.

@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.psc.cl.client.dto.ServiceAssignmentRequest;
@@ -21,6 +22,9 @@ import com.psc.cl.client.model.ServiceAssignment;
 import com.psc.cl.client.repository.ClientCompanyRepository;
 import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.client.repository.ServiceAssignmentRepository;
+import com.psc.cl.ledger.model.FinancialYear;
+import com.psc.cl.ledger.service.FinancialYears;
+import com.psc.cl.ledger.service.LedgerService;
 import com.psc.cl.servicecatalog.model.BillingFrequency;
 import com.psc.cl.servicecatalog.model.CatalogService;
 import com.psc.cl.servicecatalog.model.QuarterInvoiceMonth;
@@ -39,6 +43,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -65,6 +70,9 @@ class ServiceAssignmentServiceImplTest {
 
     @Mock
     private CatalogServiceRepository catalogServiceRepository;
+
+    @Mock
+    private LedgerService ledgerService;
 
     @InjectMocks
     private ServiceAssignmentServiceImpl serviceAssignmentService;
@@ -245,7 +253,8 @@ class ServiceAssignmentServiceImplTest {
                 .thenReturn(List.of(october, september));
         when(catalogServiceRepository.findAllById(Set.of(SERVICE_ID))).thenReturn(List.of(catalogService()));
 
-        List<ServiceAssignmentResponse> services = serviceAssignmentService.listServices(CLIENT_ID, COMPANY_ID);
+        List<ServiceAssignmentResponse> services = serviceAssignmentService.listServices(CLIENT_ID, COMPANY_ID,
+                null);
 
         assertThat(services).extracting("id").containsExactly(october.getId(), september.getId());
         assertThat(services).allSatisfy(service -> {
@@ -254,7 +263,33 @@ class ServiceAssignmentServiceImplTest {
             assertThat(service.getGstRatePercent()).isEqualTo(new BigDecimal("18.00"));
             assertThat(service.getClientId()).isEqualTo(CLIENT_ID);
             assertThat(service.getCompanyId()).isEqualTo(COMPANY_ID);
+            // Without a financial year, no billed amount.
+            assertThat(service.getFinancialYear()).isNull();
+            assertThat(service.getTotalBilled()).isNull();
         });
+        verifyNoInteractions(ledgerService);
+    }
+
+    @Test
+    @DisplayName("adds what each service was billed in a financial year, zero when nothing fell due")
+    void listsServicesWithFinancialYearBilled() {
+        stubCompany();
+        ServiceAssignment october = assignment(LocalDate.of(2026, 10, 15));
+        ServiceAssignment september = assignment(LocalDate.of(2026, 9, 15));
+        when(serviceAssignmentRepository.findByCompanyIdOrderByDeliveryDateDescCreatedAtDesc(COMPANY_ID))
+                .thenReturn(List.of(october, september));
+        when(catalogServiceRepository.findAllById(Set.of(SERVICE_ID))).thenReturn(List.of(catalogService()));
+        FinancialYear year = FinancialYears.parse("2026-27");
+        // October's service has not fallen due yet, so the ledger has nothing for it.
+        when(ledgerService.billedByService(COMPANY_ID, year))
+                .thenReturn(Map.of(september.getId(), new BigDecimal("11210.00")));
+
+        List<ServiceAssignmentResponse> services = serviceAssignmentService.listServices(CLIENT_ID, COMPANY_ID,
+                year);
+
+        assertThat(services).extracting("financialYear").containsExactly("2026-27", "2026-27");
+        assertThat(services).extracting("totalBilled")
+                .containsExactly(new BigDecimal("0.00"), new BigDecimal("11210.00"));
     }
 
     @Test
@@ -264,7 +299,7 @@ class ServiceAssignmentServiceImplTest {
         when(serviceAssignmentRepository.findByCompanyIdOrderByDeliveryDateDescCreatedAtDesc(COMPANY_ID))
                 .thenReturn(List.of());
 
-        assertThat(serviceAssignmentService.listServices(CLIENT_ID, COMPANY_ID)).isEmpty();
+        assertThat(serviceAssignmentService.listServices(CLIENT_ID, COMPANY_ID, null)).isEmpty();
     }
 
     @Test
@@ -273,8 +308,11 @@ class ServiceAssignmentServiceImplTest {
         when(clientRepository.existsById(CLIENT_ID)).thenReturn(true);
         when(clientCompanyRepository.findByIdAndClientId(COMPANY_ID, CLIENT_ID)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> serviceAssignmentService.listServices(CLIENT_ID, COMPANY_ID))
+        assertThatThrownBy(() -> serviceAssignmentService.listServices(CLIENT_ID, COMPANY_ID,
+                FinancialYears.parse("2026-27")))
                 .isInstanceOf(CompanyNotFoundException.class);
+
+        verifyNoInteractions(ledgerService);
     }
 
     @Test

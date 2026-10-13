@@ -4,6 +4,8 @@ import com.psc.cl.client.dto.ServiceAssignmentRequest;
 import com.psc.cl.client.dto.ServiceAssignmentResponse;
 import com.psc.cl.client.dto.ServiceAssignmentUpdateRequest;
 import com.psc.cl.client.service.ServiceAssignmentService;
+import com.psc.cl.ledger.model.FinancialYear;
+import com.psc.cl.ledger.service.FinancialYears;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,9 +40,12 @@ public class ServiceAssignmentController implements ServiceAssignmentApi {
     }
 
     @Override
-    public ResponseEntity<List<ServiceAssignmentResponse>> listServices(UUID clientId, UUID companyId) {
-        log.debug("Received request to list services of company {} of client {}", companyId, clientId);
-        return ResponseEntity.ok(serviceAssignmentService.listServices(clientId, companyId));
+    public ResponseEntity<List<ServiceAssignmentResponse>> listServices(UUID clientId, UUID companyId,
+                                                                        String financialYear) {
+        log.debug("Received request to list services of company {} of client {} for FY {}", companyId, clientId,
+                financialYear);
+        FinancialYear year = financialYear == null ? null : FinancialYears.parse(financialYear);
+        return ResponseEntity.ok(serviceAssignmentService.listServices(clientId, companyId, year));
     }
 
     @Override

@@ -4,6 +4,7 @@ import com.psc.cl.config.ApiPaths;
 import com.psc.cl.dto.ErrorResponse;
 import com.psc.cl.servicecatalog.dto.CatalogServiceRequest;
 import com.psc.cl.servicecatalog.dto.CatalogServiceResponse;
+import com.psc.cl.servicecatalog.dto.ServiceFeeBulkUpdateRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
@@ -22,6 +23,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 
 import java.util.List;
 import java.util.UUID;
@@ -39,6 +41,9 @@ public interface ServiceCatalogApi {
 
     /** Path of a single service, relative to {@link #BASE_PATH}. */
     String BY_ID_PATH = "/{id}";
+
+    /** Path the standard fees of several services are changed through, relative to {@link #BASE_PATH}. */
+    String FEES_PATH = "/fees";
 
     @Operation(
             summary = "Create a service",
@@ -91,7 +96,11 @@ public interface ServiceCatalogApi {
     @Operation(
             summary = "List services",
             description = "Returns every service in the catalog, ordered by name. The list is "
-                    + "returned whole; it is not paged.")
+                    + "returned whole; it is not paged. Each service also carries what it was billed across "
+                    + "every client (totalBilled): the sum of its service charges in the ledger, GST "
+                    + "included, or zero when there are none. Given a financialYear, only charges falling "
+                    + "due in that year count, and financialYear is echoed back; without one, every charge "
+                    + "due to date counts.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "The catalog, empty when nothing has "
                     + "been added yet",
@@ -102,7 +111,11 @@ public interface ServiceCatalogApi {
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ErrorResponse.class)))})
     @GetMapping
-    ResponseEntity<List<CatalogServiceResponse>> listServices();
+    ResponseEntity<List<CatalogServiceResponse>> listServices(
+            @Parameter(description = "Indian financial year (1 April to 31 March), written as yyyy-yy, to "
+                    + "total each service's billed amount for. Omit to total every year to date",
+                    example = "2026-27")
+            @RequestParam(required = false) String financialYear);
 
     @Operation(
             summary = "Update a service",
@@ -133,6 +146,38 @@ public interface ServiceCatalogApi {
             @io.swagger.v3.oas.annotations.parameters.RequestBody(
                     description = "New content for the service", required = true)
             @Valid @RequestBody CatalogServiceRequest request);
+
+    @Operation(
+            summary = "Update the standard fees of several services",
+            description = "Changes the standard fee of each service named, in one go, and nothing else "
+                    + "about them. The update is all or nothing: if any service is unknown, or one is "
+                    + "named twice, no fee changes. Up to " + ServiceFeeBulkUpdateRequest.MAX_UPDATES
+                    + " services may be changed at once. Charges already posted to the ledger keep the "
+                    + "fee they were posted with; services due afterwards are billed at the new fee.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200",
+                    description = "Fees updated; the updated services, in the order the request named them",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            array = @ArraySchema(
+                                    schema = @Schema(implementation = CatalogServiceResponse.class)))),
+            @ApiResponse(responseCode = "400",
+                    description = "Request body failed validation, such as a missing or negative fee or "
+                            + "an empty list, or a service is named more than once",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404",
+                    description = "One or more identifiers name no service; the message lists each",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "500", description = "Unexpected server error",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class)))})
+    // A literal path, so Spring routes it here rather than to updateService's /{id}.
+    @PutMapping(value = FEES_PATH, consumes = MediaType.APPLICATION_JSON_VALUE)
+    ResponseEntity<List<CatalogServiceResponse>> updateFees(
+            @io.swagger.v3.oas.annotations.parameters.RequestBody(
+                    description = "The new standard fee of each service to change", required = true)
+            @Valid @RequestBody ServiceFeeBulkUpdateRequest request);
 
     @Operation(
             summary = "Delete a service",

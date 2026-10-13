@@ -12,6 +12,7 @@ import com.psc.cl.client.model.Client;
 import com.psc.cl.client.model.ClientCompany;
 import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.client.repository.ServiceAssignmentRepository;
+import com.psc.cl.ledger.service.LedgerService;
 import com.psc.cl.managercatalog.model.Manager;
 import com.psc.cl.managercatalog.repository.ManagerRepository;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +23,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -40,11 +42,16 @@ public class ClientServiceImpl implements ClientService {
 
     private static final Sort BY_NAME = Sort.by(Sort.Direction.ASC, "lastName", "firstName");
 
+    /** What a client with no ledger entries owes, at the ledger's scale. */
+    private static final BigDecimal NOTHING_PENDING = new BigDecimal("0.00");
+
     private final ClientRepository clientRepository;
 
     private final ServiceAssignmentRepository serviceAssignmentRepository;
 
     private final ManagerRepository managerRepository;
+
+    private final LedgerService ledgerService;
 
     @Override
     @Transactional
@@ -102,7 +109,8 @@ public class ClientServiceImpl implements ClientService {
     @Transactional(readOnly = true)
     public ClientResponse getClient(UUID id) {
         Client client = clientRepository.findById(id).orElseThrow(() -> new ClientNotFoundException(id));
-        return ClientResponse.from(client, requireManager(client.getManagerId()));
+        BigDecimal pending = ledgerService.pendingByClient(List.of(id)).getOrDefault(id, NOTHING_PENDING);
+        return ClientResponse.from(client, requireManager(client.getManagerId()), pending);
     }
 
     @Override
@@ -116,10 +124,13 @@ public class ClientServiceImpl implements ClientService {
         Set<UUID> managerIds = clients.stream().map(Client::getManagerId).collect(Collectors.toSet());
         Map<UUID, Manager> managersById = managerRepository.findAllById(managerIds).stream()
                 .collect(Collectors.toMap(Manager::getId, Function.identity()));
+        // Likewise one ledger query for every client's pending amount.
+        Map<UUID, BigDecimal> pending = ledgerService.pendingByClient(clients.stream().map(Client::getId).toList());
 
         return clients.stream()
                 .map(client -> ClientSummaryResponse.from(client,
-                        assignedManager(managersById.get(client.getManagerId()), client.getManagerId())))
+                        assignedManager(managersById.get(client.getManagerId()), client.getManagerId()),
+                        pending.getOrDefault(client.getId(), NOTHING_PENDING)))
                 .toList();
     }
 

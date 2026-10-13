@@ -64,6 +64,15 @@ public class ServiceAssignmentResponse {
             example = "Filing for September 2026")
     String comment;
 
+    @Schema(description = "Financial year totalBilled covers. Only returned when listing a company's "
+            + "services for a financial year", example = "2026-27")
+    String financialYear;
+
+    @Schema(description = "Sum of this service's charges falling due in the financial year: taxable "
+            + "amounts plus GST; zero when nothing fell due. Only returned when listing for a financial year",
+            example = "11210.00")
+    BigDecimal totalBilled;
+
     @Schema(description = "When the service was assigned", example = "2026-10-04T10:15:30Z")
     Instant createdAt;
 
@@ -80,6 +89,30 @@ public class ServiceAssignmentResponse {
      */
     public static ServiceAssignmentResponse from(ServiceAssignment entity, UUID clientId,
                                                  CatalogService service) {
+        return builderFrom(entity, clientId, service).build();
+    }
+
+    /**
+     * Maps a persisted assignment onto its API representation, together with what it was billed in
+     * a financial year.
+     *
+     * @param entity        the stored assignment, with its company loaded
+     * @param clientId      the client the company belongs to
+     * @param service       the catalog service assigned
+     * @param financialYear the financial year the amount covers, such as 2026-27
+     * @param totalBilled   what the service was billed in that year
+     * @return the response payload
+     */
+    public static ServiceAssignmentResponse from(ServiceAssignment entity, UUID clientId, CatalogService service,
+                                                 String financialYear, BigDecimal totalBilled) {
+        return builderFrom(entity, clientId, service)
+                .financialYear(financialYear)
+                .totalBilled(totalBilled)
+                .build();
+    }
+
+    private static ServiceAssignmentResponseBuilder builderFrom(ServiceAssignment entity, UUID clientId,
+                                                                CatalogService service) {
         return ServiceAssignmentResponse.builder()
                 .id(entity.getId())
                 .clientId(clientId)
@@ -94,7 +127,6 @@ public class ServiceAssignmentResponse {
                 .discountPercent(entity.getDiscountPercent())
                 .comment(entity.getComment())
                 .createdAt(entity.getCreatedAt())
-                .updatedAt(entity.getUpdatedAt())
-                .build();
+                .updatedAt(entity.getUpdatedAt());
     }
 }

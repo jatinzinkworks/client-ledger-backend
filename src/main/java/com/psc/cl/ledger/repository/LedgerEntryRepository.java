@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
@@ -150,6 +151,74 @@ public interface LedgerEntryRepository extends JpaRepository<LedgerEntry, UUID> 
      */
     List<LedgerEntry> findAllByClientIdAndDueDateBetween(UUID clientId, LocalDate fromDate, LocalDate toDate,
                                                          Sort sort);
+
+    /**
+     * Sums the service charges of each service of one company falling due within a range, both ends
+     * inclusive, in one query. Served by the (company_id, due_date) index.
+     *
+     * @param companyId the company
+     * @param entryType the type of entry to sum; service charges
+     * @param fromDate  earliest due date to include
+     * @param toDate    latest due date to include
+     * @return one row per company service billed in the range; services not billed are left out
+     */
+    @Query("select e.companyServiceId as companyServiceId, sum(e.totalAmount) as totalBilled from LedgerEntry e "
+            + "where e.companyId = :companyId and e.entryType = :entryType and e.companyServiceId is not null "
+            + "and e.dueDate between :fromDate and :toDate group by e.companyServiceId")
+    List<ServiceBilledRow> totalBilledByService(@Param("companyId") UUID companyId,
+                                                @Param("entryType") LedgerEntryType entryType,
+                                                @Param("fromDate") LocalDate fromDate,
+                                                @Param("toDate") LocalDate toDate);
+
+    /**
+     * Sums the service charges of each catalog service falling due within a range, both ends
+     * inclusive, across every client, in one query. Served by the due_date index.
+     *
+     * @param entryType the type of entry to sum; service charges
+     * @param fromDate  earliest due date to include
+     * @param toDate    latest due date to include
+     * @return one row per catalog service billed in the range; services not billed are left out
+     */
+    @Query("select e.catalogServiceId as catalogServiceId, sum(e.totalAmount) as totalBilled from LedgerEntry e "
+            + "where e.entryType = :entryType and e.catalogServiceId is not null "
+            + "and e.dueDate between :fromDate and :toDate group by e.catalogServiceId")
+    List<CatalogServiceBilledRow> totalBilledByCatalogService(@Param("entryType") LedgerEntryType entryType,
+                                                              @Param("fromDate") LocalDate fromDate,
+                                                              @Param("toDate") LocalDate toDate);
+
+    /**
+     * Totals what each of the given clients still owes, across every ledger entry of every company
+     * and financial year, in one query: charges are stored positive and payments negative, so the
+     * sum is billed less received. Served by the (client_id, due_date) index.
+     *
+     * @param clientIds the clients to total; must not be empty
+     * @return one row per client with ledger entries; other clients are left out
+     */
+    @Query("select e.clientId as clientId, sum(e.totalAmount) as totalPending from LedgerEntry e "
+            + "where e.clientId in :clientIds group by e.clientId")
+    List<ClientPendingRow> totalPendingByClient(@Param("clientIds") Collection<UUID> clientIds);
+
+    /**
+     * Totals what the clients of each manager still owe, across every ledger entry of every
+     * financial year, in one query: charges are stored positive and payments negative, so the sum
+     * is billed less received. Clients are matched to their manager as they are assigned now.
+     *
+     * @return one row per manager whose clients have ledger entries; other managers are left out
+     */
+    @Query("select c.managerId as managerId, sum(e.totalAmount) as totalPending "
+            + "from LedgerEntry e join Client c on c.id = e.clientId group by c.managerId")
+    List<ManagerPendingRow> totalPendingByManager();
+
+    /**
+     * Totals what the clients of one manager still owe, across every ledger entry of every
+     * financial year, as {@link #totalPendingByManager()} does for all managers.
+     *
+     * @param managerId the manager
+     * @return billed less received; null when the manager's clients have no ledger entries
+     */
+    @Query("select sum(e.totalAmount) from LedgerEntry e join Client c on c.id = e.clientId "
+            + "where c.managerId = :managerId")
+    BigDecimal totalPendingForManager(@Param("managerId") UUID managerId);
 
     /**
      * Totals every entry of one company due within a range, whichever page is being read.

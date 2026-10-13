@@ -57,6 +57,11 @@ public class ClientResponse {
             schema = @Schema(implementation = CompanyResponse.class))
     List<CompanyResponse> companies;
 
+    @Schema(description = "What the client still owes: everything billed to all of their companies less "
+            + "every payment received, across all financial years. Negative when they have paid more than "
+            + "billed. Returned when fetching a client by id", example = "19630.00")
+    BigDecimal totalPending;
+
     @Schema(description = "When the client was added", example = "2026-10-04T10:15:30Z")
     Instant createdAt;
 
@@ -71,6 +76,22 @@ public class ClientResponse {
      * @return the response payload
      */
     public static ClientResponse from(Client entity, Manager manager) {
+        return builderFrom(entity, manager).build();
+    }
+
+    /**
+     * Maps a persisted entity onto its API representation, together with what the client still owes.
+     *
+     * @param entity       the stored client
+     * @param manager      the manager assigned to the client
+     * @param totalPending what the client still owes, across all companies and financial years
+     * @return the response payload
+     */
+    public static ClientResponse from(Client entity, Manager manager, BigDecimal totalPending) {
+        return builderFrom(entity, manager).totalPending(totalPending).build();
+    }
+
+    private static ClientResponseBuilder builderFrom(Client entity, Manager manager) {
         return ClientResponse.builder()
                 .id(entity.getId())
                 .firstName(entity.getFirstName())
@@ -82,8 +103,7 @@ public class ClientResponse {
                 .discountPercent(entity.getDiscountPercent())
                 .companies(companiesOf(entity))
                 .createdAt(entity.getCreatedAt())
-                .updatedAt(entity.getUpdatedAt())
-                .build();
+                .updatedAt(entity.getUpdatedAt());
     }
 
     /**

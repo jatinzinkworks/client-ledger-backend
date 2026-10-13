@@ -1,8 +1,14 @@
 package com.psc.cl.servicecatalog.service;
 
+import com.psc.cl.ledger.model.FinancialYear;
+import com.psc.cl.ledger.service.LedgerService;
 import com.psc.cl.servicecatalog.dto.CatalogServiceRequest;
 import com.psc.cl.servicecatalog.dto.CatalogServiceResponse;
+import com.psc.cl.servicecatalog.dto.ServiceFeeBulkUpdateRequest;
+import com.psc.cl.servicecatalog.dto.ServiceFeeUpdate;
 import com.psc.cl.servicecatalog.exception.CatalogServiceNotFoundException;
+import com.psc.cl.servicecatalog.exception.CatalogServicesNotFoundException;
+import com.psc.cl.servicecatalog.exception.DuplicateServiceFeeUpdateException;
 import com.psc.cl.servicecatalog.exception.ServiceInUseException;
 import com.psc.cl.servicecatalog.exception.ServiceNameAlreadyExistsException;
 import com.psc.cl.servicecatalog.model.CatalogService;
@@ -15,8 +21,15 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Default {@link ServiceCatalogService} backed by {@link CatalogServiceRepository}.
@@ -29,7 +42,12 @@ public class ServiceCatalogServiceImpl implements ServiceCatalogService {
 
     private static final Sort BY_NAME = Sort.by(Sort.Direction.ASC, "serviceName");
 
+    /** What a service with no charges falling due in the year was billed, at the ledger's scale. */
+    private static final BigDecimal NOTHING_BILLED = new BigDecimal("0.00");
+
     private final CatalogServiceRepository catalogServiceRepository;
+
+    private final LedgerService ledgerService;
 
     @Override
     @Transactional
@@ -58,9 +76,18 @@ public class ServiceCatalogServiceImpl implements ServiceCatalogService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<CatalogServiceResponse> listServices() {
-        return catalogServiceRepository.findAll(BY_NAME).stream()
-                .map(CatalogServiceResponse::from)
+    public List<CatalogServiceResponse> listServices(FinancialYear financialYear) {
+        List<CatalogService> services = catalogServiceRepository.findAll(BY_NAME);
+
+        // One ledger query for every service's billed amount, rather than one per service: in the
+        // year asked for, or across every year to date when none is.
+        Map<UUID, BigDecimal> billed = financialYear == null
+                ? ledgerService.billedByCatalogServiceToDate()
+                : ledgerService.billedByCatalogService(financialYear);
+        String label = financialYear == null ? null : financialYear.label();
+        return services.stream()
+                .map(service -> CatalogServiceResponse.from(service, label,
+                        billed.getOrDefault(service.getId(), NOTHING_BILLED)))
                 .toList();
     }
 
@@ -81,6 +108,49 @@ public class ServiceCatalogServiceImpl implements ServiceCatalogService {
                 saved.getServiceName(), saved.getBillingFrequency(), saved.getCategory());
 
         return CatalogServiceResponse.from(saved);
+    }
+
+    @Override
+    @Transactional
+    public List<CatalogServiceResponse> updateFees(ServiceFeeBulkUpdateRequest request) {
+        List<ServiceFeeUpdate> updates = request.updates();
+        Set<UUID> serviceIds = new HashSet<>();
+        Set<UUID> repeated = new LinkedHashSet<>();
+        updates.forEach(update -> {
+            if (!serviceIds.add(update.serviceId())) {
+                repeated.add(update.serviceId());
+            }
+        });
+        if (!repeated.isEmpty()) {
+            throw new DuplicateServiceFeeUpdateException(repeated);
+        }
+
+        // One query for every service, and every unknown identifier reported together.
+        Map<UUID, CatalogService> servicesById = catalogServiceRepository.findAllById(serviceIds).stream()
+                .collect(Collectors.toMap(CatalogService::getId, Function.identity()));
+        List<UUID> missing = updates.stream()
+                .map(ServiceFeeUpdate::serviceId)
+                .filter(id -> !servicesById.containsKey(id))
+                .toList();
+        if (!missing.isEmpty()) {
+            throw new CatalogServicesNotFoundException(missing);
+        }
+
+        List<CatalogService> updated = updates.stream()
+                .map(update -> {
+                    CatalogService service = servicesById.get(update.serviceId());
+                    log.debug("Changing standard fee of catalog service {} from {} to {}", service.getId(),
+                            service.getStandardFee(), update.standardFee());
+                    service.setStandardFee(update.standardFee());
+                    return service;
+                })
+                .toList();
+
+        // Flushing here stamps updatedAt before the services are returned.
+        catalogServiceRepository.flush();
+        log.info("Updated the standard fees of {} catalog services", updated.size());
+
+        return updated.stream().map(CatalogServiceResponse::from).toList();
     }
 
     @Override

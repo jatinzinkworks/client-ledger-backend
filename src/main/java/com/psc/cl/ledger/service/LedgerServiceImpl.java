@@ -13,9 +13,9 @@ import com.psc.cl.ledger.dto.ClientLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.CompanyBalance;
 import com.psc.cl.ledger.dto.CompanyLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.LastPayment;
-import com.psc.cl.ledger.dto.LedgerExport;
 import com.psc.cl.ledger.dto.LedgerEntryResponse;
 import com.psc.cl.ledger.dto.LedgerEntryUpdateRequest;
+import com.psc.cl.ledger.dto.LedgerExport;
 import com.psc.cl.ledger.dto.LedgerListQuery;
 import com.psc.cl.ledger.dto.LedgerListResponse;
 import com.psc.cl.ledger.dto.LedgerSummary;
@@ -29,7 +29,11 @@ import com.psc.cl.ledger.exception.PaymentNotCorrectableException;
 import com.psc.cl.ledger.model.FinancialYear;
 import com.psc.cl.ledger.model.LedgerEntry;
 import com.psc.cl.ledger.model.LedgerEntryType;
+import com.psc.cl.ledger.repository.CatalogServiceBilledRow;
+import com.psc.cl.ledger.repository.ClientPendingRow;
 import com.psc.cl.ledger.repository.LedgerEntryRepository;
+import com.psc.cl.ledger.repository.ManagerPendingRow;
+import com.psc.cl.ledger.repository.ServiceBilledRow;
 import com.psc.cl.servicecatalog.model.BillingFrequency;
 import com.psc.cl.servicecatalog.model.CatalogService;
 import com.psc.cl.servicecatalog.repository.CatalogServiceRepository;
@@ -47,6 +51,7 @@ import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -83,6 +88,9 @@ public class LedgerServiceImpl implements LedgerService {
 
     /** Runs of anything but letters and digits, replaced in a file name so it is safe on every system. */
     private static final Pattern UNSAFE_FILE_NAME = Pattern.compile("[^A-Za-z0-9]+");
+
+    /** What clients with no ledger entries owe, at the ledger's scale. */
+    private static final BigDecimal NOTHING_PENDING = new BigDecimal("0.00");
 
     /** Stands in for an open start of a date range; PostgreSQL dates cannot go back to LocalDate.MIN. */
     private static final LocalDate EARLIEST_DATE = LocalDate.of(1, 1, 1);
@@ -370,6 +378,58 @@ public class LedgerServiceImpl implements LedgerService {
     static String exportFileName(String name, String fallback, FinancialYear financialYear) {
         String safe = UNSAFE_FILE_NAME.matcher(name).replaceAll("_").replaceAll("^_|_$", "");
         return (safe.isEmpty() ? fallback : safe) + "_Ledger_FY" + financialYear.label() + ".xlsx";
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<UUID, BigDecimal> pendingByClient(Collection<UUID> clientIds) {
+        if (clientIds.isEmpty()) {
+            // Nothing to total, and an empty IN list is not valid SQL.
+            return Map.of();
+        }
+        return ledgerEntryRepository.totalPendingByClient(clientIds).stream()
+                .collect(Collectors.toMap(ClientPendingRow::getClientId, ClientPendingRow::getTotalPending));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<UUID, BigDecimal> pendingByManager() {
+        return ledgerEntryRepository.totalPendingByManager().stream()
+                .collect(Collectors.toMap(ManagerPendingRow::getManagerId, ManagerPendingRow::getTotalPending));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public BigDecimal pendingForManager(UUID managerId) {
+        BigDecimal pending = ledgerEntryRepository.totalPendingForManager(managerId);
+        return pending == null ? NOTHING_PENDING : pending;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<UUID, BigDecimal> billedByCatalogService(FinancialYear financialYear) {
+        return billedByCatalogService(financialYear.firstDay(), financialYear.lastDay());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<UUID, BigDecimal> billedByCatalogServiceToDate() {
+        // "Today" is the firm's calendar day, read from the business clock.
+        return billedByCatalogService(EARLIEST_DATE, LocalDate.now(clock));
+    }
+
+    private Map<UUID, BigDecimal> billedByCatalogService(LocalDate from, LocalDate to) {
+        return ledgerEntryRepository.totalBilledByCatalogService(LedgerEntryType.SERVICE_CHARGE, from, to).stream()
+                .collect(Collectors.toMap(CatalogServiceBilledRow::getCatalogServiceId,
+                        CatalogServiceBilledRow::getTotalBilled));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<UUID, BigDecimal> billedByService(UUID companyId, FinancialYear financialYear) {
+        return ledgerEntryRepository.totalBilledByService(companyId, LedgerEntryType.SERVICE_CHARGE,
+                        financialYear.firstDay(), financialYear.lastDay()).stream()
+                .collect(Collectors.toMap(ServiceBilledRow::getCompanyServiceId, ServiceBilledRow::getTotalBilled));
     }
 
     @Override

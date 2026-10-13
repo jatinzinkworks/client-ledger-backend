@@ -1,7 +1,9 @@
 package com.psc.cl.servicecatalog.service;
 
+import com.psc.cl.ledger.model.FinancialYear;
 import com.psc.cl.servicecatalog.dto.CatalogServiceRequest;
 import com.psc.cl.servicecatalog.dto.CatalogServiceResponse;
+import com.psc.cl.servicecatalog.dto.ServiceFeeBulkUpdateRequest;
 
 import java.util.List;
 import java.util.UUID;
@@ -32,11 +34,14 @@ public interface ServiceCatalogService {
     CatalogServiceResponse getService(UUID id);
 
     /**
-     * Lists every service in the catalog, ordered by name.
+     * Lists every service in the catalog, ordered by name, each with what it was billed across
+     * every client: in a financial year when one is given, otherwise across every year to date.
      *
+     * @param financialYear the year to total each service's billed amount for, or null for every
+     *                      year to date
      * @return the catalog, empty when nothing has been added yet
      */
-    List<CatalogServiceResponse> listServices();
+    List<CatalogServiceResponse> listServices(FinancialYear financialYear);
 
     /**
      * Replaces a service wholesale. Fields omitted from the request are cleared, and the
@@ -51,6 +56,20 @@ public interface ServiceCatalogService {
      *         when a different service already uses the requested name
      */
     CatalogServiceResponse updateService(UUID id, CatalogServiceRequest request);
+
+    /**
+     * Changes the standard fees of several services at once, all or nothing: when any service named
+     * cannot be updated, none is. Only the fee changes; every other field is left as it is. Charges
+     * already in the ledger keep the fee they were posted with; later postings use the new one.
+     *
+     * @param request the new fee of each service to change
+     * @return the updated services, in the order the request named them
+     * @throws com.psc.cl.servicecatalog.exception.DuplicateServiceFeeUpdateException
+     *         when the request names a service more than once
+     * @throws com.psc.cl.servicecatalog.exception.CatalogServicesNotFoundException
+     *         when any identifier names no service, listing each such identifier
+     */
+    List<CatalogServiceResponse> updateFees(ServiceFeeBulkUpdateRequest request);
 
     /**
      * Removes a service from the catalog.

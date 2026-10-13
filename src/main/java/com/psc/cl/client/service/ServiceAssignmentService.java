@@ -3,6 +3,7 @@ package com.psc.cl.client.service;
 import com.psc.cl.client.dto.ServiceAssignmentRequest;
 import com.psc.cl.client.dto.ServiceAssignmentResponse;
 import com.psc.cl.client.dto.ServiceAssignmentUpdateRequest;
+import com.psc.cl.ledger.model.FinancialYear;
 
 import java.util.List;
 import java.util.UUID;
@@ -33,13 +34,15 @@ public interface ServiceAssignmentService {
     ServiceAssignmentResponse assignService(UUID clientId, UUID companyId, ServiceAssignmentRequest request);
 
     /**
-     * Lists the services assigned to one company of a client, most recent delivery first.
+     * Lists the services assigned to one company of a client, most recent delivery first, each with
+     * what it was billed in a financial year when one is given.
      *
-     * @param clientId  the client the company belongs to
-     * @param companyId the company
+     * @param clientId      the client the company belongs to
+     * @param companyId     the company
+     * @param financialYear the year to add each service's billed amount for, or null to leave it out
      * @return the company's assigned services, empty when it has none
      */
-    List<ServiceAssignmentResponse> listServices(UUID clientId, UUID companyId);
+    List<ServiceAssignmentResponse> listServices(UUID clientId, UUID companyId, FinancialYear financialYear);
 
     /**
      * Reads one service assigned to a company of a client.

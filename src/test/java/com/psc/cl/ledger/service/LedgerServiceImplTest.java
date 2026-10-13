@@ -36,8 +36,12 @@ import com.psc.cl.ledger.model.FinancialYear;
 import com.psc.cl.ledger.model.LedgerEntry;
 import com.psc.cl.ledger.model.LedgerEntryType;
 import com.psc.cl.ledger.model.PaymentMethod;
+import com.psc.cl.ledger.repository.CatalogServiceBilledRow;
+import com.psc.cl.ledger.repository.ClientPendingRow;
 import com.psc.cl.ledger.repository.LedgerEntryRepository;
+import com.psc.cl.ledger.repository.ManagerPendingRow;
 import com.psc.cl.ledger.repository.PostedPeriod;
+import com.psc.cl.ledger.repository.ServiceBilledRow;
 import com.psc.cl.servicecatalog.model.BillingFrequency;
 import com.psc.cl.servicecatalog.model.CatalogService;
 import com.psc.cl.servicecatalog.repository.CatalogServiceRepository;
@@ -595,6 +599,130 @@ class LedgerServiceImplTest {
         assertThat(balances.get(COMPANY_ID).totalBilled()).isEqualTo(new BigDecimal("11210.00"));
         assertThat(balances.get(COMPANY_ID).totalPaymentReceived()).isEqualTo(new BigDecimal("5605.00"));
         assertThat(balances.get(COMPANY_ID).pending()).isEqualTo(new BigDecimal("5605.00"));
+    }
+
+    @Test
+    @DisplayName("gives what each service of a company was billed in the financial year, from one query")
+    void givesBilledByService() {
+        UUID monthlyAssignment = UUID.randomUUID();
+        UUID oneOffAssignment = UUID.randomUUID();
+        when(ledgerEntryRepository.totalBilledByService(COMPANY_ID, LedgerEntryType.SERVICE_CHARGE,
+                LocalDate.of(2026, 4, 1), LocalDate.of(2027, 3, 31))).thenReturn(List.of(
+                billed(monthlyAssignment, "11210.00"), billed(oneOffAssignment, "28025.00")));
+
+        Map<UUID, BigDecimal> billed = ledgerService.billedByService(COMPANY_ID, FinancialYears.parse("2026-27"));
+
+        assertThat(billed).containsOnly(Map.entry(monthlyAssignment, new BigDecimal("11210.00")),
+                Map.entry(oneOffAssignment, new BigDecimal("28025.00")));
+    }
+
+    @Test
+    @DisplayName("gives what each catalog service was billed in the financial year across every client")
+    void givesBilledByCatalogService() {
+        when(ledgerEntryRepository.totalBilledByCatalogService(LedgerEntryType.SERVICE_CHARGE,
+                LocalDate.of(2026, 4, 1), LocalDate.of(2027, 3, 31))).thenReturn(List.of(
+                catalogBilled(MONTHLY_ID, "39235.00"), catalogBilled(ONE_OFF_ID, "28025.00")));
+
+        Map<UUID, BigDecimal> billed = ledgerService.billedByCatalogService(FinancialYears.parse("2026-27"));
+
+        assertThat(billed).containsOnly(Map.entry(MONTHLY_ID, new BigDecimal("39235.00")),
+                Map.entry(ONE_OFF_ID, new BigDecimal("28025.00")));
+    }
+
+    @Test
+    @DisplayName("gives what each manager's clients still owe across every year, from one query")
+    void givesPendingByManager() {
+        UUID managerId = UUID.randomUUID();
+        when(ledgerEntryRepository.totalPendingByManager()).thenReturn(List.of(new ManagerPendingRow() {
+            @Override
+            public UUID getManagerId() {
+                return managerId;
+            }
+
+            @Override
+            public BigDecimal getTotalPending() {
+                return new BigDecimal("20630.00");
+            }
+        }));
+
+        assertThat(ledgerService.pendingByManager()).containsOnly(Map.entry(managerId, new BigDecimal("20630.00")));
+    }
+
+    @Test
+    @DisplayName("gives what each listed client still owes across every year, from one query")
+    void givesPendingByClient() {
+        when(ledgerEntryRepository.totalPendingByClient(List.of(CLIENT_ID))).thenReturn(List.of(new ClientPendingRow() {
+            @Override
+            public UUID getClientId() {
+                return CLIENT_ID;
+            }
+
+            @Override
+            public BigDecimal getTotalPending() {
+                return new BigDecimal("19630.00");
+            }
+        }));
+
+        assertThat(ledgerService.pendingByClient(List.of(CLIENT_ID)))
+                .containsOnly(Map.entry(CLIENT_ID, new BigDecimal("19630.00")));
+    }
+
+    @Test
+    @DisplayName("gives no pending amounts, without querying, for no clients")
+    void givesPendingForNoClients() {
+        assertThat(ledgerService.pendingByClient(List.of())).isEmpty();
+
+        verify(ledgerEntryRepository, never()).totalPendingByClient(any());
+    }
+
+    @Test
+    @DisplayName("gives one manager's pending, zero when their clients have no entries")
+    void givesPendingForManager() {
+        UUID busy = UUID.randomUUID();
+        UUID idle = UUID.randomUUID();
+        when(ledgerEntryRepository.totalPendingForManager(busy)).thenReturn(new BigDecimal("-500.00"));
+        when(ledgerEntryRepository.totalPendingForManager(idle)).thenReturn(null);
+
+        assertThat(ledgerService.pendingForManager(busy)).isEqualTo(new BigDecimal("-500.00"));
+        assertThat(ledgerService.pendingForManager(idle)).isEqualTo(new BigDecimal("0.00"));
+    }
+
+    @Test
+    @DisplayName("gives what each catalog service was billed across every year up to the firm's today")
+    void givesBilledByCatalogServiceToDate() {
+        when(ledgerEntryRepository.totalBilledByCatalogService(LedgerEntryType.SERVICE_CHARGE,
+                LocalDate.of(1, 1, 1), TODAY)).thenReturn(List.of(catalogBilled(MONTHLY_ID, "61650.00")));
+
+        assertThat(ledgerService.billedByCatalogServiceToDate())
+                .containsOnly(Map.entry(MONTHLY_ID, new BigDecimal("61650.00")));
+    }
+
+    private static CatalogServiceBilledRow catalogBilled(UUID catalogServiceId, String totalBilled) {
+        return new CatalogServiceBilledRow() {
+            @Override
+            public UUID getCatalogServiceId() {
+                return catalogServiceId;
+            }
+
+            @Override
+            public BigDecimal getTotalBilled() {
+                return new BigDecimal(totalBilled);
+            }
+        };
+    }
+
+    private static ServiceBilledRow billed(UUID companyServiceId, String totalBilled) {
+        return new ServiceBilledRow() {
+            @Override
+            public UUID getCompanyServiceId() {
+                return companyServiceId;
+            }
+
+            @Override
+            public BigDecimal getTotalBilled() {
+                return new BigDecimal(totalBilled);
+            }
+        };
     }
 
     @Test

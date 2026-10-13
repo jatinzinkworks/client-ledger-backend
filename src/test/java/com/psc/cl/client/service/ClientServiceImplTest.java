@@ -37,6 +37,7 @@ import org.springframework.data.domain.Sort;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -54,6 +55,9 @@ class ClientServiceImplTest {
 
     @Mock
     private ManagerRepository managerRepository;
+
+    @Mock
+    private LedgerService ledgerService;
 
     @InjectMocks
     private ClientServiceImpl clientService;
@@ -345,16 +349,30 @@ class ClientServiceImplTest {
     }
 
     @Test
+    @DisplayName("returns zero pending on read by id for a client with no ledger entries")
+    void readsClientWithoutEntries() {
+        Client stored = stored("Asha", "Kapoor", "Kapoor & Sons");
+        when(clientRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
+        when(managerRepository.findById(MANAGER_ID)).thenReturn(Optional.of(manager()));
+        when(ledgerService.pendingByClient(List.of(stored.getId()))).thenReturn(Map.of());
+
+        assertThat(clientService.getClient(stored.getId()).getTotalPending()).isEqualTo(new BigDecimal("0.00"));
+    }
+
+    @Test
     @DisplayName("returns the stored client with companies and manager name on read by id")
     void readsClientById() {
         Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF", "Mehta Textiles Pvt Ltd");
         when(clientRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
         when(managerRepository.findById(MANAGER_ID)).thenReturn(Optional.of(manager()));
+        when(ledgerService.pendingByClient(List.of(stored.getId())))
+                .thenReturn(Map.of(stored.getId(), new BigDecimal("19630.00")));
 
         ClientResponse response = clientService.getClient(stored.getId());
 
         assertThat(response.getId()).isEqualTo(stored.getId());
         assertThat(response.getManagerName()).isEqualTo("Pranay Singhal");
+        assertThat(response.getTotalPending()).isEqualTo(new BigDecimal("19630.00"));
         assertThat(response.getCompanies())
                 .extracting("companyName")
                 .containsExactly("Mehta Textiles Pvt Ltd", "Rohan Mehta HUF");
@@ -378,10 +396,15 @@ class ClientServiceImplTest {
         Client asha = stored("Asha", "Kapoor", "Kapoor & Sons");
         when(clientRepository.findAll(any(Sort.class))).thenReturn(List.of(asha, rohan));
         when(managerRepository.findAllById(any())).thenReturn(List.of(manager()));
+        // Asha has no ledger entries, so the ledger has no amount for her.
+        when(ledgerService.pendingByClient(List.of(asha.getId(), rohan.getId())))
+                .thenReturn(Map.of(rohan.getId(), new BigDecimal("19630.00")));
 
         List<ClientSummaryResponse> clients = clientService.listClients(null);
 
         assertThat(clients).extracting("lastName").containsExactly("Kapoor", "Mehta");
+        assertThat(clients).extracting(ClientSummaryResponse::getTotalPending)
+                .containsExactly(new BigDecimal("0.00"), new BigDecimal("19630.00"));
         assertThat(clients.get(1).getCompanyNames())
                 .containsExactly("Mehta Textiles Pvt Ltd", "Rohan Mehta HUF");
         assertThat(clients).allSatisfy(client ->

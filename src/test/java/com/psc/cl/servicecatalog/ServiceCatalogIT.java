@@ -1,6 +1,7 @@
 package com.psc.cl.servicecatalog;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -232,6 +233,71 @@ class ServiceCatalogIT extends AbstractPostgresIT {
                 .andExpect(jsonPath("$.code").value("RESOURCE_IN_USE"));
 
         assertThat(catalogServiceRepository.existsById(id)).isTrue();
+    }
+
+    @Test
+    @DisplayName("updates several services' fees at once, and none when any service is unknown")
+    void updatesFeesInBulk() throws Exception {
+        String monthlyId = JsonPath.read(mockMvc.perform(post(SERVICES_URL)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(MONTHLY_SERVICE_JSON))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString(), "$.id");
+        String auditId = JsonPath.read(mockMvc.perform(post(SERVICES_URL)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "serviceName": "Annual Audit",
+                                  "category": "AUDIT",
+                                  "billingFrequency": "ONE_OFF",
+                                  "standardFee": 25000.00
+                                }"""))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString(), "$.id");
+
+        mockMvc.perform(put(SERVICES_URL + "/fees")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "updates": [ { "serviceId": "%s", "standardFee": 27500.00 },
+                                               { "serviceId": "%s", "standardFee": 5500.00 } ] }"""
+                                .formatted(auditId, monthlyId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].id").value(auditId))
+                .andExpect(jsonPath("$[0].standardFee").value(27500.0))
+                .andExpect(jsonPath("$[1].id").value(monthlyId))
+                .andExpect(jsonPath("$[1].standardFee").value(5500.0))
+                // Only the fee changes.
+                .andExpect(jsonPath("$[1].serviceName").value("GST Monthly Return Filing"))
+                .andExpect(jsonPath("$[1].invoiceSchedule.dayOfMonth").value(7));
+        mockMvc.perform(get(SERVICES_URL + "/" + monthlyId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.standardFee").value(5500.0));
+
+        // An unknown service leaves every fee as it was.
+        String unknownId = UUID.randomUUID().toString();
+        mockMvc.perform(put(SERVICES_URL + "/fees")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "updates": [ { "serviceId": "%s", "standardFee": 9999.00 },
+                                               { "serviceId": "%s", "standardFee": 1.00 } ] }"""
+                                .formatted(monthlyId, unknownId)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message", containsString(unknownId)));
+        mockMvc.perform(get(SERVICES_URL + "/" + monthlyId))
+                .andExpect(jsonPath("$.standardFee").value(5500.0));
+
+        // So does naming a service twice.
+        mockMvc.perform(put(SERVICES_URL + "/fees")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "updates": [ { "serviceId": "%1$s", "standardFee": 1.00 },
+                                               { "serviceId": "%1$s", "standardFee": 2.00 } ] }"""
+                                .formatted(monthlyId)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+        mockMvc.perform(get(SERVICES_URL + "/" + monthlyId))
+                .andExpect(jsonPath("$.standardFee").value(5500.0));
     }
 
     @Test
