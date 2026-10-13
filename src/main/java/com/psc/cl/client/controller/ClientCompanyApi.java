@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 
 import java.util.List;
 import java.util.UUID;
@@ -42,13 +43,19 @@ public interface ClientCompanyApi {
     @Operation(
             summary = "List the companies of a client",
             description = "Returns every company the client holds, in full, ordered by company name, "
-                    + "each with the number of services assigned to it.")
+                    + "each with the number of services assigned to it. Given a financialYear, each company "
+                    + "also carries what it was billed (totalBilled), what it paid (totalPaymentReceived) "
+                    + "and what is pending in that year, from the ledger: charges count in the year they "
+                    + "fell due and payments in the year they were received, and a company with no activity "
+                    + "in the year shows zeros. Without one, those fields are left out.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "The client's companies",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             array = @ArraySchema(
                                     schema = @Schema(implementation = CompanyResponse.class)))),
-            @ApiResponse(responseCode = "400", description = "The identifier is not a valid UUID",
+            @ApiResponse(responseCode = "400",
+                    description = "The identifier is not a valid UUID, or financialYear is not a year such "
+                            + "as 2026-27",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "404", description = "No client carries this identifier",
@@ -61,7 +68,11 @@ public interface ClientCompanyApi {
     ResponseEntity<List<CompanyResponse>> listCompanies(
             @Parameter(description = "Identifier of the client", required = true,
                     example = "7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35")
-            @PathVariable UUID id);
+            @PathVariable UUID id,
+            @Parameter(description = "Indian financial year (1 April to 31 March), written as yyyy-yy, to "
+                    + "add each company's billed, received and pending amounts for. Omit to leave them out",
+                    example = "2026-27")
+            @RequestParam(required = false) String financialYear);
 
     @Operation(
             summary = "Add a company to a client",

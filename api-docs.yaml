@@ -22,6 +22,8 @@ tags:
 - name: Manager Catalog
   description: "Staff who can be assigned to client work, with their roles and contact\
     \ details"
+- name: Ledger
+  description: Amounts client companies owe for the services delivered to them
 paths:
   /psc/cl/v1/services/{id}:
     get:
@@ -788,6 +790,276 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/clients/{clientId}/companies/{companyId}/payments/{paymentId}:
+    put:
+      tags:
+      - Ledger
+      summary: Update a payment received from a company
+      description: "Replaces every detail of a payment recorded for one company of\
+        \ the client: the amount, the date received, the method, the reference and\
+        \ the comment. An omitted reference or comment is cleared. The amount is given\
+        \ as a positive number and stored as negative; the financial year follows\
+        \ the new date received, which cannot be after today. When the payment was\
+        \ recorded (entryDate) does not change. paymentId is the ledger entry id the\
+        \ payment was recorded under."
+      operationId: updatePayment
+      parameters:
+      - name: clientId
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: companyId
+        in: path
+        description: Identifier of the company that paid
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+      - name: paymentId
+        in: path
+        description: Identifier of the payment's ledger entry
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 5e7c1a93-2b4d-4f86-9a0e-8d3b6c2f1e47
+      requestBody:
+        description: The payment's corrected details
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentRequest"
+        required: true
+      responses:
+        "200":
+          description: Payment updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LedgerEntryResponse"
+        "400":
+          description: "Request body failed validation, dateReceived is after today,\
+            \ or an identifier is not a valid UUID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "No client carries this identifier, the client holds no such\
+            \ company, or no such ledger entry belongs to the company"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "The ledger entry is a service charge, not a payment"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/clients/{clientId}/companies/{companyId}/ledger-entries/{entryId}:
+    get:
+      tags:
+      - Ledger
+      summary: Fetch a ledger entry of a company
+      description: "Returns one ledger entry billed to a company of the client, with\
+        \ every financial figure stored for it."
+      operationId: getEntry
+      parameters:
+      - name: clientId
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: companyId
+        in: path
+        description: Identifier of the company
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+      - name: entryId
+        in: path
+        description: Identifier of the ledger entry
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 5e7c1a93-2b4d-4f86-9a0e-8d3b6c2f1e47
+      responses:
+        "200":
+          description: Ledger entry found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LedgerEntryResponse"
+        "400":
+          description: An identifier is not a valid UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "No client carries this identifier, the client holds no such\
+            \ company, or no such ledger entry was billed to the company"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      tags:
+      - Ledger
+      summary: Correct the rates of a ledger entry
+      description: "Replaces the service fee, discount and GST rate of one ledger\
+        \ entry billed to a company of the client. The discount, taxable, GST and\
+        \ total amounts are worked out again from them, rounded the same way as when\
+        \ entries are posted, so the figures always add up. What the entry bills,\
+        \ its due date, financial year and entry date cannot change. Only service\
+        \ charges have rates; update a payment through its payment endpoint instead."
+      operationId: updateEntry
+      parameters:
+      - name: clientId
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: companyId
+        in: path
+        description: Identifier of the company
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+      - name: entryId
+        in: path
+        description: Identifier of the ledger entry
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 5e7c1a93-2b4d-4f86-9a0e-8d3b6c2f1e47
+      requestBody:
+        description: Corrected rates for the ledger entry
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LedgerEntryUpdateRequest"
+        required: true
+      responses:
+        "200":
+          description: Ledger entry corrected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LedgerEntryResponse"
+        "400":
+          description: "Request body failed validation, or an identifier is not a\
+            \ valid UUID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "No client carries this identifier, the client holds no such\
+            \ company, or no such ledger entry was billed to the company"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "The ledger entry is a payment, which has no rates"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      tags:
+      - Ledger
+      summary: Delete a ledger entry
+      description: "Deletes one ledger entry of a company of the client: a payment\
+        \ recorded in error, or a service charge. For a service charge, the service\
+        \ it billed is left as it is: a ONE_OFF service stays marked as posted, and\
+        \ a recurring service keeps its next due date, so posting again does not bill\
+        \ the deleted date a second time."
+      operationId: deleteEntry
+      parameters:
+      - name: clientId
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: companyId
+        in: path
+        description: Identifier of the company
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+      - name: entryId
+        in: path
+        description: Identifier of the ledger entry
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 5e7c1a93-2b4d-4f86-9a0e-8d3b6c2f1e47
+      responses:
+        "204":
+          description: Ledger entry deleted
+        "400":
+          description: An identifier is not a valid UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "No client carries this identifier, the client holds no such\
+            \ company, or no such ledger entry was billed to the company"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /psc/cl/v1/services:
     get:
       tags:
@@ -1155,7 +1427,12 @@ paths:
       - Client Companies
       summary: List the companies of a client
       description: "Returns every company the client holds, in full, ordered by company\
-        \ name, each with the number of services assigned to it."
+        \ name, each with the number of services assigned to it. Given a financialYear,\
+        \ each company also carries what it was billed (totalBilled), what it paid\
+        \ (totalPaymentReceived) and what is pending in that year, from the ledger:\
+        \ charges count in the year they fell due and payments in the year they were\
+        \ received, and a company with no activity in the year shows zeros. Without\
+        \ one, those fields are left out."
       operationId: listCompanies
       parameters:
       - name: id
@@ -1166,6 +1443,15 @@ paths:
           type: string
           format: uuid
         example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: financialYear
+        in: query
+        description: "Indian financial year (1 April to 31 March), written as yyyy-yy,\
+          \ to add each company's billed, received and pending amounts for. Omit to\
+          \ leave them out"
+        required: false
+        schema:
+          type: string
+        example: 2026-27
       responses:
         "200":
           description: The client's companies
@@ -1176,7 +1462,8 @@ paths:
                 items:
                   $ref: "#/components/schemas/CompanyResponse"
         "400":
-          description: The identifier is not a valid UUID
+          description: "The identifier is not a valid UUID, or financialYear is not\
+            \ a year such as 2026-27"
           content:
             application/json:
               schema:
@@ -1355,6 +1642,637 @@ paths:
         "404":
           description: "No client carries this identifier, the client holds no such\
             \ company, or the service does not exist in the Service Catalog"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/clients/{clientId}/companies/{companyId}/payments:
+    get:
+      tags:
+      - Ledger
+      summary: List the payments received from a company
+      description: "Returns the payments recorded for one company of the client, a\
+        \ page at a time, earliest received first unless sortBy and sortDirection\
+        \ choose another order. Each is the ledger entry it was recorded as: entryType\
+        \ PAYMENT, totalAmount negative, and dueDate the date received. fromDate,\
+        \ toDate and financialYear filter on the date received, either end of the\
+        \ range may be left open, and given together only payments matching both are\
+        \ returned. Sorting by totalAmount ascending puts the largest payment first,\
+        \ as amounts are stored as negative. The summary counts and totals every matching\
+        \ payment across all pages."
+      operationId: listPayments
+      parameters:
+      - name: clientId
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: companyId
+        in: path
+        description: Identifier of the company
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+      - name: fromDate
+        in: query
+        description: Only return entries due on or after this date (ISO yyyy-MM-dd).
+          Omit to leave the range open at the start
+        required: false
+        schema:
+          type: string
+          format: date
+        example: 2026-04-01
+      - name: toDate
+        in: query
+        description: Only return entries due on or before this date (ISO yyyy-MM-dd).
+          Omit to leave the range open at the end
+        required: false
+        schema:
+          type: string
+          format: date
+        example: 2027-03-31
+      - name: financialYear
+        in: query
+        description: "Only return entries whose due date falls in this Indian financial\
+          \ year (1 April to 31 March), written as yyyy-yy. Omit to return entries\
+          \ of every year"
+        required: false
+        schema:
+          type: string
+        example: 2026-27
+      - name: page
+        in: query
+        description: "Page to return, counting from 0. A page past the last returns\
+          \ no entries"
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 0
+        example: 0
+      - name: size
+        in: query
+        description: "Largest number of entries a page holds, from 1 to 200"
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 50
+        example: 50
+      - name: sortBy
+        in: query
+        description: "Field to sort entries by: dueDate, entryDate, serviceName or\
+          \ totalAmount. Entries alike in that field follow in due date, then service\
+          \ name, order, which keeps pages stable"
+        required: false
+        schema:
+          type: string
+          default: dueDate
+          enum:
+          - dueDate
+          - entryDate
+          - serviceName
+          - totalAmount
+      - name: sortDirection
+        in: query
+        description: Whether sortBy ascends (asc) or descends (desc); either case
+          is accepted
+        required: false
+        schema:
+          type: string
+          default: asc
+          enum:
+          - asc
+          - desc
+      responses:
+        "200":
+          description: "A page of the company's payments, with the totals of every\
+            \ matching payment; no payments and zero totals when none matches"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentListResponse"
+        "400":
+          description: "An identifier is not a valid UUID, a date is not a valid ISO\
+            \ date, fromDate is after toDate, financialYear is not a year such as\
+            \ 2026-27, page is negative, size is outside 1 to 200, or sortBy or sortDirection\
+            \ is not one of the values listed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "No client carries this identifier, or the client holds no\
+            \ such company"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      tags:
+      - Ledger
+      summary: Record a payment received from a company
+      description: "Records a payment received from one company of the client as an\
+        \ entry in its ledger, with entryType PAYMENT. The amount is given as a positive\
+        \ number and stored as negative, so the ledger's totals add up to what is\
+        \ still owed. The date received places the payment in the ledger: it is the\
+        \ entry's dueDate, decides its financial year, and cannot be after today.\
+        \ The payment is not matched to particular service charges; it reduces the\
+        \ company's balance as a whole."
+      operationId: recordPayment
+      parameters:
+      - name: clientId
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: companyId
+        in: path
+        description: Identifier of the company that paid
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+      requestBody:
+        description: The payment received
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentRequest"
+        required: true
+      responses:
+        "201":
+          description: Payment recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LedgerEntryResponse"
+        "400":
+          description: "Request body failed validation, dateReceived is after today,\
+            \ or an identifier is not a valid UUID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "No client carries this identifier, or the client holds no\
+            \ such company"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/clients/{clientId}/companies/{companyId}/ledger-entries:
+    get:
+      tags:
+      - Ledger
+      summary: List the ledger entries of a company
+      description: "Returns the ledger entries posted for one company of the client,\
+        \ earliest due first unless sortBy and sortDirection choose another order.\
+        \ Narrow them to a range of due dates with fromDate and toDate, either of\
+        \ which may be left open, and to an Indian financial year with financialYear;\
+        \ given together, only entries matching both are returned. Entries are returned\
+        \ a page at a time; the summary totals every matching entry across all pages,\
+        \ not just the page returned."
+      operationId: listCompanyEntries
+      parameters:
+      - name: clientId
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: companyId
+        in: path
+        description: Identifier of the company
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+      - name: fromDate
+        in: query
+        description: Only return entries due on or after this date (ISO yyyy-MM-dd).
+          Omit to leave the range open at the start
+        required: false
+        schema:
+          type: string
+          format: date
+        example: 2026-04-01
+      - name: toDate
+        in: query
+        description: Only return entries due on or before this date (ISO yyyy-MM-dd).
+          Omit to leave the range open at the end
+        required: false
+        schema:
+          type: string
+          format: date
+        example: 2027-03-31
+      - name: financialYear
+        in: query
+        description: "Only return entries whose due date falls in this Indian financial\
+          \ year (1 April to 31 March), written as yyyy-yy. Omit to return entries\
+          \ of every year"
+        required: false
+        schema:
+          type: string
+        example: 2026-27
+      - name: page
+        in: query
+        description: "Page to return, counting from 0. A page past the last returns\
+          \ no entries"
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 0
+        example: 0
+      - name: size
+        in: query
+        description: "Largest number of entries a page holds, from 1 to 200"
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 50
+        example: 50
+      - name: sortBy
+        in: query
+        description: "Field to sort entries by: dueDate, entryDate, serviceName or\
+          \ totalAmount. Entries alike in that field follow in due date, then service\
+          \ name, order, which keeps pages stable"
+        required: false
+        schema:
+          type: string
+          default: dueDate
+          enum:
+          - dueDate
+          - entryDate
+          - serviceName
+          - totalAmount
+      - name: sortDirection
+        in: query
+        description: Whether sortBy ascends (asc) or descends (desc); either case
+          is accepted
+        required: false
+        schema:
+          type: string
+          default: asc
+          enum:
+          - asc
+          - desc
+      responses:
+        "200":
+          description: "A page of the company's ledger entries, with the totals of\
+            \ every matching entry; no entries and zero totals when none matches"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LedgerListResponse"
+        "400":
+          description: "An identifier is not a valid UUID, a date is not a valid ISO\
+            \ date, fromDate is after toDate, financialYear is not a year such as\
+            \ 2026-27, page is negative, size is outside 1 to 200, or sortBy or sortDirection\
+            \ is not one of the values listed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "No client carries this identifier, or the client holds no\
+            \ such company"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      tags:
+      - Ledger
+      summary: Post due services to a company's ledger
+      description: "Creates a ledger entry for every service of the company that has\
+        \ fallen due on or before today. Each entry takes the service fee from the\
+        \ Service Catalog, takes off the discount granted on the service, and adds\
+        \ GST at the service's rate; every figure is stored separately. A recurring\
+        \ service is billed once for each date it fell due and has not been billed\
+        \ for, then moves on to its next due date after today. A ONE_OFF service is\
+        \ billed once and never again. Posting again when nothing new is due creates\
+        \ nothing."
+      operationId: postDueServices
+      parameters:
+      - name: clientId
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: companyId
+        in: path
+        description: Identifier of the company to bill
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+      responses:
+        "200":
+          description: "The entries created, earliest due first; empty when nothing\
+            \ was due"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LedgerEntryResponse"
+        "400":
+          description: An identifier is not a valid UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "No client carries this identifier, or the client holds no\
+            \ such company"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/clients/{clientId}/ledger-summary:
+    get:
+      tags:
+      - Ledger
+      summary: "Summarise a client's account for a financial year, across all of their\
+        \ companies"
+      description: "Returns, for the client and one Indian financial year (1 April\
+        \ to 31 March): the total billed, the total payment received, what is pending\
+        \ (billed less received), and the total discount given, across every company\
+        \ of the client together; and the client's last payment, naming the company\
+        \ that made it. As for a single company, charges count in the year they fell\
+        \ due and payments in the year they were received."
+      operationId: summarizeClient
+      parameters:
+      - name: clientId
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: financialYear
+        in: query
+        description: "Indian financial year to summarise, written as yyyy-yy"
+        required: true
+        schema:
+          type: string
+        example: 2026-27
+      responses:
+        "200":
+          description: "The year's summary; every amount zero, and no lastPayment,\
+            \ when the year has no entries"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClientLedgerSummaryResponse"
+        "400":
+          description: "financialYear is missing or is not a year such as 2026-27,\
+            \ or the identifier is not a valid UUID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No client carries this identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/clients/{clientId}/ledger-entries:
+    get:
+      tags:
+      - Ledger
+      summary: List the ledger entries of a client
+      description: "Returns the ledger entries posted for any company of the client,\
+        \ earliest due first unless sortBy and sortDirection choose another order.\
+        \ Each entry carries the companyId it was billed to. Narrow them to a range\
+        \ of due dates with fromDate and toDate, either of which may be left open,\
+        \ and to an Indian financial year with financialYear; given together, only\
+        \ entries matching both are returned. Entries are returned a page at a time;\
+        \ the summary totals every matching entry across all pages, not just the page\
+        \ returned."
+      operationId: listClientEntries
+      parameters:
+      - name: clientId
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: fromDate
+        in: query
+        description: Only return entries due on or after this date (ISO yyyy-MM-dd).
+          Omit to leave the range open at the start
+        required: false
+        schema:
+          type: string
+          format: date
+        example: 2026-04-01
+      - name: toDate
+        in: query
+        description: Only return entries due on or before this date (ISO yyyy-MM-dd).
+          Omit to leave the range open at the end
+        required: false
+        schema:
+          type: string
+          format: date
+        example: 2027-03-31
+      - name: financialYear
+        in: query
+        description: "Only return entries whose due date falls in this Indian financial\
+          \ year (1 April to 31 March), written as yyyy-yy. Omit to return entries\
+          \ of every year"
+        required: false
+        schema:
+          type: string
+        example: 2026-27
+      - name: page
+        in: query
+        description: "Page to return, counting from 0. A page past the last returns\
+          \ no entries"
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 0
+        example: 0
+      - name: size
+        in: query
+        description: "Largest number of entries a page holds, from 1 to 200"
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 50
+        example: 50
+      - name: sortBy
+        in: query
+        description: "Field to sort entries by: dueDate, entryDate, serviceName or\
+          \ totalAmount. Entries alike in that field follow in due date, then service\
+          \ name, order, which keeps pages stable"
+        required: false
+        schema:
+          type: string
+          default: dueDate
+          enum:
+          - dueDate
+          - entryDate
+          - serviceName
+          - totalAmount
+      - name: sortDirection
+        in: query
+        description: Whether sortBy ascends (asc) or descends (desc); either case
+          is accepted
+        required: false
+        schema:
+          type: string
+          default: asc
+          enum:
+          - asc
+          - desc
+      responses:
+        "200":
+          description: "A page of the client's ledger entries, with the totals of\
+            \ every matching entry, broken down by financial year and by company;\
+            \ no entries and zero totals when none matches"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LedgerListResponse"
+        "400":
+          description: "The identifier is not a valid UUID, a date is not a valid\
+            \ ISO date, fromDate is after toDate, financialYear is not a year such\
+            \ as 2026-27, page is negative, size is outside 1 to 200, or sortBy or\
+            \ sortDirection is not one of the values listed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No client carries this identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/clients/{clientId}/companies/{companyId}/ledger-summary:
+    get:
+      tags:
+      - Ledger
+      summary: Summarise a company's account for a financial year
+      description: "Returns, for one company of the client and one Indian financial\
+        \ year (1 April to 31 March): the total billed, the total payment received,\
+        \ what is pending (billed less received), the total discount given, and the\
+        \ date and amount of the last payment. Service charges count in the year they\
+        \ fell due, and payments in the year they were received; a payment is not\
+        \ matched to particular charges, so a payment settling an earlier year's charges\
+        \ reduces the pending amount of the year it was received in."
+      operationId: summarizeCompany
+      parameters:
+      - name: clientId
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: companyId
+        in: path
+        description: Identifier of the company
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+      - name: financialYear
+        in: query
+        description: "Indian financial year to summarise, written as yyyy-yy"
+        required: true
+        schema:
+          type: string
+        example: 2026-27
+      responses:
+        "200":
+          description: "The year's summary; every amount zero, and no lastPayment,\
+            \ when the year has no entries"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyLedgerSummaryResponse"
+        "400":
+          description: "financialYear is missing or is not a year such as 2026-27,\
+            \ or an identifier is not a valid UUID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "No client carries this identifier, or the client holds no\
+            \ such company"
           content:
             application/json:
               schema:
@@ -1812,6 +2730,27 @@ components:
           description: Number of services assigned to the company. Only returned when
             listing a client's companies
           example: 3
+        financialYear:
+          type: string
+          description: Financial year the billing figures below cover. Only returned
+            when listing a client's companies for a financial year
+          example: 2026-27
+        totalBilled:
+          type: number
+          description: "Sum of the service charges falling due in the financial year:\
+            \ taxable amounts plus GST. Only returned when listing for a financial\
+            \ year"
+          example: 39235.0
+        totalPaymentReceived:
+          type: number
+          description: "Sum of the payments received in the financial year, as a positive\
+            \ number. Only returned when listing for a financial year"
+          example: 15605.0
+        pending:
+          type: number
+          description: Billed less received in the financial year; negative when more
+            was received. Only returned when listing for a financial year
+          example: 23630.0
     CompanyRequest:
       type: object
       description: "Company owned by, or acted for on behalf of, the client"
@@ -1953,6 +2892,198 @@ components:
           format: date-time
           description: When the assignment was last updated
           example: 2026-10-04T10:15:30Z
+    PaymentRequest:
+      type: object
+      description: A payment received from a company
+      properties:
+        amountReceived:
+          type: number
+          description: "Amount received, as a positive number. The ledger stores it\
+            \ as negative, against the charges it settles"
+          example: 28025.0
+          minimum: 0.01
+        dateReceived:
+          type: string
+          format: date
+          description: Date the payment was received; not after today
+          example: 2026-10-12
+        method:
+          type: string
+          description: How the payment was received
+          enum:
+          - BANK_TRANSFER
+          - UPI
+          - CHEQUE
+          - CASH
+          example: BANK_TRANSFER
+        reference:
+          type: string
+          description: "The payer's reference, such as a UTR, UPI transaction id or\
+            \ cheque number"
+          example: HDFC0001234567890
+          maxLength: 100
+          minLength: 0
+        comment:
+          type: string
+          description: Free-text note about the payment
+          example: Settles the incorporation invoice
+          maxLength: 1000
+          minLength: 0
+      required:
+      - amountReceived
+      - dateReceived
+      - method
+    LedgerEntryResponse:
+      type: object
+      description: "A charge for a service that fell due, or a payment received. entryType\
+        \ tells them apart; fields that do not apply to the type are left out"
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identifier of the ledger entry
+          example: 5e7c1a93-2b4d-4f86-9a0e-8d3b6c2f1e47
+        clientId:
+          type: string
+          format: uuid
+          description: Identifier of the client
+          example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+        companyId:
+          type: string
+          format: uuid
+          description: Identifier of the company billed
+          example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+        entryType:
+          type: string
+          description: "SERVICE_CHARGE for an amount owed for a service, PAYMENT for\
+            \ an amount received"
+          enum:
+          - SERVICE_CHARGE
+          - PAYMENT
+          example: SERVICE_CHARGE
+        companyServiceId:
+          type: string
+          format: uuid
+          description: Identifier of the service as assigned to the company
+          example: 9d2a7c40-6e1b-4f53-b8a9-0c3e5d7f1a62
+        serviceId:
+          type: string
+          format: uuid
+          description: Identifier of the service in the Service Catalog
+          example: 3b8e5f21-9c4d-4a17-8e62-1f0d7a9c5b34
+        serviceName:
+          type: string
+          description: Name of the service when the entry was posted
+          example: GST Monthly Return Filing
+        serviceType:
+          type: string
+          description: How the service is billed
+          enum:
+          - ONE_OFF
+          - MONTHLY
+          - QUARTERLY
+          - ANNUAL
+          example: MONTHLY
+        dueDate:
+          type: string
+          format: date
+          description: "For a service charge, the date the service fell due, which\
+            \ it bills; for a payment, the date it was received"
+          example: 2026-10-07
+        financialYear:
+          type: string
+          description: Indian financial year (1 April to 31 March) the due date falls
+            in
+          example: 2026-27
+        entryDate:
+          type: string
+          format: date
+          description: Date the entry was posted to the ledger
+          example: 2026-10-13
+        serviceFee:
+          type: number
+          description: "Standard fee of the service, before discount and excluding\
+            \ GST"
+          example: 5000.0
+        discountPercent:
+          type: number
+          description: "Discount granted on the service, as a percentage"
+          example: 5.0
+        discountAmount:
+          type: number
+          description: Amount taken off the service fee by the discount
+          example: 250.0
+        taxableAmount:
+          type: number
+          description: "Service fee after discount, on which GST is charged"
+          example: 4750.0
+        gstRatePercent:
+          type: number
+          description: "GST rate applied, as a percentage"
+          example: 18.0
+        gstAmount:
+          type: number
+          description: GST charged on the taxable amount
+          example: 855.0
+        totalAmount:
+          type: number
+          description: "For a service charge, the amount owed: the taxable amount\
+            \ plus GST. For a payment, the amount received as a negative number"
+          example: 5605.0
+        paymentMethod:
+          type: string
+          description: How a payment was received
+          enum:
+          - BANK_TRANSFER
+          - UPI
+          - CHEQUE
+          - CASH
+          example: BANK_TRANSFER
+        paymentReference:
+          type: string
+          description: "The payer's reference for a payment, such as a UTR or cheque\
+            \ number"
+          example: HDFC0001234567890
+        comment:
+          type: string
+          description: Free-text note about a payment
+          example: Settles the incorporation invoice
+        createdAt:
+          type: string
+          format: date-time
+          description: When the entry was posted
+          example: 2026-10-13T04:30:00Z
+        updatedAt:
+          type: string
+          format: date-time
+          description: When the entry was last changed; its posting time until its
+            rates are corrected
+          example: 2026-10-13T04:30:00Z
+    LedgerEntryUpdateRequest:
+      type: object
+      description: Corrected rates for a ledger entry
+      properties:
+        serviceFee:
+          type: number
+          description: "Fee for the service, before discount and excluding GST"
+          example: 5000.0
+          minimum: 0.00
+        discountPercent:
+          type: number
+          description: "Discount granted on the service, as a percentage"
+          example: 5.0
+          maximum: 100.00
+          minimum: 0.00
+        gstRatePercent:
+          type: number
+          description: "GST rate to charge, as a percentage"
+          example: 18.0
+          maximum: 100.00
+          minimum: 0.00
+      required:
+      - discountPercent
+      - gstRatePercent
+      - serviceFee
     PaymentTermsRequest:
       type: object
       description: Payment terms to store under Global Settings
@@ -2248,6 +3379,367 @@ components:
           items:
             type: string
             example: Mehta Textiles Pvt Ltd
+    ClientLedgerSummaryResponse:
+      type: object
+      description: "A client's billing and payments for one Indian financial year,\
+        \ across all of their companies"
+      properties:
+        clientId:
+          type: string
+          format: uuid
+          description: Identifier of the client
+          example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+        clientName:
+          type: string
+          description: Full name of the client
+          example: Rohan Mehta
+        financialYear:
+          type: string
+          description: Indian financial year summarised
+          example: 2026-27
+        fromDate:
+          type: string
+          format: date
+          description: "First day of the financial year, 1 April"
+          example: 2026-04-01
+        toDate:
+          type: string
+          format: date
+          description: "Last day of the financial year, 31 March"
+          example: 2027-03-31
+        totalBilled:
+          type: number
+          description: "Sum of the service charges falling due in the year, across\
+            \ every company"
+          example: 67260.0
+        totalPaymentReceived:
+          type: number
+          description: "Sum of the payments received in the year from every company,\
+            \ as a positive number"
+          example: 43025.0
+        pending:
+          type: number
+          description: "Billed less received in the year, across every company; negative\
+            \ when the year's payments exceed its billing"
+          example: 24235.0
+        totalDiscount:
+          type: number
+          description: "Sum of the discounts taken off the service fees billed in\
+            \ the year, across every company"
+          example: 3000.0
+        lastPayment:
+          $ref: "#/components/schemas/LastPayment"
+          description: "The most recent payment received in the year from any company,\
+            \ naming the company; absent when none was received"
+    LastPayment:
+      type: object
+      description: The most recent payment received in the financial year
+      properties:
+        date:
+          type: string
+          format: date
+          description: Date the payment was received
+          example: 2026-10-12
+        amount:
+          type: number
+          description: "Amount received, as a positive number"
+          example: 15000.0
+        companyId:
+          type: string
+          format: uuid
+          description: "Company that made the payment; given only in a client's summary,\
+            \ which spans several companies"
+          example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+        companyName:
+          type: string
+          description: Name of the company that made the payment; given only in a
+            client's summary
+          example: Mehta Textiles Pvt Ltd
+    CompanyTotals:
+      type: object
+      description: Totals of the ledger entries listed for one company of the client
+      properties:
+        companyId:
+          type: string
+          format: uuid
+          description: Identifier of the company
+          example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+        companyName:
+          type: string
+          description: Name of the company
+          example: Mehta Textiles Pvt Ltd
+        entryCount:
+          type: integer
+          format: int64
+          description: Number of entries listed for this company
+          example: 5
+        totalServiceFee:
+          type: number
+          description: "Sum of the service fees, before discount and excluding GST"
+          example: 35000.0
+        totalDiscountAmount:
+          type: number
+          description: Sum of the discounts taken off the service fees
+          example: 1750.0
+        totalTaxableAmount:
+          type: number
+          description: "Sum of the taxable amounts, on which GST is charged"
+          example: 33250.0
+        totalGstAmount:
+          type: number
+          description: Sum of the GST charged
+          example: 5985.0
+        totalAmount:
+          type: number
+          description: "Sum of the amounts charged for services: taxable amounts plus\
+            \ GST. Payments are not included; see totalPaid"
+          example: 39235.0
+        totalPaid:
+          type: number
+          description: "Sum of the payments received, as a positive number"
+          example: 28025.0
+        balance:
+          type: number
+          description: "Amount still owed: totalAmount less totalPaid; negative when\
+            \ more has been paid than charged"
+          example: 11210.0
+    FinancialYearTotals:
+      type: object
+      description: Totals of the ledger entries listed in one financial year
+      properties:
+        financialYear:
+          type: string
+          description: Indian financial year (1 April to 31 March) the entries' due
+            dates fall in
+          example: 2026-27
+        entryCount:
+          type: integer
+          format: int64
+          description: Number of entries listed in this financial year
+          example: 7
+        totalServiceFee:
+          type: number
+          description: "Sum of the service fees, before discount and excluding GST"
+          example: 35000.0
+        totalDiscountAmount:
+          type: number
+          description: Sum of the discounts taken off the service fees
+          example: 1750.0
+        totalTaxableAmount:
+          type: number
+          description: "Sum of the taxable amounts, on which GST is charged"
+          example: 33250.0
+        totalGstAmount:
+          type: number
+          description: Sum of the GST charged
+          example: 5985.0
+        totalAmount:
+          type: number
+          description: "Sum of the amounts charged for services: taxable amounts plus\
+            \ GST. Payments are not included; see totalPaid"
+          example: 39235.0
+        totalPaid:
+          type: number
+          description: "Sum of the payments received, as a positive number"
+          example: 28025.0
+        balance:
+          type: number
+          description: "Amount still owed: totalAmount less totalPaid; negative when\
+            \ more has been paid than charged"
+          example: 11210.0
+    LedgerListResponse:
+      type: object
+      description: "One page of ledger entries, with the totals of every entry matching\
+        \ the filters"
+      properties:
+        entries:
+          type: array
+          description: "The entries on this page, earliest due first; empty when none\
+            \ matches or the page is past the last"
+          items:
+            $ref: "#/components/schemas/LedgerEntryResponse"
+        page:
+          $ref: "#/components/schemas/PageMetadata"
+          description: Position of this page within every entry matching the filters
+        summary:
+          $ref: "#/components/schemas/LedgerSummary"
+          description: "Totals of every entry matching the filters, across all pages"
+    LedgerSummary:
+      type: object
+      description: "Totals of every ledger entry matching the filters, across all\
+        \ pages, not just the page returned"
+      properties:
+        entryCount:
+          type: integer
+          format: int64
+          description: "Number of entries matching the filters, service charges and\
+            \ payments alike"
+          example: 12
+        totalServiceFee:
+          type: number
+          description: "Sum of the service fees, before discount and excluding GST;\
+            \ service charges only"
+          example: 60000.0
+        totalDiscountAmount:
+          type: number
+          description: Sum of the discounts taken off the service fees
+          example: 3000.0
+        totalTaxableAmount:
+          type: number
+          description: "Sum of the taxable amounts, on which GST is charged"
+          example: 57000.0
+        totalGstAmount:
+          type: number
+          description: Sum of the GST charged
+          example: 10260.0
+        totalAmount:
+          type: number
+          description: "Sum of the amounts charged for services: taxable amounts plus\
+            \ GST. Payments are not included; see totalPaid"
+          example: 67260.0
+        totalPaid:
+          type: number
+          description: "Sum of the payments received, as a positive number"
+          example: 28025.0
+        balance:
+          type: number
+          description: "Amount still owed: totalAmount less totalPaid; negative when\
+            \ more has been paid than charged"
+          example: 39235.0
+        byFinancialYear:
+          type: array
+          description: "The same totals for each financial year the entries fall in,\
+            \ earliest year first; empty when there are no entries"
+          items:
+            $ref: "#/components/schemas/FinancialYearTotals"
+        byCompany:
+          type: array
+          description: "The same totals for each company the entries were billed to,\
+            \ ordered by company name. Returned on the client's ledger only; empty\
+            \ when there are no entries"
+          items:
+            $ref: "#/components/schemas/CompanyTotals"
+    PageMetadata:
+      type: object
+      description: Position of the page returned within the full list
+      properties:
+        number:
+          type: integer
+          format: int32
+          description: "Number of this page, counting from 0"
+          example: 0
+        size:
+          type: integer
+          format: int32
+          description: Largest number of entries a page holds
+          example: 50
+        numberOfElements:
+          type: integer
+          format: int32
+          description: Number of entries on this page
+          example: 50
+        totalElements:
+          type: integer
+          format: int64
+          description: Number of entries across every page
+          example: 132
+        totalPages:
+          type: integer
+          format: int32
+          description: Number of pages; 0 when there are no entries
+          example: 3
+        hasNext:
+          type: boolean
+          description: Whether a page follows this one
+          example: true
+    PaymentListResponse:
+      type: object
+      description: "One page of a company's payments, with the totals of every payment\
+        \ matching the filters"
+      properties:
+        payments:
+          type: array
+          description: "The payments on this page, each the ledger entry it was recorded\
+            \ as, with entryType PAYMENT and a negative totalAmount; empty when none\
+            \ matches or the page is past the last"
+          items:
+            $ref: "#/components/schemas/LedgerEntryResponse"
+        page:
+          $ref: "#/components/schemas/PageMetadata"
+          description: Position of this page within every payment matching the filters
+        summary:
+          $ref: "#/components/schemas/PaymentSummary"
+          description: "Totals of every payment matching the filters, across all pages"
+    PaymentSummary:
+      type: object
+      description: "Totals of every payment matching the filters, across all pages,\
+        \ not just the page returned"
+      properties:
+        paymentCount:
+          type: integer
+          format: int64
+          description: Number of payments matching the filters
+          example: 4
+        totalReceived:
+          type: number
+          description: "Sum of the payments received, as a positive number"
+          example: 18605.0
+    CompanyLedgerSummaryResponse:
+      type: object
+      description: A company's billing and payments for one Indian financial year
+      properties:
+        clientId:
+          type: string
+          format: uuid
+          description: Identifier of the client
+          example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+        companyId:
+          type: string
+          format: uuid
+          description: Identifier of the company
+          example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+        companyName:
+          type: string
+          description: Name of the company
+          example: Mehta Textiles Pvt Ltd
+        financialYear:
+          type: string
+          description: Indian financial year summarised
+          example: 2026-27
+        fromDate:
+          type: string
+          format: date
+          description: "First day of the financial year, 1 April"
+          example: 2026-04-01
+        toDate:
+          type: string
+          format: date
+          description: "Last day of the financial year, 31 March"
+          example: 2027-03-31
+        totalBilled:
+          type: number
+          description: "Sum of the service charges falling due in the year: taxable\
+            \ amounts plus GST"
+          example: 39235.0
+        totalPaymentReceived:
+          type: number
+          description: "Sum of the payments received in the year, as a positive number"
+          example: 15000.0
+        pending:
+          type: number
+          description: "Billed less received in the year; negative when the year's\
+            \ payments exceed its billing, for example when they settle an earlier\
+            \ year's charges"
+          example: 24235.0
+        totalDiscount:
+          type: number
+          description: Sum of the discounts taken off the service fees billed in the
+            year
+          example: 1750.0
+        lastPayment:
+          $ref: "#/components/schemas/LastPayment"
+          description: The most recent payment received in the year; absent when none
+            was received
   securitySchemes:
     bearerAuth:
       type: http

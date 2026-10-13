@@ -3,6 +3,7 @@ package com.psc.cl.client.dto;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.psc.cl.client.model.ClientCompany;
 import com.psc.cl.client.model.CompanyType;
+import com.psc.cl.ledger.dto.CompanyBalance;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.Value;
@@ -44,6 +45,22 @@ public class CompanyResponse {
             + "client's companies", example = "3")
     Long serviceCount;
 
+    @Schema(description = "Financial year the billing figures below cover. Only returned when listing a "
+            + "client's companies for a financial year", example = "2026-27")
+    String financialYear;
+
+    @Schema(description = "Sum of the service charges falling due in the financial year: taxable amounts "
+            + "plus GST. Only returned when listing for a financial year", example = "39235.00")
+    BigDecimal totalBilled;
+
+    @Schema(description = "Sum of the payments received in the financial year, as a positive number. Only "
+            + "returned when listing for a financial year", example = "15605.00")
+    BigDecimal totalPaymentReceived;
+
+    @Schema(description = "Billed less received in the financial year; negative when more was received. "
+            + "Only returned when listing for a financial year", example = "23630.00")
+    BigDecimal pending;
+
     /**
      * Maps a persisted entity onto its API representation.
      *
@@ -63,6 +80,27 @@ public class CompanyResponse {
      */
     public static CompanyResponse from(ClientCompany entity, long serviceCount) {
         return builderFrom(entity).serviceCount(serviceCount).build();
+    }
+
+    /**
+     * Maps a persisted entity onto its API representation, together with its service count and
+     * what it was billed and paid in a financial year.
+     *
+     * @param entity        the stored company
+     * @param serviceCount  the number of services assigned to the company
+     * @param financialYear the financial year the balance covers, such as 2026-27
+     * @param balance       what the company was billed and paid in that year
+     * @return the response payload
+     */
+    public static CompanyResponse from(ClientCompany entity, long serviceCount, String financialYear,
+                                       CompanyBalance balance) {
+        return builderFrom(entity)
+                .serviceCount(serviceCount)
+                .financialYear(financialYear)
+                .totalBilled(balance.totalBilled())
+                .totalPaymentReceived(balance.totalPaymentReceived())
+                .pending(balance.pending())
+                .build();
     }
 
     private static CompanyResponseBuilder builderFrom(ClientCompany entity) {

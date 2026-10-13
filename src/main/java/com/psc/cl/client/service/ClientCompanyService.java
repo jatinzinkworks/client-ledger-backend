@@ -3,6 +3,8 @@ package com.psc.cl.client.service;
 import com.psc.cl.client.dto.CompanyRequest;
 import com.psc.cl.client.dto.CompanyResponse;
 
+import com.psc.cl.ledger.model.FinancialYear;
+
 import java.util.List;
 import java.util.UUID;
 
@@ -19,7 +21,7 @@ public interface ClientCompanyService {
      * @throws com.psc.cl.client.exception.ClientNotFoundException
      *         when no client carries this identifier
      */
-    List<CompanyResponse> listCompanies(UUID clientId);
+    List<CompanyResponse> listCompanies(UUID clientId, FinancialYear financialYear);
 
     /**
      * Adds one company to an existing client.

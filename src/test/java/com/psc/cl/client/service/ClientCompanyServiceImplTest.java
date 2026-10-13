@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.psc.cl.client.dto.ClientRequest;
@@ -23,6 +24,10 @@ import com.psc.cl.client.repository.ClientCompanyRepository;
 import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.client.repository.CompanyServiceCount;
 import com.psc.cl.client.repository.ServiceAssignmentRepository;
+import com.psc.cl.ledger.dto.CompanyBalance;
+import com.psc.cl.ledger.model.FinancialYear;
+import com.psc.cl.ledger.service.FinancialYears;
+import com.psc.cl.ledger.service.LedgerService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -32,6 +37,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -50,6 +56,9 @@ class ClientCompanyServiceImplTest {
     @Mock
     private ServiceAssignmentRepository serviceAssignmentRepository;
 
+    @Mock
+    private LedgerService ledgerService;
+
     @InjectMocks
     private ClientCompanyServiceImpl clientCompanyService;
 
@@ -66,7 +75,7 @@ class ClientCompanyServiceImplTest {
         when(serviceAssignmentRepository.countByCompanyIdIn(Set.of(hufId, textilesId)))
                 .thenReturn(List.of(serviceCount(textilesId, 3)));
 
-        List<CompanyResponse> companies = clientCompanyService.listCompanies(stored.getId());
+        List<CompanyResponse> companies = clientCompanyService.listCompanies(stored.getId(), null);
 
         assertThat(companies).extracting("companyName")
                 .containsExactly("Mehta Textiles Pvt Ltd", "Rohan Mehta HUF");
@@ -74,7 +83,43 @@ class ClientCompanyServiceImplTest {
         assertThat(companies).extracting("discountPercent")
                 .containsExactly(new BigDecimal("7.50"), new BigDecimal("10.00"));
         assertThat(companies).extracting("discountInherited").containsExactly(false, true);
-        assertThat(companies).allSatisfy(company -> assertThat(company.getAddress()).isNotBlank());
+        assertThat(companies).allSatisfy(company -> {
+            assertThat(company.getAddress()).isNotBlank();
+            // Without a financial year, no billing figures.
+            assertThat(company.getFinancialYear()).isNull();
+            assertThat(company.getTotalBilled()).isNull();
+            assertThat(company.getPending()).isNull();
+        });
+        verifyNoInteractions(ledgerService);
+    }
+
+    @Test
+    @DisplayName("adds each company's billed, received and pending amounts for a financial year, zero when idle")
+    void listsCompaniesWithFinancialYearBalances() {
+        Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF", "Mehta Textiles Pvt Ltd");
+        UUID textilesId = stored.getCompanies().get(1).getId();
+        when(clientRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
+        when(serviceAssignmentRepository.countByCompanyIdIn(any())).thenReturn(List.of());
+        FinancialYear year = FinancialYears.parse("2026-27");
+        // The HUF had nothing billed or received, so the ledger returns no balance for it.
+        when(ledgerService.companyBalances(stored.getId(), year)).thenReturn(Map.of(textilesId,
+                new CompanyBalance(new BigDecimal("39235.00"), new BigDecimal("15605.00"),
+                        new BigDecimal("23630.00"))));
+
+        List<CompanyResponse> companies = clientCompanyService.listCompanies(stored.getId(), year);
+
+        CompanyResponse textiles = companies.get(0);
+        assertThat(textiles.getCompanyName()).isEqualTo("Mehta Textiles Pvt Ltd");
+        assertThat(textiles.getFinancialYear()).isEqualTo("2026-27");
+        assertThat(textiles.getTotalBilled()).isEqualTo(new BigDecimal("39235.00"));
+        assertThat(textiles.getTotalPaymentReceived()).isEqualTo(new BigDecimal("15605.00"));
+        assertThat(textiles.getPending()).isEqualTo(new BigDecimal("23630.00"));
+
+        CompanyResponse huf = companies.get(1);
+        assertThat(huf.getFinancialYear()).isEqualTo("2026-27");
+        assertThat(huf.getTotalBilled()).isEqualTo(new BigDecimal("0.00"));
+        assertThat(huf.getTotalPaymentReceived()).isEqualTo(new BigDecimal("0.00"));
+        assertThat(huf.getPending()).isEqualTo(new BigDecimal("0.00"));
     }
 
     @Test
@@ -83,8 +128,10 @@ class ClientCompanyServiceImplTest {
         UUID missing = UUID.randomUUID();
         when(clientRepository.findById(missing)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> clientCompanyService.listCompanies(missing))
+        assertThatThrownBy(() -> clientCompanyService.listCompanies(missing, FinancialYears.parse("2026-27")))
                 .isInstanceOf(ClientNotFoundException.class);
+
+        verifyNoInteractions(ledgerService);
     }
 
     @Test

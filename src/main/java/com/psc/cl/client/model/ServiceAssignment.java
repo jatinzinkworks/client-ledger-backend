@@ -76,6 +76,13 @@ public class ServiceAssignment {
     @Column(name = "comment", length = MAX_COMMENT_LENGTH)
     private String comment;
 
+    /**
+     * Whether a {@link BillingFrequency#ONE_OFF} service has been posted to the ledger, so it is
+     * billed once only. Recurring services move {@link #nextDueDate} on instead.
+     */
+    @Column(name = "ledger_posted", nullable = false)
+    private boolean ledgerPosted;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

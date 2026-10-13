@@ -35,6 +35,10 @@ spring:
   jackson:
     default-property-inclusion: non_null
 
+client-ledger:
+  # Zone whose calendar decides "today" for billing, such as which services are due for the ledger.
+  business-time-zone: ${BUSINESS_TIME_ZONE:Asia/Kolkata}
+
 server:
   port: ${SERVER_PORT:8080}
 

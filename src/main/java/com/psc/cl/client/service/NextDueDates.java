@@ -13,8 +13,10 @@ import java.time.YearMonth;
  *
  * <p>The V9 migration applies the same rules in SQL to rows that existed before the column did;
  * keep the two in step.
+ *
+ * <p>Public so the ledger can move a recurring service on to its next due date once billed.
  */
-final class NextDueDates {
+public final class NextDueDates {
 
     /** An annual schedule recurs within twelve months, so a year's search always finds a date. */
     private static final int MONTHS_TO_SEARCH = 12;
@@ -41,7 +43,7 @@ final class NextDueDates {
      * @param from    the date to search from, inclusive
      * @return the next due date
      */
-    static LocalDate onOrAfter(CatalogService service, LocalDate from) {
+    public static LocalDate onOrAfter(CatalogService service, LocalDate from) {
         BillingFrequency frequency = service.getBillingFrequency();
         if (frequency == BillingFrequency.ONE_OFF) {
             return from;

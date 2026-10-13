@@ -89,6 +89,13 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 .body(body(HttpStatus.BAD_REQUEST, VALIDATION_FAILED, VALIDATION_MESSAGE, request, fieldErrors));
     }
 
+    @ExceptionHandler(InvalidRequestException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidRequest(InvalidRequestException ex, WebRequest request) {
+        log.warn("Invalid request on {}: {}", path(request), ex.getMessage());
+        return ResponseEntity.badRequest()
+                .body(body(HttpStatus.BAD_REQUEST, "INVALID_REQUEST", ex.getMessage(), request, null));
+    }
+
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleNotFound(ResourceNotFoundException ex, WebRequest request) {
         log.warn("Not found on {}: {}", path(request), ex.getMessage());

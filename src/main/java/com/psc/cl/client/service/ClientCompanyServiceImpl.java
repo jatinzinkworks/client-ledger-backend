@@ -15,6 +15,9 @@ import com.psc.cl.client.repository.ClientCompanyRepository;
 import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.client.repository.CompanyServiceCount;
 import com.psc.cl.client.repository.ServiceAssignmentRepository;
+import com.psc.cl.ledger.dto.CompanyBalance;
+import com.psc.cl.ledger.model.FinancialYear;
+import com.psc.cl.ledger.service.LedgerService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,9 +48,11 @@ public class ClientCompanyServiceImpl implements ClientCompanyService {
 
     private final ServiceAssignmentRepository serviceAssignmentRepository;
 
+    private final LedgerService ledgerService;
+
     @Override
     @Transactional(readOnly = true)
-    public List<CompanyResponse> listCompanies(UUID clientId) {
+    public List<CompanyResponse> listCompanies(UUID clientId, FinancialYear financialYear) {
         Client client = requireClient(clientId);
         Set<UUID> companyIds = client.getCompanies().stream()
                 .map(ClientCompany::getId)
@@ -56,9 +61,19 @@ public class ClientCompanyServiceImpl implements ClientCompanyService {
         // One query for every company of the client, rather than one per company.
         Map<UUID, Long> serviceCounts = serviceAssignmentRepository.countByCompanyIdIn(companyIds).stream()
                 .collect(Collectors.toMap(CompanyServiceCount::getCompanyId, CompanyServiceCount::getServiceCount));
+        // Likewise one ledger query for every company's balance, and only when a year is asked for.
+        Map<UUID, CompanyBalance> balances = financialYear == null
+                ? Map.of()
+                : ledgerService.companyBalances(clientId, financialYear);
 
         return client.getCompanies().stream()
-                .map(company -> CompanyResponse.from(company, serviceCounts.getOrDefault(company.getId(), 0L)))
+                .map(company -> {
+                    long serviceCount = serviceCounts.getOrDefault(company.getId(), 0L);
+                    return financialYear == null
+                            ? CompanyResponse.from(company, serviceCount)
+                            : CompanyResponse.from(company, serviceCount, financialYear.label(),
+                                    balances.getOrDefault(company.getId(), CompanyBalance.ZERO));
+                })
                 .sorted(ClientResponse.BY_COMPANY_NAME)
                 .toList();
     }

@@ -3,6 +3,8 @@ package com.psc.cl.client.controller;
 import com.psc.cl.client.dto.CompanyRequest;
 import com.psc.cl.client.dto.CompanyResponse;
 import com.psc.cl.client.service.ClientCompanyService;
+import com.psc.cl.ledger.model.FinancialYear;
+import com.psc.cl.ledger.service.FinancialYears;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,9 +28,10 @@ public class ClientCompanyController implements ClientCompanyApi {
     private final ClientCompanyService clientCompanyService;
 
     @Override
-    public ResponseEntity<List<CompanyResponse>> listCompanies(UUID id) {
-        log.debug("Received request to list companies of client {}", id);
-        return ResponseEntity.ok(clientCompanyService.listCompanies(id));
+    public ResponseEntity<List<CompanyResponse>> listCompanies(UUID id, String financialYear) {
+        log.debug("Received request to list companies of client {} for FY {}", id, financialYear);
+        FinancialYear year = financialYear == null ? null : FinancialYears.parse(financialYear);
+        return ResponseEntity.ok(clientCompanyService.listCompanies(id, year));
     }
 
     @Override

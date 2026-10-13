@@ -27,6 +27,7 @@ import com.psc.cl.client.exception.CompanyNotFoundException;
 import com.psc.cl.client.exception.LastCompanyRemovalException;
 import com.psc.cl.client.model.CompanyType;
 import com.psc.cl.client.service.ClientCompanyService;
+import com.psc.cl.ledger.service.FinancialYears;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -73,7 +74,7 @@ class ClientCompanyControllerTest {
                 .discountPercent(new BigDecimal("5.00"))
                 .serviceCount(3L)
                 .build();
-        when(clientCompanyService.listCompanies(id)).thenReturn(List.of(listed));
+        when(clientCompanyService.listCompanies(id, null)).thenReturn(List.of(listed));
 
         mockMvc.perform(get(CLIENTS_URL + "/" + id + "/companies"))
                 .andExpect(status().isOk())
@@ -84,10 +85,43 @@ class ClientCompanyControllerTest {
     }
 
     @Test
+    @DisplayName("passes the financial year through and returns each company's billed, received and pending")
+    void listsCompaniesForFinancialYear() throws Exception {
+        UUID id = UUID.randomUUID();
+        CompanyResponse listed = CompanyResponse.builder()
+                .id(UUID.randomUUID())
+                .companyName("Mehta Textiles Pvt Ltd")
+                .serviceCount(1L)
+                .financialYear("2026-27")
+                .totalBilled(new BigDecimal("39235.00"))
+                .totalPaymentReceived(new BigDecimal("15605.00"))
+                .pending(new BigDecimal("23630.00"))
+                .build();
+        when(clientCompanyService.listCompanies(id, FinancialYears.parse("2026-27"))).thenReturn(List.of(listed));
+
+        mockMvc.perform(get(CLIENTS_URL + "/" + id + "/companies").param("financialYear", "2026-27"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].financialYear").value("2026-27"))
+                .andExpect(jsonPath("$[0].totalBilled").value(39235.0))
+                .andExpect(jsonPath("$[0].totalPaymentReceived").value(15605.0))
+                .andExpect(jsonPath("$[0].pending").value(23630.0));
+    }
+
+    @Test
+    @DisplayName("returns 400 when the financial year is not written as yyyy-yy")
+    void listCompaniesRejectsMalformedFinancialYear() throws Exception {
+        mockMvc.perform(get(CLIENTS_URL + "/" + UUID.randomUUID() + "/companies").param("financialYear", "2026"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+
+        verify(clientCompanyService, never()).listCompanies(any(), any());
+    }
+
+    @Test
     @DisplayName("returns 404 when listing companies of an unknown client")
     void listCompaniesReturnsNotFound() throws Exception {
         UUID id = UUID.randomUUID();
-        when(clientCompanyService.listCompanies(id)).thenThrow(new ClientNotFoundException(id));
+        when(clientCompanyService.listCompanies(id, null)).thenThrow(new ClientNotFoundException(id));
 
         mockMvc.perform(get(CLIENTS_URL + "/" + id + "/companies"))
                 .andExpect(status().isNotFound())

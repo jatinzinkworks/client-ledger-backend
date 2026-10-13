@@ -1,11 +1,14 @@
 package com.psc.cl.client.repository;
 
 import com.psc.cl.client.model.ServiceAssignment;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -46,6 +49,22 @@ public interface ServiceAssignmentRepository extends JpaRepository<ServiceAssign
      * @return true when the company has at least one assignment of the service
      */
     boolean existsByCompanyIdAndCatalogServiceId(UUID companyId, UUID catalogServiceId);
+
+    /**
+     * Reads the services of one company that are due for the ledger and locks their rows until
+     * the transaction ends, so concurrent postings for the company take turns and cannot bill the
+     * same due date twice. A ONE_OFF service already posted is left out. Served by the
+     * (company_id, catalog_service_id) index.
+     *
+     * @param companyId the company
+     * @param asOf      the date services must fall due on or before
+     * @return the locked assignments, earliest due first; empty when nothing is due
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select a from ServiceAssignment a where a.company.id = :companyId and a.nextDueDate <= :asOf "
+            + "and a.ledgerPosted = false order by a.nextDueDate, a.createdAt")
+    List<ServiceAssignment> findDueForUpdate(@Param("companyId") UUID companyId,
+                                             @Param("asOf") LocalDate asOf);
 
     /**
      * Whether any of the given companies has services assigned, so they are not removed from under
