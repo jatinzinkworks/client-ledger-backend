@@ -55,7 +55,8 @@ class ManagerCatalogIT extends AbstractPostgresIT {
         mockMvc.perform(get(MANAGERS_URL + "/" + id))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.email").value("pranay.singhal@pranaysinghal.in"))
-                .andExpect(jsonPath("$.mobileNumber").value("+91 98765 43210"));
+                .andExpect(jsonPath("$.mobileNumber").value("+91 98765 43210"))
+                .andExpect(jsonPath("$.clientCount").value(0));
 
         mockMvc.perform(get(MANAGERS_URL))
                 .andExpect(status().isOk())
@@ -175,7 +176,8 @@ class ManagerCatalogIT extends AbstractPostgresIT {
                 .andExpect(jsonPath("$.length()").value(3))
                 .andExpect(jsonPath("$[0].firstName").value("Aarti"))
                 .andExpect(jsonPath("$[1].firstName").value("Bhavna"))
-                .andExpect(jsonPath("$[2].lastName").value("Singhal"));
+                .andExpect(jsonPath("$[2].lastName").value("Singhal"))
+                .andExpect(jsonPath("$[0].clientCount").value(0));
     }
 
     @Test

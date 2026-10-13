@@ -38,6 +38,11 @@ public class ManagerResponse {
     @Schema(description = "Mobile contact number", example = "+91 98765 43210")
     String mobileNumber;
 
+    @Schema(description = "Number of clients assigned to the manager. Returned when listing managers "
+            + "and when fetching one by id",
+            example = "12")
+    Long clientCount;
+
     @Schema(description = "When the manager was added", example = "2026-10-01T10:15:30Z")
     Instant createdAt;
 
@@ -51,6 +56,21 @@ public class ManagerResponse {
      * @return the response payload
      */
     public static ManagerResponse from(Manager entity) {
+        return builderFrom(entity).build();
+    }
+
+    /**
+     * Maps a persisted entity onto its API representation, including how many clients it has.
+     *
+     * @param entity      the stored manager
+     * @param clientCount how many clients are assigned to the manager
+     * @return the response payload
+     */
+    public static ManagerResponse from(Manager entity, long clientCount) {
+        return builderFrom(entity).clientCount(clientCount).build();
+    }
+
+    private static ManagerResponseBuilder builderFrom(Manager entity) {
         return ManagerResponse.builder()
                 .id(entity.getId())
                 .firstName(entity.getFirstName())
@@ -59,7 +79,6 @@ public class ManagerResponse {
                 .role(entity.getRole())
                 .mobileNumber(entity.getMobileNumber())
                 .createdAt(entity.getCreatedAt())
-                .updatedAt(entity.getUpdatedAt())
-                .build();
+                .updatedAt(entity.getUpdatedAt());
     }
 }

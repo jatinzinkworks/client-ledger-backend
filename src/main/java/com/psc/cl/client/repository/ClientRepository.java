@@ -60,4 +60,23 @@ public interface ClientRepository extends JpaRepository<Client, UUID> {
      * @return how many clients are assigned to the manager, zero when none
      */
     long countByManagerId(UUID managerId);
+
+    /**
+     * Counts the clients of every manager that has at least one, in a single grouped query.
+     * Managers without clients do not appear.
+     *
+     * @return one row per manager with clients
+     */
+    @Query("select c.managerId as managerId, count(c) as clientCount from Client c group by c.managerId")
+    List<ManagerClientCount> countClientsByManager();
+
+    /**
+     * How many clients one manager looks after, as returned by {@link #countClientsByManager()}.
+     */
+    interface ManagerClientCount {
+
+        UUID getManagerId();
+
+        long getClientCount();
+    }
 }

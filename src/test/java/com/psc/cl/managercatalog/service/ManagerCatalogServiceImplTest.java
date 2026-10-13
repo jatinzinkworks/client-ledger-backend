@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.psc.cl.client.repository.ClientRepository;
+import com.psc.cl.client.repository.ClientRepository.ManagerClientCount;
 import com.psc.cl.managercatalog.dto.ManagerRequest;
 import com.psc.cl.managercatalog.dto.ManagerResponse;
 import com.psc.cl.managercatalog.exception.ManagerEmailAlreadyExistsException;
@@ -116,11 +117,13 @@ class ManagerCatalogServiceImplTest {
     void readsManagerById() {
         Manager stored = stored();
         when(managerRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
+        when(clientRepository.countByManagerId(stored.getId())).thenReturn(2L);
 
         ManagerResponse response = managerCatalogService.getManager(stored.getId());
 
         assertThat(response.getId()).isEqualTo(stored.getId());
         assertThat(response.getLastName()).isEqualTo("Singhal");
+        assertThat(response.getClientCount()).isEqualTo(2L);
     }
 
     @Test
@@ -148,6 +151,20 @@ class ManagerCatalogServiceImplTest {
         verify(managerRepository).findAll(sortCaptor.capture());
         assertThat(sortCaptor.getValue())
                 .isEqualTo(Sort.by(Sort.Direction.ASC, "lastName", "firstName"));
+    }
+
+    @Test
+    @DisplayName("lists each manager's client count, zero for a manager without clients")
+    void listsManagersWithClientCounts() {
+        Manager withClients = stored();
+        Manager withoutClients = stored();
+        when(managerRepository.findAll(any(Sort.class))).thenReturn(List.of(withClients, withoutClients));
+        when(clientRepository.countClientsByManager())
+                .thenReturn(List.of(clientCount(withClients.getId(), 4)));
+
+        List<ManagerResponse> managers = managerCatalogService.listManagers();
+
+        assertThat(managers).extracting(ManagerResponse::getClientCount).containsExactly(4L, 0L);
     }
 
     @Test
@@ -295,6 +312,20 @@ class ManagerCatalogServiceImplTest {
         manager.setRole(ManagerRole.SENIOR_MANAGER);
         manager.setMobileNumber("+91 98765 43210");
         return manager;
+    }
+
+    private ManagerClientCount clientCount(UUID managerId, long count) {
+        return new ManagerClientCount() {
+            @Override
+            public UUID getManagerId() {
+                return managerId;
+            }
+
+            @Override
+            public long getClientCount() {
+                return count;
+            }
+        };
     }
 
     private void stubSave() {

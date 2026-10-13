@@ -177,7 +177,8 @@ class ManagerCatalogControllerTest {
 
         mockMvc.perform(get(MANAGERS_URL + "/" + id))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.email").value("pranay.singhal@pranaysinghal.in"));
+                .andExpect(jsonPath("$.email").value("pranay.singhal@pranaysinghal.in"))
+                .andExpect(jsonPath("$.clientCount").value(3));
     }
 
     @Test
@@ -209,7 +210,8 @@ class ManagerCatalogControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].lastName").value("Singhal"));
+                .andExpect(jsonPath("$[0].lastName").value("Singhal"))
+                .andExpect(jsonPath("$[0].clientCount").value(3));
     }
 
     @Test
@@ -331,6 +333,7 @@ class ManagerCatalogControllerTest {
                 .email("pranay.singhal@pranaysinghal.in")
                 .role(ManagerRole.SENIOR_MANAGER)
                 .mobileNumber("+91 98765 43210")
+                .clientCount(3L)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();

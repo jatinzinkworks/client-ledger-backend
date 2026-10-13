@@ -1,6 +1,7 @@
 package com.psc.cl.managercatalog.service;
 
 import com.psc.cl.client.repository.ClientRepository;
+import com.psc.cl.client.repository.ClientRepository.ManagerClientCount;
 import com.psc.cl.managercatalog.dto.ManagerRequest;
 import com.psc.cl.managercatalog.dto.ManagerResponse;
 import com.psc.cl.managercatalog.exception.ManagerEmailAlreadyExistsException;
@@ -17,7 +18,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Default {@link ManagerCatalogService} backed by {@link ManagerRepository}.
@@ -54,14 +57,18 @@ public class ManagerCatalogServiceImpl implements ManagerCatalogService {
     @Override
     @Transactional(readOnly = true)
     public ManagerResponse getManager(UUID id) {
-        return ManagerResponse.from(require(id));
+        return ManagerResponse.from(require(id), clientRepository.countByManagerId(id));
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<ManagerResponse> listManagers() {
+        // One grouped query for every manager's client count, rather than one per manager.
+        Map<UUID, Long> clientCounts = clientRepository.countClientsByManager().stream()
+                .collect(Collectors.toMap(ManagerClientCount::getManagerId, ManagerClientCount::getClientCount));
+
         return managerRepository.findAll(BY_NAME).stream()
-                .map(ManagerResponse::from)
+                .map(manager -> ManagerResponse.from(manager, clientCounts.getOrDefault(manager.getId(), 0L)))
                 .toList();
     }
 
