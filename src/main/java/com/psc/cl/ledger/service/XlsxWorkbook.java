@@ -10,6 +10,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -28,6 +29,9 @@ final class XlsxWorkbook {
 
     /** Excel refuses sheet names longer than this. */
     private static final int MAX_SHEET_NAME_LENGTH = 31;
+
+    /** Characters Excel refuses in a sheet name. */
+    private static final Pattern FORBIDDEN_IN_SHEET_NAME = Pattern.compile("[:\\\\/?*\\[\\]]");
 
     private static final String MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 
@@ -75,17 +79,63 @@ final class XlsxWorkbook {
     /**
      * Adds a sheet after those already added.
      *
-     * @param name         the tab's name, at most 31 characters and without {@code : \ / ? * [ ]}
+     * @param name         the tab's name: at most 31 characters, without {@code : \ / ? * [ ]}, not
+     *                     starting or ending with an apostrophe, and unlike any other sheet's name
+     *                     ignoring case, as Excel requires; see {@link #sheetName}
      * @param columnWidths width of each column from A, in characters
      * @return the sheet, to add rows to
      */
     Sheet addSheet(String name, int... columnWidths) {
-        if (name.isEmpty() || name.length() > MAX_SHEET_NAME_LENGTH || name.matches(".*[:\\\\/?*\\[\\]].*")) {
+        if (!isValidSheetName(name)) {
             throw new IllegalArgumentException("Not a valid sheet name: " + name);
+        }
+        if (isTaken(name)) {
+            throw new IllegalArgumentException("The workbook already has a sheet named " + name);
         }
         Sheet sheet = new Sheet(name, columnWidths.clone());
         sheets.add(sheet);
         return sheet;
+    }
+
+    /**
+     * Turns any text, such as a company's name, into a sheet name {@link #addSheet} accepts: the
+     * characters Excel forbids become hyphens, the name is cut to 31 characters, and a name already
+     * taken gets a number, such as {@code Mehta Textiles (2)}.
+     *
+     * @param text     the text to name the sheet after
+     * @param fallback the name to use when nothing of the text is left, itself a valid sheet name
+     * @return a valid name no other sheet of this workbook has yet
+     */
+    String sheetName(String text, String fallback) {
+        String base = FORBIDDEN_IN_SHEET_NAME.matcher(text).replaceAll("-").strip();
+        if (base.length() > MAX_SHEET_NAME_LENGTH) {
+            base = base.substring(0, MAX_SHEET_NAME_LENGTH);
+        }
+        base = trimApostrophes(base);
+        if (base.isEmpty()) {
+            base = fallback;
+        }
+        String name = base;
+        for (int n = 2; isTaken(name); n++) {
+            String suffix = " (" + n + ")";
+            int room = MAX_SHEET_NAME_LENGTH - suffix.length();
+            name = trimApostrophes(base.length() > room ? base.substring(0, room) : base) + suffix;
+        }
+        return name;
+    }
+
+    private boolean isTaken(String name) {
+        return sheets.stream().anyMatch(sheet -> sheet.name.equalsIgnoreCase(name));
+    }
+
+    private static boolean isValidSheetName(String name) {
+        return !name.isBlank() && name.length() <= MAX_SHEET_NAME_LENGTH
+                && !FORBIDDEN_IN_SHEET_NAME.matcher(name).find()
+                && !name.startsWith("'") && !name.endsWith("'");
+    }
+
+    private static String trimApostrophes(String name) {
+        return name.replaceAll("^['\\s]+|['\\s]+$", "");
     }
 
     /**

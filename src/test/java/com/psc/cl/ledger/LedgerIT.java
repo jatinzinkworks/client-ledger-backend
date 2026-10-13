@@ -764,8 +764,43 @@ class LedgerIT extends AbstractPostgresIT {
                 .contains("<v>39235.00</v></c>")
                 .contains("<v>18605.00</v></c>")
                 .contains("<v>20630.00</v></c>");
+        // Then one sheet per company, by name, each closing on that company's pending.
+        assertThat(workbookPart(workbook, "xl/workbook.xml"))
+                .contains("<sheet name=\"Mehta Textiles Pvt Ltd\" sheetId=\"3\"")
+                .contains("<sheet name=\"Rohan Mehta HUF\" sheetId=\"4\"");
+        assertThat(workbookPart(workbook, "xl/worksheets/sheet3.xml"))
+                .contains(">UPI<")
+                .doesNotContain(">Cheque<")
+                .contains("<v>2605.00</v></c>");
+        assertThat(workbookPart(workbook, "xl/worksheets/sheet4.xml"))
+                .contains(">Cheque<")
+                .doesNotContain(">UPI<")
+                .contains("<v>18025.00</v></c>");
         mockMvc.perform(get(export).param("financialYear", "26-27"))
                 .andExpect(status().isBadRequest());
+
+        // One company's export holds only its own year: billed 11210.00, received 8605.00, pending 2605.00.
+        String companyExport = ApiPaths.V1 + "/clients/" + clientId + "/companies/" + companyId + "/ledger-export";
+        byte[] companyWorkbook = mockMvc.perform(get(companyExport).param("financialYear", "2026-27"))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"Mehta_Textiles_Pvt_Ltd_Ledger_FY2026-27.xlsx\""))
+                .andReturn().getResponse().getContentAsByteArray();
+        assertThat(workbookPart(companyWorkbook, "xl/worksheets/sheet1.xml"))
+                .contains(">Company Ledger<")
+                .contains(">Rohan Mehta<")
+                .contains(">Mehta Textiles Pvt Ltd<")
+                .contains("<v>11210.00</v>")
+                .contains("<v>8605.00</v>")
+                .contains("<v>2605.00</v>");
+        assertThat(workbookPart(companyWorkbook, "xl/worksheets/sheet2.xml"))
+                .contains(">UPI<")
+                .doesNotContain(">Rohan Mehta HUF<")
+                .doesNotContain(">Cheque<")
+                .contains("<v>2605.00</v></c>");
+        mockMvc.perform(get(ApiPaths.V1 + "/clients/" + clientId + "/companies/" + UUID.randomUUID()
+                        + "/ledger-export").param("financialYear", "2026-27"))
+                .andExpect(status().isNotFound());
         mockMvc.perform(get(ApiPaths.V1 + "/clients/" + UUID.randomUUID() + "/ledger-export")
                         .param("financialYear", "2026-27"))
                 .andExpect(status().isNotFound());

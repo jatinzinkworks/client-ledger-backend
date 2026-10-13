@@ -84,7 +84,19 @@ public class LedgerController implements LedgerApi {
     public ResponseEntity<byte[]> exportClient(UUID clientId, String financialYear) {
         log.debug("Received request to export the ledger of client {} for FY {}", clientId, financialYear);
         FinancialYear year = FinancialYears.parse(financialYear);
-        LedgerExport export = ledgerService.exportClient(clientId, year);
+        return download(ledgerService.exportClient(clientId, year));
+    }
+
+    @Override
+    public ResponseEntity<byte[]> exportCompany(UUID clientId, UUID companyId, String financialYear) {
+        log.debug("Received request to export the ledger of company {} of client {} for FY {}", companyId,
+                clientId, financialYear);
+        FinancialYear year = FinancialYears.parse(financialYear);
+        return download(ledgerService.exportCompany(clientId, companyId, year));
+    }
+
+    /** An export as a download, saved under its own file name. */
+    private static ResponseEntity<byte[]> download(LedgerExport export) {
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(LedgerExport.XLSX_MEDIA_TYPE))
                 .header(HttpHeaders.CONTENT_DISPOSITION,

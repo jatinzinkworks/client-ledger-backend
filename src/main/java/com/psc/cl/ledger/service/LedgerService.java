@@ -130,7 +130,8 @@ public interface LedgerService {
     /**
      * Exports a client's ledger for one financial year as an Excel workbook: a Summary sheet with
      * the figures of {@link #summarizeClient}, and a Ledger sheet with every entry of the year across
-     * all of the client's companies, earliest first, with a running balance and totals.
+     * all of the client's companies, earliest first, with a running balance and totals, followed by
+     * one sheet per company, by name, with only that company's entries, balance and totals.
      *
      * @param clientId      the client
      * @param financialYear the financial year to export
@@ -139,6 +140,20 @@ public interface LedgerService {
      *         zero totals and an empty ledger
      */
     LedgerExport exportClient(UUID clientId, FinancialYear financialYear);
+
+    /**
+     * Exports the ledger of one company of a client for one financial year as an Excel workbook: a
+     * Summary sheet with the figures of {@link #summarizeCompany}, and a Ledger sheet with every
+     * entry of the company in the year, earliest first, with a running balance and totals.
+     *
+     * @param clientId      the client
+     * @param companyId     the company of the client
+     * @param financialYear the financial year to export
+     * @return the .xlsx file, named after the company and the year, such as
+     *         {@code Mehta_Textiles_Pvt_Ltd_Ledger_FY2026-27.xlsx}; a year with no entries still
+     *         exports, with zero totals and an empty ledger
+     */
+    LedgerExport exportCompany(UUID clientId, UUID companyId, FinancialYear financialYear);
 
     /**
      * The balance of each company of a client for one financial year: billed, received and pending.

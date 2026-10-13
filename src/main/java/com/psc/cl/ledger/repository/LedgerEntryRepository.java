@@ -126,6 +126,19 @@ public interface LedgerEntryRepository extends JpaRepository<LedgerEntry, UUID> 
                                                       Pageable pageable);
 
     /**
+     * Reads every entry of one company due within a range, both ends inclusive, in one go, for
+     * exports. Served by the (company_id, due_date) index.
+     *
+     * @param companyId the company
+     * @param fromDate  earliest due date to include
+     * @param toDate    latest due date to include
+     * @param sort      the order to read entries in
+     * @return the entries; empty when none matches
+     */
+    List<LedgerEntry> findAllByCompanyIdAndDueDateBetween(UUID companyId, LocalDate fromDate, LocalDate toDate,
+                                                          Sort sort);
+
+    /**
      * Reads every entry of every company of one client due within a range, both ends inclusive, in
      * one go, for exports. Served by the (client_id, due_date) index.
      *

@@ -85,6 +85,9 @@ class LedgerControllerTest {
 
     private static final String CLIENT_EXPORT_URL = ApiPaths.V1 + "/clients/" + CLIENT_ID + "/ledger-export";
 
+    private static final String COMPANY_EXPORT_URL =
+            ApiPaths.V1 + "/clients/" + CLIENT_ID + "/companies/" + COMPANY_ID + "/ledger-export";
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -938,6 +941,48 @@ class LedgerControllerTest {
                 .thenThrow(new ClientNotFoundException(CLIENT_ID));
 
         mockMvc.perform(get(CLIENT_EXPORT_URL).param("financialYear", "2026-27"))
+                .andExpect(status().isNotFound())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+    }
+
+    @Test
+    @DisplayName("downloads a company's year as an .xlsx attachment named after it")
+    void exportsCompanyYear() throws Exception {
+        byte[] workbook = {0x50, 0x4b, 0x03, 0x04};
+        when(ledgerService.exportCompany(CLIENT_ID, COMPANY_ID, FinancialYears.parse("2026-27")))
+                .thenReturn(new LedgerExport("Mehta_Textiles_Pvt_Ltd_Ledger_FY2026-27.xlsx", workbook));
+
+        mockMvc.perform(get(COMPANY_EXPORT_URL).param("financialYear", "2026-27"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(LedgerExport.XLSX_MEDIA_TYPE))
+                .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"Mehta_Textiles_Pvt_Ltd_Ledger_FY2026-27.xlsx\""))
+                .andExpect(content().bytes(workbook));
+    }
+
+    @Test
+    @DisplayName("returns 400 when exporting a company without a valid financial year or under a malformed id")
+    void rejectsInvalidCompanyExport() throws Exception {
+        mockMvc.perform(get(COMPANY_EXPORT_URL))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get(COMPANY_EXPORT_URL).param("financialYear", "26-27"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+        mockMvc.perform(get(ApiPaths.V1 + "/clients/" + CLIENT_ID + "/companies/not-a-uuid/ledger-export")
+                        .param("financialYear", "2026-27"))
+                .andExpect(status().isBadRequest());
+
+        verify(ledgerService, never()).exportCompany(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("returns 404 as JSON when exporting a company the client does not hold")
+    void exportsUnknownCompany() throws Exception {
+        when(ledgerService.exportCompany(CLIENT_ID, COMPANY_ID, FinancialYears.parse("2026-27")))
+                .thenThrow(new CompanyNotFoundException(CLIENT_ID, COMPANY_ID));
+
+        mockMvc.perform(get(COMPANY_EXPORT_URL).param("financialYear", "2026-27"))
                 .andExpect(status().isNotFound())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));

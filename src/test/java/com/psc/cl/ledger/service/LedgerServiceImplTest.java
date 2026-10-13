@@ -637,6 +637,9 @@ class LedgerServiceImplTest {
         assertThat(parts.get("xl/worksheets/sheet2.xml"))
                 .contains(">Mehta Textiles Pvt Ltd<")
                 .contains(">GST Monthly Return Filing<");
+        // The client's only company gets its own sheet too.
+        assertThat(parts.get("xl/workbook.xml")).contains("<sheet name=\"Mehta Textiles Pvt Ltd\" sheetId=\"3\"");
+        assertThat(parts.get("xl/worksheets/sheet3.xml")).contains(">GST Monthly Return Filing<");
     }
 
     @Test
@@ -651,17 +654,58 @@ class LedgerServiceImplTest {
     }
 
     @Test
-    @DisplayName("names an export with only letters, digits and underscores, falling back to Client")
+    @DisplayName("names an export with only letters, digits and underscores, falling back when none survive")
     void namesExportSafely() {
         FinancialYear year = FinancialYears.parse("2026-27");
-        client.setFirstName(" Anil ");
-        client.setLastName("D'Souza-Pinto Jr.");
-        assertThat(LedgerServiceImpl.exportFileName(client, year))
+        assertThat(LedgerServiceImpl.exportFileName(" Anil  D'Souza-Pinto Jr.", "Client", year))
                 .isEqualTo("Anil_D_Souza_Pinto_Jr_Ledger_FY2026-27.xlsx");
+        assertThat(LedgerServiceImpl.exportFileName("M/s Mehta & Sons (HUF)", "Company", year))
+                .isEqualTo("M_s_Mehta_Sons_HUF_Ledger_FY2026-27.xlsx");
+        assertThat(LedgerServiceImpl.exportFileName("\u0930\u093e\u092e \u0936\u0930\u094d\u092e\u093e",
+                "Client", year)).isEqualTo("Client_Ledger_FY2026-27.xlsx");
+    }
 
-        client.setFirstName("राम");
-        client.setLastName("शर्मा");
-        assertThat(LedgerServiceImpl.exportFileName(client, year)).isEqualTo("Client_Ledger_FY2026-27.xlsx");
+    @Test
+    @DisplayName("exports a company's year as a workbook named after it, with its summary and entries")
+    void exportsCompanyYear() {
+        client.setFirstName("Rohan");
+        client.setLastName("Mehta");
+        stubCompany();
+        LocalDate from = LocalDate.of(2026, 4, 1);
+        LocalDate to = LocalDate.of(2027, 3, 31);
+        when(ledgerEntryRepository.totalCompanyEntries(COMPANY_ID, from, to)).thenReturn(List.of(
+                LedgerSummariesTest.row(COMPANY_ID, "2026-27", 1, "5000.00", "250.00", "4750.00", "855.00",
+                        "5605.00")));
+        when(ledgerEntryRepository.findFirstByCompanyIdAndEntryTypeAndDueDateBetweenOrderByDueDateDescCreatedAtDesc(
+                COMPANY_ID, LedgerEntryType.PAYMENT, from, to)).thenReturn(Optional.empty());
+        when(ledgerEntryRepository.findAllByCompanyIdAndDueDateBetween(COMPANY_ID, from, to, EARLIEST_DUE_FIRST))
+                .thenReturn(List.of(storedEntry()));
+
+        LedgerExport export = ledgerService.exportCompany(CLIENT_ID, COMPANY_ID, FinancialYears.parse("2026-27"));
+
+        assertThat(export.fileName()).isEqualTo("Mehta_Textiles_Pvt_Ltd_Ledger_FY2026-27.xlsx");
+        Map<String, String> parts = XlsxWorkbookTest.parts(export.content());
+        assertThat(parts.get("xl/worksheets/sheet1.xml"))
+                .contains(">Company Ledger<")
+                .contains(">Rohan Mehta<")
+                .contains(">Mehta Textiles Pvt Ltd<")
+                .contains("<v>5605.00</v>")
+                .contains("<v>46309</v>");
+        assertThat(parts.get("xl/worksheets/sheet2.xml"))
+                .contains(">GST Monthly Return Filing<")
+                .doesNotContain(">Mehta Textiles Pvt Ltd<");
+    }
+
+    @Test
+    @DisplayName("raises not found when exporting a company the client does not hold")
+    void exportsUnknownCompany() {
+        when(clientRepository.existsById(CLIENT_ID)).thenReturn(true);
+        when(clientCompanyRepository.findByIdAndClientId(COMPANY_ID, CLIENT_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> ledgerService.exportCompany(CLIENT_ID, COMPANY_ID, FinancialYears.parse("2026-27")))
+                .isInstanceOf(CompanyNotFoundException.class);
+
+        verify(ledgerEntryRepository, never()).findAllByCompanyIdAndDueDateBetween(any(), any(), any(), any());
     }
 
     private ClientCompany company(UUID id, String name) {

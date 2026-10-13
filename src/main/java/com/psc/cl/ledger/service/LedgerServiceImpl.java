@@ -265,14 +265,20 @@ public class LedgerServiceImpl implements LedgerService {
     @Transactional(readOnly = true)
     public CompanyLedgerSummaryResponse summarizeCompany(UUID clientId, UUID companyId,
                                                          FinancialYear financialYear) {
-        ClientCompany company = requireCompany(clientId, companyId);
+        return summarize(clientId, requireCompany(clientId, companyId), financialYear);
+    }
+
+    /** A company's summary for a financial year, once the company has been found to be the client's. */
+    private CompanyLedgerSummaryResponse summarize(UUID clientId, ClientCompany company,
+                                                   FinancialYear financialYear) {
         LocalDate from = financialYear.firstDay();
         LocalDate to = financialYear.lastDay();
 
         // The same totals the ledger lists use, so the figures always agree with them.
-        LedgerSummary totals = LedgerSummaries.of(ledgerEntryRepository.totalCompanyEntries(companyId, from, to));
+        LedgerSummary totals = LedgerSummaries.of(ledgerEntryRepository.totalCompanyEntries(company.getId(),
+                from, to));
         LedgerEntry lastPayment = ledgerEntryRepository
-                .findFirstByCompanyIdAndEntryTypeAndDueDateBetweenOrderByDueDateDescCreatedAtDesc(companyId,
+                .findFirstByCompanyIdAndEntryTypeAndDueDateBetweenOrderByDueDateDescCreatedAtDesc(company.getId(),
                         LedgerEntryType.PAYMENT, from, to)
                 .orElse(null);
 
@@ -300,7 +306,7 @@ public class LedgerServiceImpl implements LedgerService {
 
         return ClientLedgerSummaryResponse.builder()
                 .clientId(clientId)
-                .clientName(client.getFirstName() + " " + client.getLastName())
+                .clientName(fullName(client))
                 .financialYear(financialYear.label())
                 .fromDate(from)
                 .toDate(to)
@@ -323,23 +329,47 @@ public class LedgerServiceImpl implements LedgerService {
         ClientLedgerSummaryResponse summary = summarizeClient(clientId, financialYear);
         List<LedgerEntry> entries = ledgerEntryRepository.findAllByClientIdAndDueDateBetween(clientId,
                 financialYear.firstDay(), financialYear.lastDay(), EXPORT_ORDER);
-        byte[] content = ClientLedgerWorkbook.write(summary, entries, companyNames, LocalDate.now(clock));
+        byte[] content = LedgerWorkbook.forClient(summary, entries, companyNames, LocalDate.now(clock));
 
         log.info("Exported {} ledger entries of client {} for FY {}", entries.size(), clientId,
                 financialYear.label());
-        return new LedgerExport(exportFileName(client, financialYear), content);
+        return new LedgerExport(exportFileName(fullName(client), "Client", financialYear), content);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public LedgerExport exportCompany(UUID clientId, UUID companyId, FinancialYear financialYear) {
+        ClientCompany company = requireCompany(clientId, companyId);
+
+        // The Summary sheet shows exactly what the company summary endpoint returns for the year.
+        CompanyLedgerSummaryResponse summary = summarize(clientId, company, financialYear);
+        List<LedgerEntry> entries = ledgerEntryRepository.findAllByCompanyIdAndDueDateBetween(companyId,
+                financialYear.firstDay(), financialYear.lastDay(), EXPORT_ORDER);
+        byte[] content = LedgerWorkbook.forCompany(fullName(company.getClient()), summary, entries,
+                LocalDate.now(clock));
+
+        log.info("Exported {} ledger entries of company {} of client {} for FY {}", entries.size(), companyId,
+                clientId, financialYear.label());
+        return new LedgerExport(exportFileName(company.getCompanyName(), "Company", financialYear), content);
+    }
+
+    private static String fullName(Client client) {
+        return client.getFirstName() + " " + client.getLastName();
     }
 
     /**
-     * Names an export after the client and the year, such as {@code Rohan_Mehta_Ledger_FY2026-27.xlsx}.
-     * Anything but letters and digits in the name becomes an underscore, so the name is safe in a
-     * download header and on any file system.
+     * Names an export after whose ledger it is and the year, such as
+     * {@code Rohan_Mehta_Ledger_FY2026-27.xlsx}. Anything but letters and digits in the name becomes
+     * an underscore, so the name is safe in a download header and on any file system.
+     *
+     * @param name          the client's or company's name
+     * @param fallback      used instead when no letters or digits of the name survive, as for a name
+     *                      written only in Devanagari
+     * @param financialYear the year exported
      */
-    static String exportFileName(Client client, FinancialYear financialYear) {
-        String name = UNSAFE_FILE_NAME.matcher(client.getFirstName() + " " + client.getLastName())
-                .replaceAll("_")
-                .replaceAll("^_|_$", "");
-        return (name.isEmpty() ? "Client" : name) + "_Ledger_FY" + financialYear.label() + ".xlsx";
+    static String exportFileName(String name, String fallback, FinancialYear financialYear) {
+        String safe = UNSAFE_FILE_NAME.matcher(name).replaceAll("_").replaceAll("^_|_$", "");
+        return (safe.isEmpty() ? fallback : safe) + "_Ledger_FY" + financialYear.label() + ".xlsx";
     }
 
     @Override

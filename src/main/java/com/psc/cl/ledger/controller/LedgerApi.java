@@ -68,6 +68,9 @@ public interface LedgerApi {
     /** Path a client's ledger for a financial year is downloaded from as an Excel workbook. */
     String CLIENT_EXPORT_PATH = ApiPaths.V1 + "/clients/{clientId}/ledger-export";
 
+    /** Path the ledger of one company of a client for a financial year is downloaded from as an Excel workbook. */
+    String COMPANY_EXPORT_PATH = ApiPaths.V1 + "/clients/{clientId}/companies/{companyId}/ledger-export";
+
     /** Shared by the list endpoints' range filter. */
     String FROM_DATE_DESCRIPTION = "Only return entries due on or after this date (ISO yyyy-MM-dd). "
             + "Omit to leave the range open at the start";
@@ -249,8 +252,11 @@ public interface LedgerApi {
                     + "sheet holds the figures of the client's ledger summary for the year; its Ledger sheet "
                     + "lists every service charge and payment of the year across all of the client's "
                     + "companies, earliest first, with charges as debits, payments as credits, a running "
-                    + "balance, and a totals row. As in the summary, charges count in the year they fell due "
-                    + "and payments in the year they were received, and the balance starts from zero.")
+                    + "balance, and a totals row. One sheet per company follows, by company name, listing "
+                    + "only that company's entries with its own running balance and totals; a company with "
+                    + "no entries in the year gets headings and zero totals. As in the summary, charges count "
+                    + "in the year they fell due and payments in the year they were received, and each "
+                    + "balance starts from zero.")
     @ApiResponses({
             @ApiResponse(responseCode = "200",
                     description = "The workbook, as an attachment; a year with no entries gives zero totals "
@@ -278,6 +284,52 @@ public interface LedgerApi {
             @Parameter(description = "Identifier of the client", required = true,
                     example = "7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35")
             @PathVariable UUID clientId,
+            @Parameter(description = "Indian financial year to export, written as yyyy-yy", required = true,
+                    example = "2026-27")
+            @RequestParam String financialYear);
+
+    @Operation(
+            summary = "Export a company's ledger for a financial year as an Excel workbook",
+            description = "Downloads an .xlsx workbook for one company of the client and one Indian financial "
+                    + "year (1 April to 31 March), named after the company and the year, such as "
+                    + "Mehta_Textiles_Pvt_Ltd_Ledger_FY2026-27.xlsx. Its Summary sheet holds the figures of "
+                    + "the company's ledger summary for the year; its Ledger sheet lists every service "
+                    + "charge and payment of the company in the year, earliest first, with charges as "
+                    + "debits, payments as credits, a running balance, and a totals row. As in the summary, "
+                    + "charges count in the year they fell due and payments in the year they were received, "
+                    + "and the balance starts from zero.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200",
+                    description = "The workbook, as an attachment; a year with no entries gives zero totals "
+                            + "and an empty ledger",
+                    headers = @Header(name = HttpHeaders.CONTENT_DISPOSITION,
+                            description = "attachment, with the workbook's file name",
+                            schema = @Schema(type = "string",
+                                    example = "attachment; filename=\"Mehta_Textiles_Pvt_Ltd_Ledger_FY2026-27.xlsx\"")),
+                    content = @Content(mediaType = LedgerExport.XLSX_MEDIA_TYPE,
+                            schema = @Schema(type = "string", format = "binary"))),
+            @ApiResponse(responseCode = "400",
+                    description = "financialYear is missing or is not a year such as 2026-27, or an "
+                            + "identifier is not a valid UUID",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404",
+                    description = "No client carries this identifier, or the client holds no such company",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "500", description = "Unexpected server error",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class)))})
+    // JSON is listed too, so an error can still be returned as an ErrorResponse.
+    @GetMapping(value = COMPANY_EXPORT_PATH,
+            produces = {LedgerExport.XLSX_MEDIA_TYPE, MediaType.APPLICATION_JSON_VALUE})
+    ResponseEntity<byte[]> exportCompany(
+            @Parameter(description = "Identifier of the client", required = true,
+                    example = "7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35")
+            @PathVariable UUID clientId,
+            @Parameter(description = "Identifier of the company of the client", required = true,
+                    example = "4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28")
+            @PathVariable UUID companyId,
             @Parameter(description = "Indian financial year to export, written as yyyy-yy", required = true,
                     example = "2026-27")
             @RequestParam String financialYear);

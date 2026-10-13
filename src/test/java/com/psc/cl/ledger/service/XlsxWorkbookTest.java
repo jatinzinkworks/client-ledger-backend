@@ -101,6 +101,31 @@ class XlsxWorkbookTest {
         assertThatThrownBy(() -> workbook.addSheet("")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> workbook.addSheet("FY 2026/27")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> workbook.addSheet("A".repeat(32))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> workbook.addSheet("'Mehta'")).isInstanceOf(IllegalArgumentException.class);
+
+        workbook.addSheet("Ledger");
+        assertThatThrownBy(() -> workbook.addSheet("LEDGER")).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("turns any name into a valid sheet name: forbidden characters replaced, cut to 31, kept unique")
+    void namesSheets() {
+        XlsxWorkbook workbook = new XlsxWorkbook();
+        workbook.addSheet("Ledger");
+
+        assertThat(workbook.sheetName("M/s Mehta: [HUF]?", "Company")).isEqualTo("M-s Mehta- -HUF--");
+        assertThat(workbook.sheetName("Mehta Textiles and Garments Private Limited", "Company"))
+                .isEqualTo("Mehta Textiles and Garments Pri");
+        // Excel compares sheet names ignoring case.
+        assertThat(workbook.sheetName("ledger", "Company")).isEqualTo("ledger (2)");
+        assertThat(workbook.sheetName(" ''' ", "Company")).isEqualTo("Company");
+
+        String longName = "Mehta Textiles and Garments Private Limited";
+        workbook.addSheet(workbook.sheetName(longName, "Company"));
+        String second = workbook.sheetName(longName, "Company");
+        assertThat(second).isEqualTo("Mehta Textiles and Garments (2)").hasSize(31);
+        workbook.addSheet(second);
+        assertThat(workbook.sheetName(longName, "Company")).isEqualTo("Mehta Textiles and Garments (3)");
     }
 
     /**
