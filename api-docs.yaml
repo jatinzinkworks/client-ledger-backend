@@ -13,11 +13,12 @@ tags:
   description: "Tenant-wide configuration for the Client Ledger, such as payment terms"
 - name: Client Services
   description: Services from the Service Catalog delivered to a client's companies
+- name: Clients
+  description: People the firm works for and the manager who looks after them
 - name: Service Catalog
   description: "Billable services the firm offers, with their fees and billing schedules"
-- name: Clients
-  description: "People the firm works for, the manager who looks after them and the\
-    \ companies they hold"
+- name: Client Companies
+  description: "Companies owned by, or acted for on behalf of, a client"
 - name: Manager Catalog
   description: "Staff who can be assigned to client work, with their roles and contact\
     \ details"
@@ -345,10 +346,10 @@ paths:
       tags:
       - Clients
       summary: Update a client
-      description: "Replaces a client's own fields wholesale. The client's companies\
-        \ are left as they are; add or delete them through the company endpoints.\
-        \ An omitted client discount resets to zero, and companies already held keep\
-        \ their discount."
+      description: Replaces a client's own fields wholesale. The client's companies
+        are left as they are; add or delete them through the company endpoints. An
+        omitted client discount resets to zero. Companies without a discount of their
+        own take the new client discount.
       operationId: updateClient
       parameters:
       - name: id
@@ -428,6 +429,172 @@ paths:
         "409":
           description: Services are still assigned to one or more of the client's
             companies
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/clients/{id}/companies/{companyId}:
+    get:
+      tags:
+      - Client Companies
+      summary: Fetch a company of a client
+      description: Returns one company of the client. A company that exists but belongs
+        to a different client is reported as not found.
+      operationId: getCompany
+      parameters:
+      - name: id
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: companyId
+        in: path
+        description: Identifier of the company
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+      responses:
+        "200":
+          description: Company found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyResponse"
+        "400":
+          description: An identifier is not a valid UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "No client carries this identifier, or the client holds no\
+            \ such company"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      tags:
+      - Client Companies
+      summary: Update a company of a client
+      description: "Replaces one company of the client wholesale; it keeps its identifier.\
+        \ Every field except the discount is mandatory, and an omitted discount gives\
+        \ the company the client's. A company that exists but belongs to a different\
+        \ client is reported as not found."
+      operationId: updateCompany
+      parameters:
+      - name: id
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: companyId
+        in: path
+        description: Identifier of the company
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+      requestBody:
+        description: New content for the company
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompanyRequest"
+        required: true
+      responses:
+        "200":
+          description: Company updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyResponse"
+        "400":
+          description: "Request body failed validation, or an identifier is not a\
+            \ valid UUID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "No client carries this identifier, or the client holds no\
+            \ such company"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      tags:
+      - Client Companies
+      summary: Delete a company of a client
+      description: "Removes one company of the client. A client must keep at least\
+        \ one company, so their only company cannot be deleted; delete the client\
+        \ instead. A company with services assigned cannot be deleted; remove those\
+        \ services first."
+      operationId: deleteCompany
+      parameters:
+      - name: id
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: companyId
+        in: path
+        description: Identifier of the company
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+      responses:
+        "204":
+          description: Company deleted
+        "400":
+          description: An identifier is not a valid UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "No client carries this identifier, or the client holds no\
+            \ such company"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "It is the client's only company (BUSINESS_RULE_VIOLATION),\
+            \ or services are still assigned to it (RESOURCE_IN_USE)"
           content:
             application/json:
               schema:
@@ -985,10 +1152,10 @@ paths:
   /psc/cl/v1/clients/{id}/companies:
     get:
       tags:
-      - Clients
+      - Client Companies
       summary: List the companies of a client
       description: "Returns every company the client holds, in full, ordered by company\
-        \ name."
+        \ name, each with the number of services assigned to it."
       operationId: listCompanies
       parameters:
       - name: id
@@ -1028,7 +1195,7 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
     post:
       tags:
-      - Clients
+      - Client Companies
       summary: Add a company to a client
       description: "Adds one company to an existing client. Every field except the\
         \ discount is mandatory, and a company without a discount of its own takes\
@@ -1188,112 +1355,6 @@ paths:
         "404":
           description: "No client carries this identifier, the client holds no such\
             \ company, or the service does not exist in the Service Catalog"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "500":
-          description: Unexpected server error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-  /psc/cl/v1/clients/{id}/companies/{companyId}:
-    get:
-      tags:
-      - Clients
-      summary: Fetch a company of a client
-      description: Returns one company of the client. A company that exists but belongs
-        to a different client is reported as not found.
-      operationId: getCompany
-      parameters:
-      - name: id
-        in: path
-        description: Identifier of the client
-        required: true
-        schema:
-          type: string
-          format: uuid
-        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
-      - name: companyId
-        in: path
-        description: Identifier of the company
-        required: true
-        schema:
-          type: string
-          format: uuid
-        example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
-      responses:
-        "200":
-          description: Company found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CompanyResponse"
-        "400":
-          description: An identifier is not a valid UUID
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "404":
-          description: "No client carries this identifier, or the client holds no\
-            \ such company"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "500":
-          description: Unexpected server error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-    delete:
-      tags:
-      - Clients
-      summary: Delete a company of a client
-      description: "Removes one company of the client. A client must keep at least\
-        \ one company, so their only company cannot be deleted; delete the client\
-        \ instead. A company with services assigned cannot be deleted; remove those\
-        \ services first."
-      operationId: deleteCompany
-      parameters:
-      - name: id
-        in: path
-        description: Identifier of the client
-        required: true
-        schema:
-          type: string
-          format: uuid
-        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
-      - name: companyId
-        in: path
-        description: Identifier of the company
-        required: true
-        schema:
-          type: string
-          format: uuid
-        example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
-      responses:
-        "204":
-          description: Company deleted
-        "400":
-          description: An identifier is not a valid UUID
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "404":
-          description: "No client carries this identifier, or the client holds no\
-            \ such company"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "409":
-          description: "It is the client's only company (BUSINESS_RULE_VIOLATION),\
-            \ or services are still assigned to it (RESOURCE_IN_USE)"
           content:
             application/json:
               schema:
@@ -1634,9 +1695,8 @@ components:
         discountPercent:
           type: number
           default: "0.00"
-          description: "Discount granted to the client, as a percentage. Companies\
-            \ already held keep their discount; companies added later without one\
-            \ of their own take this"
+          description: "Discount granted to the client, as a percentage. Also applied\
+            \ to every company that does not set its own"
           example: 10.0
           maximum: 100.00
           minimum: 0.00
@@ -1731,8 +1791,61 @@ components:
           example: "12 MG Road, Bengaluru, Karnataka 560001"
         discountPercent:
           type: number
-          description: "Discount granted on this company's work, as a percentage"
+          description: "Discount granted on this company's work, as a percentage:\
+            \ the company's own, or the client's current discount when the company\
+            \ has none of its own"
           example: 5.0
+        discountInherited:
+          type: boolean
+          description: "True when the company has no discount of its own, so discountPercent\
+            \ is the client's and follows any change to it"
+          example: false
+        serviceCount:
+          type: integer
+          format: int64
+          description: Number of services assigned to the company. Only returned when
+            listing a client's companies
+          example: 3
+    CompanyRequest:
+      type: object
+      description: "Company owned by, or acted for on behalf of, the client"
+      properties:
+        companyName:
+          type: string
+          description: Registered name of the company
+          example: Mehta Textiles Pvt Ltd
+          maxLength: 200
+          minLength: 0
+        companyType:
+          type: string
+          description: Legal form of the company
+          enum:
+          - PRIVATE_LIMITED
+          - PUBLIC_LIMITED
+          - LLP
+          - PARTNERSHIP
+          - PROPRIETORSHIP
+          - TRUST
+          - HUF
+          - INDIVIDUAL
+          example: PRIVATE_LIMITED
+        address:
+          type: string
+          description: Registered address of the company
+          example: "12 MG Road, Bengaluru, Karnataka 560001"
+          maxLength: 500
+          minLength: 0
+        discountPercent:
+          type: number
+          description: "Discount granted on this company's work, as a percentage.\
+            \ When omitted, the company takes the client's discount"
+          example: 5.0
+          maximum: 100.00
+          minimum: 0.00
+      required:
+      - address
+      - companyName
+      - companyType
     ServiceAssignmentUpdateRequest:
       type: object
       description: New details for a service assigned to a company
@@ -1795,6 +1908,16 @@ components:
           - QUARTERLY
           - ANNUAL
           example: MONTHLY
+        serviceFee:
+          type: number
+          description: "Standard fee of the service, excluding GST and before this\
+            \ assignment's discount, taken from the Service Catalog"
+          example: 5000.0
+        gstRatePercent:
+          type: number
+          description: "GST rate applied to the service fee, as a percentage, taken\
+            \ from the Service Catalog"
+          example: 18.0
         deliveryDate:
           type: string
           format: date
@@ -2045,46 +2168,6 @@ components:
       - lastName
       - managerId
       - phone
-    CompanyRequest:
-      type: object
-      description: "Company owned by, or acted for on behalf of, the client"
-      properties:
-        companyName:
-          type: string
-          description: Registered name of the company
-          example: Mehta Textiles Pvt Ltd
-          maxLength: 200
-          minLength: 0
-        companyType:
-          type: string
-          description: Legal form of the company
-          enum:
-          - PRIVATE_LIMITED
-          - PUBLIC_LIMITED
-          - LLP
-          - PARTNERSHIP
-          - PROPRIETORSHIP
-          - TRUST
-          - HUF
-          - INDIVIDUAL
-          example: PRIVATE_LIMITED
-        address:
-          type: string
-          description: Registered address of the company
-          example: "12 MG Road, Bengaluru, Karnataka 560001"
-          maxLength: 500
-          minLength: 0
-        discountPercent:
-          type: number
-          description: "Discount granted on this company's work, as a percentage.\
-            \ When omitted, the company takes the client's discount"
-          example: 5.0
-          maximum: 100.00
-          minimum: 0.00
-      required:
-      - address
-      - companyName
-      - companyType
     ServiceAssignmentRequest:
       type: object
       description: Catalog service to deliver to the company

@@ -296,7 +296,8 @@ class ServiceAssignmentIT extends AbstractPostgresIT {
                 .andExpect(jsonPath("$[1].id").value(october))
                 .andExpect(jsonPath("$[2].id").value(september))
                 .andExpect(jsonPath("$[0].serviceName").value("GST Monthly Return Filing"))
-                .andExpect(jsonPath("$[0].serviceFee").value(5000.0));
+                .andExpect(jsonPath("$[0].serviceFee").value(5000.0))
+                .andExpect(jsonPath("$[0].gstRatePercent").value(18.0));
 
         mockMvc.perform(get(servicesUrl(textilesId) + "/" + october))
                 .andExpect(status().isOk())

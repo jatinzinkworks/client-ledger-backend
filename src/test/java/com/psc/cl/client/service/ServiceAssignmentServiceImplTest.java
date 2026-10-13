@@ -251,6 +251,7 @@ class ServiceAssignmentServiceImplTest {
         assertThat(services).allSatisfy(service -> {
             assertThat(service.getServiceName()).isEqualTo("GST Monthly Return Filing");
             assertThat(service.getServiceFee()).isEqualTo(new BigDecimal("5000.00"));
+            assertThat(service.getGstRatePercent()).isEqualTo(new BigDecimal("18.00"));
             assertThat(service.getClientId()).isEqualTo(CLIENT_ID);
             assertThat(service.getCompanyId()).isEqualTo(COMPANY_ID);
         });
@@ -460,6 +461,7 @@ class ServiceAssignmentServiceImplTest {
         service.setId(SERVICE_ID);
         service.setServiceName("GST Monthly Return Filing");
         service.setStandardFee(new BigDecimal("5000.00"));
+        service.setGstRatePercent(new BigDecimal("18.00"));
         service.setBillingFrequency(BillingFrequency.MONTHLY);
         service.setInvoiceDayOfMonth(7);
         return service;

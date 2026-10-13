@@ -46,6 +46,10 @@ public class ServiceAssignmentResponse {
             + "discount, taken from the Service Catalog", example = "5000.00")
     BigDecimal serviceFee;
 
+    @Schema(description = "GST rate applied to the service fee, as a percentage, taken from the "
+            + "Service Catalog", example = "18.00")
+    BigDecimal gstRatePercent;
+
     @Schema(description = "Date the service is, or was, delivered", example = "2026-10-15")
     LocalDate deliveryDate;
 
@@ -84,6 +88,7 @@ public class ServiceAssignmentResponse {
                 .serviceName(service.getServiceName())
                 .serviceType(entity.getServiceType())
                 .serviceFee(service.getStandardFee())
+                .gstRatePercent(service.getGstRatePercent())
                 .deliveryDate(entity.getDeliveryDate())
                 .nextDueDate(entity.getNextDueDate())
                 .discountPercent(entity.getDiscountPercent())

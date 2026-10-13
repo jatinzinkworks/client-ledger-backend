@@ -202,7 +202,8 @@ class ServiceAssignmentControllerTest {
                 .andExpect(jsonPath("$[0].id").value(first.toString()))
                 .andExpect(jsonPath("$[1].id").value(second.toString()))
                 .andExpect(jsonPath("$[0].serviceName").value("GST Monthly Return Filing"))
-                .andExpect(jsonPath("$[0].serviceFee").value(5000.0));
+                .andExpect(jsonPath("$[0].serviceFee").value(5000.0))
+                .andExpect(jsonPath("$[0].gstRatePercent").value(18.0));
     }
 
     @Test
@@ -353,6 +354,7 @@ class ServiceAssignmentControllerTest {
                 .serviceName("GST Monthly Return Filing")
                 .serviceType(BillingFrequency.MONTHLY)
                 .serviceFee(new BigDecimal("5000.00"))
+                .gstRatePercent(new BigDecimal("18.00"))
                 .deliveryDate(LocalDate.of(2026, 10, 15))
                 .nextDueDate(LocalDate.of(2026, 11, 7))
                 .discountPercent(new BigDecimal("5.00"))
