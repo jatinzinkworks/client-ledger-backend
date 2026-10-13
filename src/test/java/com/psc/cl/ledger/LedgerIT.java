@@ -746,6 +746,31 @@ class LedgerIT extends AbstractPostgresIT {
         mockMvc.perform(get(companies).param("financialYear", "26-27"))
                 .andExpect(status().isBadRequest());
 
+        // The client's years, latest first: 2026-27 still open and owing, 2025-26 holding only the March
+        // payment. Billed is before discount: 39235.00 charged after 1750.00 off.
+        mockMvc.perform(get(ApiPaths.V1 + "/clients/" + clientId + "/ledger-status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.clientName").value("Rohan Mehta"))
+                .andExpect(jsonPath("$.years[0].financialYear").value("2026-27"))
+                .andExpect(jsonPath("$.years[0].current").value(true))
+                .andExpect(jsonPath("$.years[0].companyCount").value(2))
+                .andExpect(jsonPath("$.years[0].billed").value(40985.0))
+                .andExpect(jsonPath("$.years[0].discount").value(1750.0))
+                .andExpect(jsonPath("$.years[0].received").value(18605.0))
+                .andExpect(jsonPath("$.years[0].closingBalance").value(20630.0))
+                .andExpect(jsonPath("$.years[0].status").value("PENDING"))
+                .andExpect(jsonPath("$.years[0].companies[0].companyName").value("Mehta Textiles Pvt Ltd"))
+                .andExpect(jsonPath("$.years[0].companies[0].closingBalance").value(2605.0))
+                .andExpect(jsonPath("$.years[0].companies[1].closingBalance").value(18025.0))
+                .andExpect(jsonPath("$.years[1].financialYear").value("2025-26"))
+                .andExpect(jsonPath("$.years[1].closedOn").value("2026-03-31"))
+                .andExpect(jsonPath("$.years[1].received").value(1000.0))
+                .andExpect(jsonPath("$.years[1].closingBalance").value(-1000.0))
+                // More received than billed in the year: nothing owing, so settled.
+                .andExpect(jsonPath("$.years[1].status").value("SETTLED"));
+        mockMvc.perform(get(ApiPaths.V1 + "/clients/" + UUID.randomUUID() + "/ledger-status"))
+                .andExpect(status().isNotFound());
+
         // The client, fetched or listed, carries what they still owe across every company and year.
         mockMvc.perform(get(ClientApi.BASE_PATH + "/" + clientId))
                 .andExpect(status().isOk())

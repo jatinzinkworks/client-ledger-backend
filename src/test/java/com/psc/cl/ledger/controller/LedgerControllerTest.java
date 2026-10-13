@@ -20,9 +20,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.psc.cl.client.exception.ClientNotFoundException;
 import com.psc.cl.client.exception.CompanyNotFoundException;
 import com.psc.cl.config.ApiPaths;
+import com.psc.cl.ledger.dto.ClientLedgerStatusResponse;
 import com.psc.cl.ledger.dto.ClientLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.CompanyLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.CompanyTotals;
+import com.psc.cl.ledger.dto.CompanyYearStatus;
+import com.psc.cl.ledger.dto.FinancialYearStatus;
 import com.psc.cl.ledger.dto.FinancialYearTotals;
 import com.psc.cl.ledger.dto.LastPayment;
 import com.psc.cl.ledger.dto.LedgerEntryResponse;
@@ -32,6 +35,7 @@ import com.psc.cl.ledger.dto.LedgerListQuery;
 import com.psc.cl.ledger.dto.LedgerListResponse;
 import com.psc.cl.ledger.dto.LedgerSortField;
 import com.psc.cl.ledger.dto.LedgerSummary;
+import com.psc.cl.ledger.dto.LedgerYearStatus;
 import com.psc.cl.ledger.dto.PageMetadata;
 import com.psc.cl.ledger.dto.PaymentListResponse;
 import com.psc.cl.ledger.dto.PaymentRequest;
@@ -894,6 +898,69 @@ class LedgerControllerTest {
                 .andExpect(jsonPath("$.summary.byCompany[0].companyName").value("Mehta Textiles Pvt Ltd"))
                 .andExpect(jsonPath("$.summary.byCompany[0].entryCount").value(2))
                 .andExpect(jsonPath("$.summary.byCompany[0].totalAmount").value(11210.0));
+    }
+
+    @Test
+    @DisplayName("returns a client's years, each with its figures, status and companies")
+    void givesClientLedgerStatus() throws Exception {
+        when(ledgerService.clientLedgerStatus(CLIENT_ID)).thenReturn(ClientLedgerStatusResponse.builder()
+                .clientId(CLIENT_ID)
+                .clientName("Rohan Mehta")
+                .clientSince(LocalDate.of(2025, 4, 1))
+                .yearCount(2)
+                .years(List.of(
+                        FinancialYearStatus.builder()
+                                .financialYear("2026-27")
+                                .current(true)
+                                .companyCount(1)
+                                .billed(new BigDecimal("184500.00"))
+                                .discount(new BigDecimal("6350.00"))
+                                .received(new BigDecimal("80000.00"))
+                                .closingBalance(new BigDecimal("98150.00"))
+                                .status(LedgerYearStatus.PENDING)
+                                .companies(List.of(CompanyYearStatus.builder()
+                                        .companyId(COMPANY_ID)
+                                        .companyName("Mehta Textiles Pvt Ltd")
+                                        .closingBalance(new BigDecimal("98150.00"))
+                                        .status(LedgerYearStatus.PENDING)
+                                        .build()))
+                                .build(),
+                        FinancialYearStatus.builder()
+                                .financialYear("2025-26")
+                                .closedOn(LocalDate.of(2026, 3, 31))
+                                .closingBalance(new BigDecimal("21000.00"))
+                                .status(LedgerYearStatus.CARRIED)
+                                .companies(List.of())
+                                .build()))
+                .build());
+
+        mockMvc.perform(get(ApiPaths.V1 + "/clients/" + CLIENT_ID + "/ledger-status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.clientName").value("Rohan Mehta"))
+                .andExpect(jsonPath("$.clientSince").value("2025-04-01"))
+                .andExpect(jsonPath("$.yearCount").value(2))
+                .andExpect(jsonPath("$.years[0].financialYear").value("2026-27"))
+                .andExpect(jsonPath("$.years[0].current").value(true))
+                .andExpect(jsonPath("$.years[0].closedOn").doesNotExist())
+                .andExpect(jsonPath("$.years[0].billed").value(184500.0))
+                .andExpect(jsonPath("$.years[0].discount").value(6350.0))
+                .andExpect(jsonPath("$.years[0].received").value(80000.0))
+                .andExpect(jsonPath("$.years[0].closingBalance").value(98150.0))
+                .andExpect(jsonPath("$.years[0].status").value("PENDING"))
+                .andExpect(jsonPath("$.years[0].companies[0].companyName").value("Mehta Textiles Pvt Ltd"))
+                .andExpect(jsonPath("$.years[1].current").value(false))
+                .andExpect(jsonPath("$.years[1].closedOn").value("2026-03-31"))
+                .andExpect(jsonPath("$.years[1].status").value("CARRIED"));
+    }
+
+    @Test
+    @DisplayName("returns 404 for the ledger status of an unknown client")
+    void givesLedgerStatusOfUnknownClient() throws Exception {
+        when(ledgerService.clientLedgerStatus(CLIENT_ID)).thenThrow(new ClientNotFoundException(CLIENT_ID));
+
+        mockMvc.perform(get(ApiPaths.V1 + "/clients/" + CLIENT_ID + "/ledger-status"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
     }
 
     @Test

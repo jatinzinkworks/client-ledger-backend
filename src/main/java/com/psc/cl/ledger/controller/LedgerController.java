@@ -1,5 +1,6 @@
 package com.psc.cl.ledger.controller;
 
+import com.psc.cl.ledger.dto.ClientLedgerStatusResponse;
 import com.psc.cl.ledger.dto.ClientLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.CompanyLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.LedgerEntryResponse;
@@ -78,6 +79,12 @@ public class LedgerController implements LedgerApi {
         log.debug("Received request to summarise client {} for FY {}", clientId, financialYear);
         FinancialYear year = FinancialYears.parse(financialYear);
         return ResponseEntity.ok(ledgerService.summarizeClient(clientId, year));
+    }
+
+    @Override
+    public ResponseEntity<ClientLedgerStatusResponse> clientLedgerStatus(UUID clientId) {
+        log.debug("Received request for the ledger status of client {} by financial year", clientId);
+        return ResponseEntity.ok(ledgerService.clientLedgerStatus(clientId));
     }
 
     @Override

@@ -2,6 +2,7 @@ package com.psc.cl.ledger.controller;
 
 import com.psc.cl.config.ApiPaths;
 import com.psc.cl.dto.ErrorResponse;
+import com.psc.cl.ledger.dto.ClientLedgerStatusResponse;
 import com.psc.cl.ledger.dto.ClientLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.CompanyLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.LedgerEntryResponse;
@@ -64,6 +65,9 @@ public interface LedgerApi {
 
     /** Path of the financial year summary of a client across all of their companies. */
     String CLIENT_SUMMARY_PATH = ApiPaths.V1 + "/clients/{clientId}/ledger-summary";
+
+    /** Path of a client's balance for every financial year since they became a client. */
+    String CLIENT_STATUS_PATH = ApiPaths.V1 + "/clients/{clientId}/ledger-status";
 
     /** Path a client's ledger for a financial year is downloaded from as an Excel workbook. */
     String CLIENT_EXPORT_PATH = ApiPaths.V1 + "/clients/{clientId}/ledger-export";
@@ -244,6 +248,39 @@ public interface LedgerApi {
             @Parameter(description = "Indian financial year to summarise, written as yyyy-yy", required = true,
                     example = "2026-27")
             @RequestParam String financialYear);
+
+    @Operation(
+            summary = "Show a client's balance for every financial year",
+            description = "Returns, for every Indian financial year (1 April to 31 March) since the client "
+                    + "became one, latest first: what was billed before discount, the discount given, what "
+                    + "was received, the closing balance (billed less discount less received) and a status. "
+                    + "The current year runs to date and is PENDING while it has an amount owing; a closed "
+                    + "year that ended with an amount owing is CARRIED; a year with nothing owing is SETTLED, "
+                    + "as is one where more was received than billed, whose closing balance is then "
+                    + "negative. Charges count in the year they fell due and payments in the year they were "
+                    + "received; each year stands alone, so an "
+                    + "earlier year's balance is not brought into the next. The first year is that of the "
+                    + "client's earliest ledger entry, or of the day they were added if earlier; years with no "
+                    + "entries are listed with zeros. Each year also carries the same figures for each company "
+                    + "with entries in it.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "The client's years, latest first",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ClientLedgerStatusResponse.class))),
+            @ApiResponse(responseCode = "400", description = "The identifier is not a valid UUID",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "No client carries this identifier",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "500", description = "Unexpected server error",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class)))})
+    @GetMapping(CLIENT_STATUS_PATH)
+    ResponseEntity<ClientLedgerStatusResponse> clientLedgerStatus(
+            @Parameter(description = "Identifier of the client", required = true,
+                    example = "7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35")
+            @PathVariable UUID clientId);
 
     @Operation(
             summary = "Export a client's ledger for a financial year as an Excel workbook",

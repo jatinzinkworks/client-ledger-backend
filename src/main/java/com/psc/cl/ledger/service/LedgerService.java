@@ -1,5 +1,6 @@
 package com.psc.cl.ledger.service;
 
+import com.psc.cl.ledger.dto.ClientLedgerStatusResponse;
 import com.psc.cl.ledger.dto.ClientLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.CompanyBalance;
 import com.psc.cl.ledger.dto.CompanyLedgerSummaryResponse;
@@ -128,6 +129,18 @@ public interface LedgerService {
      * @return the year's summary; every amount zero, and no last payment, when the year has no entries
      */
     ClientLedgerSummaryResponse summarizeClient(UUID clientId, FinancialYear financialYear);
+
+    /**
+     * A client's balance for every financial year since they became a client, latest first: billed
+     * before discount, discount, received, the year's closing balance and its status, across all of
+     * their companies and for each company. The first year is that of the client's earliest ledger
+     * entry, or of the day they were added if earlier; the last is the current year. Years without
+     * entries are listed with zero figures.
+     *
+     * @param clientId the client
+     * @return the client's years
+     */
+    ClientLedgerStatusResponse clientLedgerStatus(UUID clientId);
 
     /**
      * Exports a client's ledger for one financial year as an Excel workbook: a Summary sheet with

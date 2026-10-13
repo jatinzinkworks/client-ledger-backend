@@ -17,7 +17,11 @@ import com.psc.cl.client.model.ServiceAssignment;
 import com.psc.cl.client.repository.ClientCompanyRepository;
 import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.client.repository.ServiceAssignmentRepository;
+import com.psc.cl.ledger.dto.ClientLedgerStatusResponse;
 import com.psc.cl.ledger.dto.ClientLedgerSummaryResponse;
+import com.psc.cl.ledger.dto.CompanyYearStatus;
+import com.psc.cl.ledger.dto.FinancialYearStatus;
+import com.psc.cl.ledger.dto.LedgerYearStatus;
 import com.psc.cl.ledger.dto.CompanyBalance;
 import com.psc.cl.ledger.dto.CompanyLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.LedgerEntryResponse;
@@ -723,6 +727,69 @@ class LedgerServiceImplTest {
                 return new BigDecimal(totalBilled);
             }
         };
+    }
+
+    @Test
+    @DisplayName("lists a client's years latest first, back to an entry from before they were added")
+    void givesClientLedgerStatus() {
+        client.setFirstName("Rohan");
+        client.setLastName("Mehta");
+        // Added in 2024-25, with a payment migrated from 2022-23.
+        client.setCreatedAt(Instant.parse("2024-06-01T04:30:00Z"));
+        when(clientRepository.findById(CLIENT_ID)).thenReturn(Optional.of(client));
+        when(ledgerEntryRepository.totalClientEntries(CLIENT_ID, LocalDate.of(1, 1, 1), LocalDate.of(9999, 12, 31)))
+                .thenReturn(List.of(
+                        LedgerSummariesTest.row(COMPANY_ID, "2026-27", 1, "5000.00", "250.00", "4750.00", "855.00",
+                                "5605.00"),
+                        LedgerSummariesTest.payment(COMPANY_ID, "2022-23", 1, "-500.00")));
+
+        ClientLedgerStatusResponse status = ledgerService.clientLedgerStatus(CLIENT_ID);
+
+        assertThat(status.getClientId()).isEqualTo(CLIENT_ID);
+        assertThat(status.getClientName()).isEqualTo("Rohan Mehta");
+        assertThat(status.getClientSince()).isEqualTo(LocalDate.of(2022, 4, 1));
+        assertThat(status.getYearCount()).isEqualTo(5);
+        assertThat(status.getYears()).extracting(FinancialYearStatus::getFinancialYear)
+                .containsExactly("2026-27", "2025-26", "2024-25", "2023-24", "2022-23");
+        // Today, 14 October 2026, falls in 2026-27.
+        assertThat(status.getYears()).extracting(FinancialYearStatus::isCurrent)
+                .containsExactly(true, false, false, false, false);
+        assertThat(status.getYears()).extracting(FinancialYearStatus::getStatus).containsExactly(
+                LedgerYearStatus.PENDING, LedgerYearStatus.SETTLED, LedgerYearStatus.SETTLED,
+                LedgerYearStatus.SETTLED, LedgerYearStatus.SETTLED);
+        assertThat(status.getYears().getFirst().getCompanies())
+                .extracting(CompanyYearStatus::getCompanyName).containsExactly("Mehta Textiles Pvt Ltd");
+    }
+
+    @Test
+    @DisplayName("lists every year since a client was added, even with no entries")
+    void givesClientLedgerStatusWithoutEntries() {
+        client.setFirstName("Asha");
+        client.setLastName("Kapoor");
+        client.setCreatedAt(Instant.parse("2024-06-01T04:30:00Z"));
+        when(clientRepository.findById(CLIENT_ID)).thenReturn(Optional.of(client));
+        when(ledgerEntryRepository.totalClientEntries(any(), any(), any())).thenReturn(List.of());
+
+        ClientLedgerStatusResponse status = ledgerService.clientLedgerStatus(CLIENT_ID);
+
+        assertThat(status.getClientSince()).isEqualTo(LocalDate.of(2024, 4, 1));
+        assertThat(status.getYears()).extracting(FinancialYearStatus::getFinancialYear)
+                .containsExactly("2026-27", "2025-26", "2024-25");
+        assertThat(status.getYears()).allSatisfy(year -> {
+            assertThat(year.getStatus()).isEqualTo(LedgerYearStatus.SETTLED);
+            assertThat(year.getClosingBalance()).isEqualTo(new BigDecimal("0.00"));
+        });
+    }
+
+    @Test
+    @DisplayName("raises not found for the ledger status of an unknown client")
+    void givesLedgerStatusOfUnknownClient() {
+        when(clientRepository.findById(CLIENT_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> ledgerService.clientLedgerStatus(CLIENT_ID))
+                .isInstanceOf(ClientNotFoundException.class);
+
+        verify(ledgerEntryRepository, never()).totalClientEntries(any(), any(), any());
     }
 
     @Test

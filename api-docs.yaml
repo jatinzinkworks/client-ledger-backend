@@ -2173,6 +2173,59 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/clients/{clientId}/ledger-status:
+    get:
+      tags:
+      - Ledger
+      summary: Show a client's balance for every financial year
+      description: "Returns, for every Indian financial year (1 April to 31 March)\
+        \ since the client became one, latest first: what was billed before discount,\
+        \ the discount given, what was received, the closing balance (billed less\
+        \ discount less received) and a status. The current year runs to date and\
+        \ is PENDING while it has an amount owing; a closed year that ended with an\
+        \ amount owing is CARRIED; a year with nothing owing is SETTLED, as is one\
+        \ where more was received than billed, whose closing balance is then negative.\
+        \ Charges count in the year they fell due and payments in the year they were\
+        \ received; each year stands alone, so an earlier year's balance is not brought\
+        \ into the next. The first year is that of the client's earliest ledger entry,\
+        \ or of the day they were added if earlier; years with no entries are listed\
+        \ with zeros. Each year also carries the same figures for each company with\
+        \ entries in it."
+      operationId: clientLedgerStatus
+      parameters:
+      - name: clientId
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      responses:
+        "200":
+          description: "The client's years, latest first"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClientLedgerStatusResponse"
+        "400":
+          description: The identifier is not a valid UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No client carries this identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /psc/cl/v1/clients/{clientId}/ledger-export:
     get:
       tags:
@@ -3761,6 +3814,145 @@ components:
           description: Name of the company that made the payment; given only in a
             client's summary
           example: Mehta Textiles Pvt Ltd
+    ClientLedgerStatusResponse:
+      type: object
+      description: A client's ledger balance for every financial year since they became
+        a client
+      properties:
+        clientId:
+          type: string
+          format: uuid
+          description: Identifier of the client
+          example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+        clientName:
+          type: string
+          description: Full name of the client
+          example: Rohan Mehta
+        clientSince:
+          type: string
+          format: date
+          description: "First day of the first financial year listed: that of the\
+            \ client's earliest ledger entry, or of the day they were added if earlier"
+          example: 2019-04-01
+        yearCount:
+          type: integer
+          format: int32
+          description: "Number of financial years listed, from clientSince to the\
+            \ current year"
+          example: 8
+        years:
+          type: array
+          description: "Every financial year from clientSince to the current one,\
+            \ latest first, including years with no entries"
+          items:
+            $ref: "#/components/schemas/FinancialYearStatus"
+    CompanyYearStatus:
+      type: object
+      description: One company's balance in one financial year
+      properties:
+        companyId:
+          type: string
+          format: uuid
+          description: Identifier of the company
+          example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+        companyName:
+          type: string
+          description: Name of the company
+          example: Mehta Textiles Pvt Ltd
+        billed:
+          type: number
+          description: "Service charges falling due in the year before their discount:\
+            \ what was charged plus the discount given, GST included"
+          example: 61500.0
+        discount:
+          type: number
+          description: Discount given on those charges
+          example: 2116.67
+        received:
+          type: number
+          description: Payments received in the year
+          example: 52383.33
+        closingBalance:
+          type: number
+          description: "Billed less discount less received: what the year's activity\
+            \ left owing; negative when more was received"
+          example: 7000.0
+        status:
+          type: string
+          description: Where the company's year stands
+          enum:
+          - PENDING
+          - CARRIED
+          - SETTLED
+          example: CARRIED
+    FinancialYearStatus:
+      type: object
+      description: A client's balance in one financial year
+      properties:
+        financialYear:
+          type: string
+          description: Indian financial year (1 April to 31 March)
+          example: 2025-26
+        fromDate:
+          type: string
+          format: date
+          description: First day of the financial year
+          example: 2025-04-01
+        toDate:
+          type: string
+          format: date
+          description: Last day of the financial year
+          example: 2026-03-31
+        current:
+          type: boolean
+          description: "Whether this is the current financial year, whose figures\
+            \ run to date"
+          example: false
+        closedOn:
+          type: string
+          format: date
+          description: "Day the year closed: its last day. Absent for the current\
+            \ year"
+          example: 2026-03-31
+        companyCount:
+          type: integer
+          format: int32
+          description: Number of the client's companies with ledger entries in the
+            year
+          example: 3
+        billed:
+          type: number
+          description: "Service charges falling due in the year before their discount:\
+            \ what was charged plus the discount given, GST included"
+          example: 184500.0
+        discount:
+          type: number
+          description: Discount given on those charges
+          example: 6350.0
+        received:
+          type: number
+          description: Payments received in the year
+          example: 157150.0
+        closingBalance:
+          type: number
+          description: "Billed less discount less received: what the year's activity\
+            \ left owing; negative when more was received. Each year stands alone;\
+            \ an earlier year's balance is not brought forward into it"
+          example: 21000.0
+        status:
+          type: string
+          description: Where the year stands
+          enum:
+          - PENDING
+          - CARRIED
+          - SETTLED
+          example: CARRIED
+        companies:
+          type: array
+          description: "The same figures for each company with ledger entries in the\
+            \ year, ordered by company name; they add up to the year's"
+          items:
+            $ref: "#/components/schemas/CompanyYearStatus"
     CompanyTotals:
       type: object
       description: Totals of the ledger entries listed for one company of the client

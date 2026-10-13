@@ -5,15 +5,20 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.psc.cl.ledger.dto.CompanyBalance;
 import com.psc.cl.ledger.dto.CompanyTotals;
+import com.psc.cl.ledger.dto.CompanyYearStatus;
+import com.psc.cl.ledger.dto.FinancialYearStatus;
 import com.psc.cl.ledger.dto.FinancialYearTotals;
 import com.psc.cl.ledger.dto.LedgerSummary;
+import com.psc.cl.ledger.dto.LedgerYearStatus;
 import com.psc.cl.ledger.dto.PaymentSummary;
+import com.psc.cl.ledger.model.FinancialYear;
 import com.psc.cl.ledger.model.LedgerEntryType;
 import com.psc.cl.ledger.repository.LedgerTotalsRow;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -224,6 +229,70 @@ class LedgerSummariesTest {
      * A row of service charges. Also used by {@link LedgerServiceImplTest} to stand in for the
      * database's totals.
      */
+    @Test
+    @DisplayName("gives each year's billed before discount, received, closing balance and status, and each company's")
+    void givesStatusesByYear() {
+        List<FinancialYear> years = List.of(FinancialYears.parse("2026-27"), FinancialYears.parse("2025-26"),
+                FinancialYears.parse("2024-25"), FinancialYears.parse("2023-24"));
+        List<LedgerTotalsRow> rows = List.of(TEXTILES_2026_27, HUF_2026_27, payment(TEXTILES, "2026-27", 1, "-5605.00"),
+                HUF_2025_26, payment(HUF, "2025-26", 1, "-20000.00"), payment(TEXTILES, "2023-24", 1, "-1000.00"));
+
+        List<FinancialYearStatus> statuses = LedgerSummaries.statusesByYear(rows, NAMES, years, years.getFirst());
+
+        assertThat(statuses).extracting(FinancialYearStatus::getFinancialYear)
+                .containsExactly("2026-27", "2025-26", "2024-25", "2023-24");
+
+        // The current year: owing, so pending, and still open.
+        FinancialYearStatus current = statuses.get(0);
+        assertThat(current.isCurrent()).isTrue();
+        assertThat(current.getClosedOn()).isNull();
+        assertThat(current.getFromDate()).isEqualTo(LocalDate.of(2026, 4, 1));
+        assertThat(current.getToDate()).isEqualTo(LocalDate.of(2027, 3, 31));
+        assertThat(current.getCompanyCount()).isEqualTo(2);
+        // 39235.00 charged after a 1750.00 discount.
+        assertThat(current.getBilled()).isEqualTo(new BigDecimal("40985.00"));
+        assertThat(current.getDiscount()).isEqualTo(new BigDecimal("1750.00"));
+        assertThat(current.getReceived()).isEqualTo(new BigDecimal("5605.00"));
+        assertThat(current.getClosingBalance()).isEqualTo(new BigDecimal("33630.00"));
+        assertThat(current.getStatus()).isEqualTo(LedgerYearStatus.PENDING);
+        assertThat(current.getCompanies()).extracting(CompanyYearStatus::getCompanyName)
+                .containsExactly("Mehta Textiles Pvt Ltd", "Rohan Mehta HUF");
+        CompanyYearStatus textiles = current.getCompanies().get(0);
+        assertThat(textiles.getBilled()).isEqualTo(new BigDecimal("11710.00"));
+        assertThat(textiles.getDiscount()).isEqualTo(new BigDecimal("500.00"));
+        assertThat(textiles.getReceived()).isEqualTo(new BigDecimal("5605.00"));
+        assertThat(textiles.getClosingBalance()).isEqualTo(new BigDecimal("5605.00"));
+        assertThat(textiles.getStatus()).isEqualTo(LedgerYearStatus.PENDING);
+        CompanyYearStatus huf = current.getCompanies().get(1);
+        assertThat(huf.getReceived()).isEqualTo(new BigDecimal("0.00"));
+        assertThat(huf.getClosingBalance()).isEqualTo(new BigDecimal("28025.00"));
+
+        // A closed year left owing: carried.
+        FinancialYearStatus carried = statuses.get(1);
+        assertThat(carried.isCurrent()).isFalse();
+        assertThat(carried.getClosedOn()).isEqualTo(LocalDate.of(2026, 3, 31));
+        assertThat(carried.getCompanyCount()).isEqualTo(1);
+        assertThat(carried.getBilled()).isEqualTo(new BigDecimal("29275.00"));
+        assertThat(carried.getReceived()).isEqualTo(new BigDecimal("20000.00"));
+        assertThat(carried.getClosingBalance()).isEqualTo(new BigDecimal("8025.00"));
+        assertThat(carried.getStatus()).isEqualTo(LedgerYearStatus.CARRIED);
+        assertThat(carried.getCompanies().getFirst().getStatus()).isEqualTo(LedgerYearStatus.CARRIED);
+
+        // A year with no entries: zeros, settled, no companies.
+        FinancialYearStatus empty = statuses.get(2);
+        assertThat(empty.getBilled()).isEqualTo(new BigDecimal("0.00"));
+        assertThat(empty.getReceived()).isEqualTo(new BigDecimal("0.00"));
+        assertThat(empty.getClosingBalance()).isEqualTo(new BigDecimal("0.00"));
+        assertThat(empty.getStatus()).isEqualTo(LedgerYearStatus.SETTLED);
+        assertThat(empty.getCompanyCount()).isZero();
+        assertThat(empty.getCompanies()).isEmpty();
+
+        // Only a payment: more received than billed, which owes nothing, so is settled.
+        FinancialYearStatus overpaid = statuses.get(3);
+        assertThat(overpaid.getClosingBalance()).isEqualTo(new BigDecimal("-1000.00"));
+        assertThat(overpaid.getStatus()).isEqualTo(LedgerYearStatus.SETTLED);
+    }
+
     static LedgerTotalsRow row(UUID companyId, String financialYear, long entryCount, String fee,
                                        String discount, String taxable, String gst, String total) {
         return row(companyId, financialYear, LedgerEntryType.SERVICE_CHARGE, entryCount, fee, discount, taxable,

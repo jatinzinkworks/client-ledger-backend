@@ -9,6 +9,7 @@ import com.psc.cl.client.repository.ClientCompanyRepository;
 import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.client.repository.ServiceAssignmentRepository;
 import com.psc.cl.client.service.NextDueDates;
+import com.psc.cl.ledger.dto.ClientLedgerStatusResponse;
 import com.psc.cl.ledger.dto.ClientLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.CompanyBalance;
 import com.psc.cl.ledger.dto.CompanyLedgerSummaryResponse;
@@ -32,6 +33,7 @@ import com.psc.cl.ledger.model.LedgerEntryType;
 import com.psc.cl.ledger.repository.CatalogServiceBilledRow;
 import com.psc.cl.ledger.repository.ClientPendingRow;
 import com.psc.cl.ledger.repository.LedgerEntryRepository;
+import com.psc.cl.ledger.repository.LedgerTotalsRow;
 import com.psc.cl.ledger.repository.ManagerPendingRow;
 import com.psc.cl.ledger.repository.ServiceBilledRow;
 import com.psc.cl.servicecatalog.model.BillingFrequency;
@@ -324,6 +326,62 @@ public class LedgerServiceImpl implements LedgerService {
                 .totalDiscount(totals.getTotalDiscountAmount())
                 .lastPayment(lastPayment)
                 .build();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ClientLedgerStatusResponse clientLedgerStatus(UUID clientId) {
+        Client client = clientRepository.findById(clientId).orElseThrow(() -> new ClientNotFoundException(clientId));
+        Map<UUID, String> companyNames = client.getCompanies().stream()
+                .collect(Collectors.toMap(ClientCompany::getId, ClientCompany::getCompanyName));
+
+        // The same totals query the ledger lists use, over every date, so the years agree with them.
+        List<LedgerTotalsRow> rows = ledgerEntryRepository.totalClientEntries(clientId, EARLIEST_DATE, LATEST_DATE);
+        LocalDate today = LocalDate.now(clock);
+        FinancialYear currentYear = FinancialYears.containing(today);
+        List<FinancialYear> years = yearsLatestFirst(firstYear(client, rows, today), lastYear(rows, currentYear));
+
+        return ClientLedgerStatusResponse.builder()
+                .clientId(clientId)
+                .clientName(fullName(client))
+                .clientSince(years.getLast().firstDay())
+                .yearCount(years.size())
+                .years(LedgerSummaries.statusesByYear(rows, companyNames, years, currentYear))
+                .build();
+    }
+
+    /** The year the client was added in, or that of their earliest entry if earlier, as for migrated history. */
+    private FinancialYear firstYear(Client client, List<LedgerTotalsRow> rows, LocalDate today) {
+        LocalDate addedOn = client.getCreatedAt() == null ? today : LocalDate.ofInstant(client.getCreatedAt(),
+                clock.getZone());
+        FinancialYear added = FinancialYears.containing(addedOn);
+        return rows.stream()
+                .map(LedgerTotalsRow::getFinancialYear)
+                .map(FinancialYears::parse)
+                .filter(year -> year.firstDay().isBefore(added.firstDay()))
+                .min(Comparator.comparing(FinancialYear::firstDay))
+                .orElse(added);
+    }
+
+    /** The current year, unless an entry falls later. */
+    private static FinancialYear lastYear(List<LedgerTotalsRow> rows, FinancialYear currentYear) {
+        return rows.stream()
+                .map(LedgerTotalsRow::getFinancialYear)
+                .map(FinancialYears::parse)
+                .filter(year -> year.firstDay().isAfter(currentYear.firstDay()))
+                .max(Comparator.comparing(FinancialYear::firstDay))
+                .orElse(currentYear);
+    }
+
+    /** At least the last year, even if the client was somehow added after it. */
+    private static List<FinancialYear> yearsLatestFirst(FinancialYear first, FinancialYear last) {
+        LocalDate earliest = first.firstDay().isAfter(last.firstDay()) ? last.firstDay() : first.firstDay();
+        List<FinancialYear> years = new ArrayList<>();
+        for (FinancialYear year = last; !year.firstDay().isBefore(earliest);
+             year = FinancialYears.containing(year.firstDay().minusDays(1))) {
+            years.add(year);
+        }
+        return years;
     }
 
     @Override

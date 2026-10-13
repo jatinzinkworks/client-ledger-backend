@@ -2,9 +2,13 @@ package com.psc.cl.ledger.service;
 
 import com.psc.cl.ledger.dto.CompanyBalance;
 import com.psc.cl.ledger.dto.CompanyTotals;
+import com.psc.cl.ledger.dto.CompanyYearStatus;
+import com.psc.cl.ledger.dto.FinancialYearStatus;
 import com.psc.cl.ledger.dto.FinancialYearTotals;
 import com.psc.cl.ledger.dto.LedgerSummary;
+import com.psc.cl.ledger.dto.LedgerYearStatus;
 import com.psc.cl.ledger.dto.PaymentSummary;
+import com.psc.cl.ledger.model.FinancialYear;
 import com.psc.cl.ledger.model.LedgerEntryType;
 import com.psc.cl.ledger.repository.LedgerTotalsRow;
 
@@ -85,6 +89,72 @@ final class LedgerSummaries {
                     Totals totals = Totals.of(company.getValue());
                     return new CompanyBalance(totals.charged(), totals.paid(), totals.balance());
                 }));
+    }
+
+    /**
+     * Each financial year's balance, across all of a client's companies and for each of them, in
+     * the order the years are given. A year without rows is listed with zero figures and no
+     * companies.
+     *
+     * <p>Billed is shown before discount, as charged plus the discount given, so that billed less
+     * discount less received is the year's closing balance.
+     *
+     * @param rows         the totals of the client's entries, one row per company, financial year and type
+     * @param companyNames the name of every company of the client, by identifier
+     * @param years        the financial years to list, in the order to list them
+     * @param currentYear  the financial year today falls in, which is still open
+     * @return one status per year given
+     * @throws IllegalStateException when a row's company is missing from the names given
+     */
+    static List<FinancialYearStatus> statusesByYear(List<LedgerTotalsRow> rows, Map<UUID, String> companyNames,
+                                                    List<FinancialYear> years, FinancialYear currentYear) {
+        Map<String, List<LedgerTotalsRow>> rowsByYear = rows.stream()
+                .collect(Collectors.groupingBy(LedgerTotalsRow::getFinancialYear));
+        return years.stream()
+                .map(year -> {
+                    List<LedgerTotalsRow> yearRows = rowsByYear.getOrDefault(year.label(), List.of());
+                    boolean current = year.equals(currentYear);
+                    Totals totals = Totals.of(yearRows);
+                    List<CompanyYearStatus> companies = companyStatuses(yearRows, companyNames, current);
+                    return FinancialYearStatus.builder()
+                            .financialYear(year.label())
+                            .fromDate(year.firstDay())
+                            .toDate(year.lastDay())
+                            .current(current)
+                            .closedOn(current ? null : year.lastDay())
+                            .companyCount(companies.size())
+                            .billed(totals.billedBeforeDiscount())
+                            .discount(totals.discountAmount())
+                            .received(totals.paid())
+                            .closingBalance(totals.balance())
+                            .status(LedgerYearStatus.of(totals.balance(), current))
+                            .companies(companies)
+                            .build();
+                })
+                .toList();
+    }
+
+    /** Ordered by name, as companies are listed elsewhere; the identifier settles a tie. */
+    private static List<CompanyYearStatus> companyStatuses(List<LedgerTotalsRow> yearRows,
+                                                           Map<UUID, String> companyNames, boolean current) {
+        return yearRows.stream()
+                .collect(Collectors.groupingBy(LedgerTotalsRow::getCompanyId))
+                .entrySet().stream()
+                .map(company -> {
+                    Totals totals = Totals.of(company.getValue());
+                    return CompanyYearStatus.builder()
+                            .companyId(company.getKey())
+                            .companyName(companyName(companyNames, company.getKey()))
+                            .billed(totals.billedBeforeDiscount())
+                            .discount(totals.discountAmount())
+                            .received(totals.paid())
+                            .closingBalance(totals.balance())
+                            .status(LedgerYearStatus.of(totals.balance(), current))
+                            .build();
+                })
+                .sorted(Comparator.comparing(CompanyYearStatus::getCompanyName)
+                        .thenComparing(CompanyYearStatus::getCompanyId))
+                .toList();
     }
 
     private static LedgerSummary.LedgerSummaryBuilder overall(List<LedgerTotalsRow> rows) {
@@ -192,6 +262,11 @@ final class LedgerSummaries {
         /** What is still owed; negative when more has been paid than charged. */
         BigDecimal balance() {
             return charged.subtract(paid);
+        }
+
+        /** What was charged before the discount came off: charged plus the discount given. */
+        BigDecimal billedBeforeDiscount() {
+            return charged.add(discountAmount);
         }
 
         private static List<LedgerTotalsRow> ofType(List<LedgerTotalsRow> rows, LedgerEntryType type) {
