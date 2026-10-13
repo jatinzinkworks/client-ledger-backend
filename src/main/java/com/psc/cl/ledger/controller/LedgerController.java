@@ -4,6 +4,7 @@ import com.psc.cl.ledger.dto.ClientLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.CompanyLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.LedgerEntryResponse;
 import com.psc.cl.ledger.dto.LedgerEntryUpdateRequest;
+import com.psc.cl.ledger.dto.LedgerExport;
 import com.psc.cl.ledger.dto.LedgerListQuery;
 import com.psc.cl.ledger.dto.LedgerListResponse;
 import com.psc.cl.ledger.dto.LedgerSortField;
@@ -19,6 +20,9 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.util.UriComponentsBuilder;
@@ -74,6 +78,18 @@ public class LedgerController implements LedgerApi {
         log.debug("Received request to summarise client {} for FY {}", clientId, financialYear);
         FinancialYear year = FinancialYears.parse(financialYear);
         return ResponseEntity.ok(ledgerService.summarizeClient(clientId, year));
+    }
+
+    @Override
+    public ResponseEntity<byte[]> exportClient(UUID clientId, String financialYear) {
+        log.debug("Received request to export the ledger of client {} for FY {}", clientId, financialYear);
+        FinancialYear year = FinancialYears.parse(financialYear);
+        LedgerExport export = ledgerService.exportClient(clientId, year);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(LedgerExport.XLSX_MEDIA_TYPE))
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        ContentDisposition.attachment().filename(export.fileName()).build().toString())
+                .body(export.content());
     }
 
     @Override

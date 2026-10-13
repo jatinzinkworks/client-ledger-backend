@@ -22,6 +22,7 @@ import com.psc.cl.ledger.dto.CompanyBalance;
 import com.psc.cl.ledger.dto.CompanyLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.LedgerEntryResponse;
 import com.psc.cl.ledger.dto.LedgerEntryUpdateRequest;
+import com.psc.cl.ledger.dto.LedgerExport;
 import com.psc.cl.ledger.dto.LedgerListQuery;
 import com.psc.cl.ledger.dto.LedgerListResponse;
 import com.psc.cl.ledger.dto.LedgerSortField;
@@ -606,6 +607,61 @@ class LedgerServiceImplTest {
                 .hasMessageContaining(CLIENT_ID.toString());
 
         verify(ledgerEntryRepository, never()).totalClientEntries(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("exports a client's year as a workbook named after them, with the summary and every entry")
+    void exportsClientYear() {
+        client.setFirstName("Rohan");
+        client.setLastName("Mehta");
+        when(clientRepository.findById(CLIENT_ID)).thenReturn(Optional.of(client));
+        LocalDate from = LocalDate.of(2026, 4, 1);
+        LocalDate to = LocalDate.of(2027, 3, 31);
+        when(ledgerEntryRepository.totalClientEntries(CLIENT_ID, from, to)).thenReturn(List.of(
+                LedgerSummariesTest.row(COMPANY_ID, "2026-27", 1, "5000.00", "250.00", "4750.00", "855.00",
+                        "5605.00")));
+        when(ledgerEntryRepository.findFirstByClientIdAndEntryTypeAndDueDateBetweenOrderByDueDateDescCreatedAtDesc(
+                CLIENT_ID, LedgerEntryType.PAYMENT, from, to)).thenReturn(Optional.empty());
+        when(ledgerEntryRepository.findAllByClientIdAndDueDateBetween(CLIENT_ID, from, to, EARLIEST_DUE_FIRST))
+                .thenReturn(List.of(storedEntry()));
+
+        LedgerExport export = ledgerService.exportClient(CLIENT_ID, FinancialYears.parse("2026-27"));
+
+        assertThat(export.fileName()).isEqualTo("Rohan_Mehta_Ledger_FY2026-27.xlsx");
+        Map<String, String> parts = XlsxWorkbookTest.parts(export.content());
+        assertThat(parts.get("xl/worksheets/sheet1.xml"))
+                .contains(">Rohan Mehta<")
+                .contains("<v>5605.00</v>")
+                // Generated on the firm's today, 14 October 2026.
+                .contains("<v>46309</v>");
+        assertThat(parts.get("xl/worksheets/sheet2.xml"))
+                .contains(">Mehta Textiles Pvt Ltd<")
+                .contains(">GST Monthly Return Filing<");
+    }
+
+    @Test
+    @DisplayName("raises not found when exporting an unknown client")
+    void exportsUnknownClient() {
+        when(clientRepository.findById(CLIENT_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> ledgerService.exportClient(CLIENT_ID, FinancialYears.parse("2026-27")))
+                .isInstanceOf(ClientNotFoundException.class);
+
+        verify(ledgerEntryRepository, never()).findAllByClientIdAndDueDateBetween(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("names an export with only letters, digits and underscores, falling back to Client")
+    void namesExportSafely() {
+        FinancialYear year = FinancialYears.parse("2026-27");
+        client.setFirstName(" Anil ");
+        client.setLastName("D'Souza-Pinto Jr.");
+        assertThat(LedgerServiceImpl.exportFileName(client, year))
+                .isEqualTo("Anil_D_Souza_Pinto_Jr_Ledger_FY2026-27.xlsx");
+
+        client.setFirstName("राम");
+        client.setLastName("शर्मा");
+        assertThat(LedgerServiceImpl.exportFileName(client, year)).isEqualTo("Client_Ledger_FY2026-27.xlsx");
     }
 
     private ClientCompany company(UUID id, String name) {

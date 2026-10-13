@@ -4,6 +4,7 @@ import com.psc.cl.ledger.model.LedgerEntry;
 import com.psc.cl.ledger.model.LedgerEntryType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -123,6 +124,19 @@ public interface LedgerEntryRepository extends JpaRepository<LedgerEntry, UUID> 
      */
     Page<LedgerEntry> findByClientIdAndDueDateBetween(UUID clientId, LocalDate fromDate, LocalDate toDate,
                                                       Pageable pageable);
+
+    /**
+     * Reads every entry of every company of one client due within a range, both ends inclusive, in
+     * one go, for exports. Served by the (client_id, due_date) index.
+     *
+     * @param clientId the client
+     * @param fromDate earliest due date to include
+     * @param toDate   latest due date to include
+     * @param sort     the order to read entries in
+     * @return the entries; empty when none matches
+     */
+    List<LedgerEntry> findAllByClientIdAndDueDateBetween(UUID clientId, LocalDate fromDate, LocalDate toDate,
+                                                         Sort sort);
 
     /**
      * Totals every entry of one company due within a range, whichever page is being read.

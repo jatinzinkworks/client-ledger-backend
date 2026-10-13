@@ -34,10 +34,15 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.UUID;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 class LedgerIT extends AbstractPostgresIT {
 
@@ -737,6 +742,34 @@ class LedgerIT extends AbstractPostgresIT {
         mockMvc.perform(get(companies).param("financialYear", "26-27"))
                 .andExpect(status().isBadRequest());
 
+        // The export holds the same year: the summary's figures, and every entry with its totals.
+        String export = ApiPaths.V1 + "/clients/" + clientId + "/ledger-export";
+        byte[] workbook = mockMvc.perform(get(export).param("financialYear", "2026-27"))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CONTENT_TYPE,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"Rohan_Mehta_Ledger_FY2026-27.xlsx\""))
+                .andReturn().getResponse().getContentAsByteArray();
+        assertThat(workbookPart(workbook, "xl/worksheets/sheet1.xml"))
+                .contains(">Rohan Mehta<")
+                .contains("<v>39235.00</v>")
+                .contains("<v>18605.00</v>")
+                .contains("<v>20630.00</v>");
+        assertThat(workbookPart(workbook, "xl/worksheets/sheet2.xml"))
+                .contains(">Mehta Textiles Pvt Ltd<")
+                .contains(">Rohan Mehta HUF<")
+                .contains(">Cheque<")
+                // Totals row: debits, credits, and the closing balance, which is the summary's pending.
+                .contains("<v>39235.00</v></c>")
+                .contains("<v>18605.00</v></c>")
+                .contains("<v>20630.00</v></c>");
+        mockMvc.perform(get(export).param("financialYear", "26-27"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get(ApiPaths.V1 + "/clients/" + UUID.randomUUID() + "/ledger-export")
+                        .param("financialYear", "2026-27"))
+                .andExpect(status().isNotFound());
+
         mockMvc.perform(get(clientSummary))
                 .andExpect(status().isBadRequest());
         mockMvc.perform(get(ApiPaths.V1 + "/clients/" + UUID.randomUUID() + "/ledger-summary")
@@ -991,6 +1024,18 @@ class LedgerIT extends AbstractPostgresIT {
 
     private String servicesUrl() {
         return ClientApi.BASE_PATH + "/" + clientId + "/companies/" + companyId + "/services";
+    }
+
+    /** One part of an .xlsx workbook, read as text. */
+    private static String workbookPart(byte[] workbook, String name) throws IOException {
+        try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(workbook), StandardCharsets.UTF_8)) {
+            for (ZipEntry entry = zip.getNextEntry(); entry != null; entry = zip.getNextEntry()) {
+                if (entry.getName().equals(name)) {
+                    return new String(zip.readAllBytes(), StandardCharsets.UTF_8);
+                }
+            }
+        }
+        throw new AssertionError("The workbook has no part " + name);
     }
 
     private UUID createManager() {

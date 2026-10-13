@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -26,6 +27,7 @@ import com.psc.cl.ledger.dto.FinancialYearTotals;
 import com.psc.cl.ledger.dto.LastPayment;
 import com.psc.cl.ledger.dto.LedgerEntryResponse;
 import com.psc.cl.ledger.dto.LedgerEntryUpdateRequest;
+import com.psc.cl.ledger.dto.LedgerExport;
 import com.psc.cl.ledger.dto.LedgerListQuery;
 import com.psc.cl.ledger.dto.LedgerListResponse;
 import com.psc.cl.ledger.dto.LedgerSortField;
@@ -80,6 +82,8 @@ class LedgerControllerTest {
     private static final String CLIENT_SUMMARY_URL = ApiPaths.V1 + "/clients/" + CLIENT_ID + "/ledger-summary";
 
     private static final String CLIENT_LEDGER_URL = ApiPaths.V1 + "/clients/" + CLIENT_ID + "/ledger-entries";
+
+    private static final String CLIENT_EXPORT_URL = ApiPaths.V1 + "/clients/" + CLIENT_ID + "/ledger-export";
 
     @Autowired
     private MockMvc mockMvc;
@@ -897,6 +901,45 @@ class LedgerControllerTest {
 
         mockMvc.perform(get(CLIENT_LEDGER_URL))
                 .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+    }
+
+    @Test
+    @DisplayName("downloads a client's year as an .xlsx attachment named after them")
+    void exportsClientYear() throws Exception {
+        byte[] workbook = {0x50, 0x4b, 0x03, 0x04};
+        when(ledgerService.exportClient(CLIENT_ID, FinancialYears.parse("2026-27")))
+                .thenReturn(new LedgerExport("Rohan_Mehta_Ledger_FY2026-27.xlsx", workbook));
+
+        mockMvc.perform(get(CLIENT_EXPORT_URL).param("financialYear", "2026-27"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(LedgerExport.XLSX_MEDIA_TYPE))
+                .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"Rohan_Mehta_Ledger_FY2026-27.xlsx\""))
+                .andExpect(content().bytes(workbook));
+    }
+
+    @Test
+    @DisplayName("returns 400 when exporting without a financial year, or with a malformed one")
+    void rejectsExportWithoutValidFinancialYear() throws Exception {
+        mockMvc.perform(get(CLIENT_EXPORT_URL))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get(CLIENT_EXPORT_URL).param("financialYear", "2026-28"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+
+        verify(ledgerService, never()).exportClient(any(), any());
+    }
+
+    @Test
+    @DisplayName("returns 404 as JSON when exporting an unknown client")
+    void exportsUnknownClient() throws Exception {
+        when(ledgerService.exportClient(CLIENT_ID, FinancialYears.parse("2026-27")))
+                .thenThrow(new ClientNotFoundException(CLIENT_ID));
+
+        mockMvc.perform(get(CLIENT_EXPORT_URL).param("financialYear", "2026-27"))
+                .andExpect(status().isNotFound())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
     }
 

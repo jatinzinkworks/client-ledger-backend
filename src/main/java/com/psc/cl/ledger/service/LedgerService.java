@@ -3,6 +3,7 @@ package com.psc.cl.ledger.service;
 import com.psc.cl.ledger.dto.ClientLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.CompanyBalance;
 import com.psc.cl.ledger.dto.CompanyLedgerSummaryResponse;
+import com.psc.cl.ledger.dto.LedgerExport;
 import com.psc.cl.ledger.dto.LedgerEntryResponse;
 import com.psc.cl.ledger.dto.LedgerEntryUpdateRequest;
 import com.psc.cl.ledger.dto.LedgerListQuery;
@@ -125,6 +126,19 @@ public interface LedgerService {
      * @return the year's summary; every amount zero, and no last payment, when the year has no entries
      */
     ClientLedgerSummaryResponse summarizeClient(UUID clientId, FinancialYear financialYear);
+
+    /**
+     * Exports a client's ledger for one financial year as an Excel workbook: a Summary sheet with
+     * the figures of {@link #summarizeClient}, and a Ledger sheet with every entry of the year across
+     * all of the client's companies, earliest first, with a running balance and totals.
+     *
+     * @param clientId      the client
+     * @param financialYear the financial year to export
+     * @return the .xlsx file, named after the client and the year, such as
+     *         {@code Rohan_Mehta_Ledger_FY2026-27.xlsx}; a year with no entries still exports, with
+     *         zero totals and an empty ledger
+     */
+    LedgerExport exportClient(UUID clientId, FinancialYear financialYear);
 
     /**
      * The balance of each company of a client for one financial year: billed, received and pending.

@@ -13,6 +13,7 @@ import com.psc.cl.ledger.dto.ClientLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.CompanyBalance;
 import com.psc.cl.ledger.dto.CompanyLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.LastPayment;
+import com.psc.cl.ledger.dto.LedgerExport;
 import com.psc.cl.ledger.dto.LedgerEntryResponse;
 import com.psc.cl.ledger.dto.LedgerEntryUpdateRequest;
 import com.psc.cl.ledger.dto.LedgerListQuery;
@@ -52,6 +53,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -76,6 +78,12 @@ public class LedgerServiceImpl implements LedgerService {
      */
     private static final List<String> TIE_BREAKERS = List.of("dueDate", "serviceName", "createdAt", "id");
 
+    /** Order of an export's ledger: earliest due first, as the lists sort by default. */
+    private static final Sort EXPORT_ORDER = Sort.by(TIE_BREAKERS.toArray(String[]::new));
+
+    /** Runs of anything but letters and digits, replaced in a file name so it is safe on every system. */
+    private static final Pattern UNSAFE_FILE_NAME = Pattern.compile("[^A-Za-z0-9]+");
+
     /** Stands in for an open start of a date range; PostgreSQL dates cannot go back to LocalDate.MIN. */
     private static final LocalDate EARLIEST_DATE = LocalDate.of(1, 1, 1);
 
@@ -99,8 +107,6 @@ public class LedgerServiceImpl implements LedgerService {
     public List<LedgerEntryResponse> postDueServices(UUID clientId, UUID companyId) {
         requireCompany(clientId, companyId);
         LocalDate today = LocalDate.now(clock);
-
-        today = today.plusDays(19);
 
         List<ServiceAssignment> due = serviceAssignmentRepository.findDueForUpdate(companyId, today);
         if (due.isEmpty()) {
@@ -304,6 +310,36 @@ public class LedgerServiceImpl implements LedgerService {
                 .totalDiscount(totals.getTotalDiscountAmount())
                 .lastPayment(lastPayment)
                 .build();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public LedgerExport exportClient(UUID clientId, FinancialYear financialYear) {
+        Client client = clientRepository.findById(clientId).orElseThrow(() -> new ClientNotFoundException(clientId));
+        Map<UUID, String> companyNames = client.getCompanies().stream()
+                .collect(Collectors.toMap(ClientCompany::getId, ClientCompany::getCompanyName));
+
+        // The Summary sheet shows exactly what the summary endpoint returns for the year.
+        ClientLedgerSummaryResponse summary = summarizeClient(clientId, financialYear);
+        List<LedgerEntry> entries = ledgerEntryRepository.findAllByClientIdAndDueDateBetween(clientId,
+                financialYear.firstDay(), financialYear.lastDay(), EXPORT_ORDER);
+        byte[] content = ClientLedgerWorkbook.write(summary, entries, companyNames, LocalDate.now(clock));
+
+        log.info("Exported {} ledger entries of client {} for FY {}", entries.size(), clientId,
+                financialYear.label());
+        return new LedgerExport(exportFileName(client, financialYear), content);
+    }
+
+    /**
+     * Names an export after the client and the year, such as {@code Rohan_Mehta_Ledger_FY2026-27.xlsx}.
+     * Anything but letters and digits in the name becomes an underscore, so the name is safe in a
+     * download header and on any file system.
+     */
+    static String exportFileName(Client client, FinancialYear financialYear) {
+        String name = UNSAFE_FILE_NAME.matcher(client.getFirstName() + " " + client.getLastName())
+                .replaceAll("_")
+                .replaceAll("^_|_$", "");
+        return (name.isEmpty() ? "Client" : name) + "_Ledger_FY" + financialYear.label() + ".xlsx";
     }
 
     @Override
