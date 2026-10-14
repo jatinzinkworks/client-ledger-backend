@@ -103,11 +103,14 @@ final class LedgerSummaries {
      * @param companyNames the name of every company of the client, by identifier
      * @param years        the financial years to list, in the order to list them
      * @param currentYear  the financial year today falls in, which is still open
+     * @param pendingOnly  whether each year lists only the companies still owing for it; the year's own
+     *                     figures and company count cover every company either way
      * @return one status per year given
      * @throws IllegalStateException when a row's company is missing from the names given
      */
     static List<FinancialYearStatus> statusesByYear(List<LedgerTotalsRow> rows, Map<UUID, String> companyNames,
-                                                    List<FinancialYear> years, FinancialYear currentYear) {
+                                                    List<FinancialYear> years, FinancialYear currentYear,
+                                                    boolean pendingOnly) {
         Map<String, List<LedgerTotalsRow>> rowsByYear = rows.stream()
                 .collect(Collectors.groupingBy(LedgerTotalsRow::getFinancialYear));
         return years.stream()
@@ -116,6 +119,9 @@ final class LedgerSummaries {
                     boolean current = year.equals(currentYear);
                     Totals totals = Totals.of(yearRows);
                     List<CompanyYearStatus> companies = companyStatuses(yearRows, companyNames, current);
+                    List<CompanyYearStatus> listed = pendingOnly
+                            ? companies.stream().filter(company -> company.getClosingBalance().signum() > 0).toList()
+                            : companies;
                     return FinancialYearStatus.builder()
                             .financialYear(year.label())
                             .fromDate(year.firstDay())
@@ -128,7 +134,7 @@ final class LedgerSummaries {
                             .received(totals.paid())
                             .closingBalance(totals.balance())
                             .status(LedgerYearStatus.of(totals.balance(), current))
-                            .companies(companies)
+                            .companies(listed)
                             .build();
                 })
                 .toList();

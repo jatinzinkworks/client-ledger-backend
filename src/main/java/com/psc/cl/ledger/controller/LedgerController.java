@@ -1,5 +1,6 @@
 package com.psc.cl.ledger.controller;
 
+import com.psc.cl.ledger.dto.BulkPostingResponse;
 import com.psc.cl.ledger.dto.ClientLedgerStatusResponse;
 import com.psc.cl.ledger.dto.ClientLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.CompanyLedgerSummaryResponse;
@@ -15,6 +16,7 @@ import com.psc.cl.ledger.exception.InvalidDateRangeException;
 import com.psc.cl.ledger.exception.InvalidPageException;
 import com.psc.cl.ledger.exception.InvalidSortException;
 import com.psc.cl.ledger.model.FinancialYear;
+import com.psc.cl.ledger.service.BulkPostingService;
 import com.psc.cl.ledger.service.FinancialYears;
 import com.psc.cl.ledger.service.LedgerService;
 import lombok.RequiredArgsConstructor;
@@ -44,10 +46,18 @@ public class LedgerController implements LedgerApi {
 
     private final LedgerService ledgerService;
 
+    private final BulkPostingService bulkPostingService;
+
     @Override
     public ResponseEntity<List<LedgerEntryResponse>> postDueServices(UUID clientId, UUID companyId) {
         log.debug("Received request to post due services of company {} of client {}", companyId, clientId);
         return ResponseEntity.ok(ledgerService.postDueServices(clientId, companyId));
+    }
+
+    @Override
+    public ResponseEntity<BulkPostingResponse> postAllDueServices() {
+        log.debug("Received request to post due services of every company");
+        return ResponseEntity.ok(bulkPostingService.postAllDueServices());
     }
 
     @Override
@@ -82,9 +92,12 @@ public class LedgerController implements LedgerApi {
     }
 
     @Override
-    public ResponseEntity<ClientLedgerStatusResponse> clientLedgerStatus(UUID clientId) {
-        log.debug("Received request for the ledger status of client {} by financial year", clientId);
-        return ResponseEntity.ok(ledgerService.clientLedgerStatus(clientId));
+    public ResponseEntity<ClientLedgerStatusResponse> clientLedgerStatus(UUID clientId, String financialYear,
+                                                                         boolean pendingOnly) {
+        log.debug("Received request for the ledger status of client {} for FY {}, pending only {}", clientId,
+                financialYear == null ? "all" : financialYear, pendingOnly);
+        FinancialYear year = financialYear == null ? null : FinancialYears.parse(financialYear);
+        return ResponseEntity.ok(ledgerService.clientLedgerStatus(clientId, year, pendingOnly));
     }
 
     @Override

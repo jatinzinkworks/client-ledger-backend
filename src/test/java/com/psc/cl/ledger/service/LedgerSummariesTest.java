@@ -237,7 +237,8 @@ class LedgerSummariesTest {
         List<LedgerTotalsRow> rows = List.of(TEXTILES_2026_27, HUF_2026_27, payment(TEXTILES, "2026-27", 1, "-5605.00"),
                 HUF_2025_26, payment(HUF, "2025-26", 1, "-20000.00"), payment(TEXTILES, "2023-24", 1, "-1000.00"));
 
-        List<FinancialYearStatus> statuses = LedgerSummaries.statusesByYear(rows, NAMES, years, years.getFirst());
+        List<FinancialYearStatus> statuses = LedgerSummaries.statusesByYear(rows, NAMES, years, years.getFirst(),
+                false);
 
         assertThat(statuses).extracting(FinancialYearStatus::getFinancialYear)
                 .containsExactly("2026-27", "2025-26", "2024-25", "2023-24");
@@ -291,6 +292,25 @@ class LedgerSummariesTest {
         FinancialYearStatus overpaid = statuses.get(3);
         assertThat(overpaid.getClosingBalance()).isEqualTo(new BigDecimal("-1000.00"));
         assertThat(overpaid.getStatus()).isEqualTo(LedgerYearStatus.SETTLED);
+    }
+
+    @Test
+    @DisplayName("lists only the companies still owing when asked, keeping the year's figures for every company")
+    void givesStatusesOfOwingCompaniesOnly() {
+        List<FinancialYear> years = List.of(FinancialYears.parse("2026-27"));
+        // Mehta Textiles has paid in full; Rohan Mehta HUF has paid nothing.
+        List<LedgerTotalsRow> rows = List.of(TEXTILES_2026_27, payment(TEXTILES, "2026-27", 1, "-11210.00"),
+                HUF_2026_27);
+
+        FinancialYearStatus year = LedgerSummaries.statusesByYear(rows, NAMES, years, years.getFirst(), true)
+                .getFirst();
+
+        assertThat(year.getCompanies()).extracting(CompanyYearStatus::getCompanyName)
+                .containsExactly("Rohan Mehta HUF");
+        assertThat(year.getCompanyCount()).isEqualTo(2);
+        assertThat(year.getBilled()).isEqualTo(new BigDecimal("40985.00"));
+        assertThat(year.getReceived()).isEqualTo(new BigDecimal("11210.00"));
+        assertThat(year.getClosingBalance()).isEqualTo(new BigDecimal("28025.00"));
     }
 
     static LedgerTotalsRow row(UUID companyId, String financialYear, long entryCount, String fee,

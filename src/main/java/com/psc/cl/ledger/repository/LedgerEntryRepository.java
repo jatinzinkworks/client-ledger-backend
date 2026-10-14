@@ -234,6 +234,228 @@ public interface LedgerEntryRepository extends JpaRepository<LedgerEntry, UUID> 
                                               @Param("toDate") LocalDate toDate);
 
     /**
+     * Ranks the clients still owing over a range of dates, both ends inclusive, by what they owe,
+     * most first: one row per client whose charges in the range exceed their payments in it. Clients
+     * owing the same come in identifier order, so the ranking is stable.
+     *
+     * @param charge   the entry type of service charges, whose amounts count as billed
+     * @param payment  the entry type of payments, whose amounts count as paid
+     * @param fromDate earliest due date to include
+     * @param toDate   latest due date to include
+     * @param pageable how many clients to return, as the size of the first page
+     * @return the clients owing most, at most the page size of them
+     */
+    @Query("select e.clientId as clientId, "
+            + "sum(case when e.entryType = :charge then e.totalAmount else 0 end) as totalBilled, "
+            + "sum(case when e.entryType = :payment then e.totalAmount else 0 end) as totalPaid, "
+            + "sum(e.totalAmount) as pending "
+            + "from LedgerEntry e where e.dueDate between :fromDate and :toDate "
+            + "group by e.clientId having sum(e.totalAmount) > 0 "
+            + "order by sum(e.totalAmount) desc, e.clientId")
+    List<ClientBalanceRow> topClientsByPending(@Param("charge") LedgerEntryType charge,
+                                               @Param("payment") LedgerEntryType payment,
+                                               @Param("fromDate") LocalDate fromDate,
+                                               @Param("toDate") LocalDate toDate,
+                                               Pageable pageable);
+
+    /**
+     * Ranks clients by what they were billed over a range of dates, both ends inclusive, most
+     * first: one row per client charged anything in the range. Clients billed the same come in
+     * identifier order, so the ranking is stable.
+     *
+     * @param charge   the entry type of service charges, whose amounts count as billed
+     * @param payment  the entry type of payments, whose amounts count as paid
+     * @param fromDate earliest due date to include
+     * @param toDate   latest due date to include
+     * @param pageable how many clients to return, as the size of the first page
+     * @return the clients billed most, at most the page size of them
+     */
+    @Query("select e.clientId as clientId, "
+            + "sum(case when e.entryType = :charge then e.totalAmount else 0 end) as totalBilled, "
+            + "sum(case when e.entryType = :payment then e.totalAmount else 0 end) as totalPaid, "
+            + "sum(e.totalAmount) as pending "
+            + "from LedgerEntry e where e.dueDate between :fromDate and :toDate "
+            + "group by e.clientId having sum(case when e.entryType = :charge then e.totalAmount else 0 end) > 0 "
+            + "order by sum(case when e.entryType = :charge then e.totalAmount else 0 end) desc, e.clientId")
+    List<ClientBalanceRow> topClientsByBilled(@Param("charge") LedgerEntryType charge,
+                                              @Param("payment") LedgerEntryType payment,
+                                              @Param("fromDate") LocalDate fromDate,
+                                              @Param("toDate") LocalDate toDate,
+                                              Pageable pageable);
+
+    /**
+     * Ranks managers by what their clients still owe over a range of dates, both ends inclusive,
+     * most first: one row per manager whose clients' charges in the range exceed their payments in
+     * it. Clients are matched to their manager as they are assigned now. Managers owing the same come
+     * in identifier order, so the ranking is stable.
+     *
+     * @param charge   the entry type of service charges, whose amounts count as billed
+     * @param payment  the entry type of payments, whose amounts count as paid
+     * @param fromDate earliest due date to include
+     * @param toDate   latest due date to include
+     * @param pageable how many managers to return, as the size of the first page
+     * @return the managers whose clients owe most, at most the page size of them
+     */
+    @Query("select c.managerId as managerId, "
+            + "sum(case when e.entryType = :charge then e.totalAmount else 0 end) as totalBilled, "
+            + "sum(case when e.entryType = :payment then e.totalAmount else 0 end) as totalPaid, "
+            + "sum(e.totalAmount) as pending "
+            + "from LedgerEntry e join Client c on c.id = e.clientId "
+            + "where e.dueDate between :fromDate and :toDate "
+            + "group by c.managerId having sum(e.totalAmount) > 0 "
+            + "order by sum(e.totalAmount) desc, c.managerId")
+    List<ManagerBalanceRow> topManagersByPending(@Param("charge") LedgerEntryType charge,
+                                                 @Param("payment") LedgerEntryType payment,
+                                                 @Param("fromDate") LocalDate fromDate,
+                                                 @Param("toDate") LocalDate toDate,
+                                                 Pageable pageable);
+
+    /**
+     * Ranks managers by what was billed to their clients over a range of dates, both ends
+     * inclusive, most first: one row per manager whose clients were charged anything in the range.
+     * Clients are matched to their manager as they are assigned now. Managers billed the same come
+     * in identifier order, so the ranking is stable.
+     *
+     * @param charge   the entry type of service charges, whose amounts count as billed
+     * @param payment  the entry type of payments, whose amounts count as paid
+     * @param fromDate earliest due date to include
+     * @param toDate   latest due date to include
+     * @param pageable how many managers to return, as the size of the first page
+     * @return the managers whose clients were billed most, at most the page size of them
+     */
+    @Query("select c.managerId as managerId, "
+            + "sum(case when e.entryType = :charge then e.totalAmount else 0 end) as totalBilled, "
+            + "sum(case when e.entryType = :payment then e.totalAmount else 0 end) as totalPaid, "
+            + "sum(e.totalAmount) as pending "
+            + "from LedgerEntry e join Client c on c.id = e.clientId "
+            + "where e.dueDate between :fromDate and :toDate "
+            + "group by c.managerId having sum(case when e.entryType = :charge then e.totalAmount else 0 end) > 0 "
+            + "order by sum(case when e.entryType = :charge then e.totalAmount else 0 end) desc, c.managerId")
+    List<ManagerBalanceRow> topManagersByBilled(@Param("charge") LedgerEntryType charge,
+                                                @Param("payment") LedgerEntryType payment,
+                                                @Param("fromDate") LocalDate fromDate,
+                                                @Param("toDate") LocalDate toDate,
+                                                Pageable pageable);
+
+    /**
+     * Ranks companies by what they still owe over a range of dates, both ends inclusive, most first:
+     * one row per company whose charges in the range exceed its payments in it. Companies owing the
+     * same come in identifier order, so the ranking is stable.
+     *
+     * @param charge   the entry type of service charges, whose amounts count as billed
+     * @param payment  the entry type of payments, whose amounts count as paid
+     * @param fromDate earliest due date to include
+     * @param toDate   latest due date to include
+     * @param pageable how many companies to return, as the size of the first page
+     * @return the companies owing most, at most the page size of them
+     */
+    @Query("select e.companyId as companyId, e.clientId as clientId, "
+            + "sum(case when e.entryType = :charge then e.totalAmount else 0 end) as totalBilled, "
+            + "sum(case when e.entryType = :payment then e.totalAmount else 0 end) as totalPaid, "
+            + "sum(e.totalAmount) as pending "
+            + "from LedgerEntry e where e.dueDate between :fromDate and :toDate "
+            + "group by e.companyId, e.clientId having sum(e.totalAmount) > 0 "
+            + "order by sum(e.totalAmount) desc, e.companyId")
+    List<CompanyBalanceRow> topCompaniesByPending(@Param("charge") LedgerEntryType charge,
+                                                  @Param("payment") LedgerEntryType payment,
+                                                  @Param("fromDate") LocalDate fromDate,
+                                                  @Param("toDate") LocalDate toDate,
+                                                  Pageable pageable);
+
+    /**
+     * Ranks companies by what they were billed over a range of dates, both ends inclusive, most
+     * first: one row per company charged anything in the range. Companies billed the same come in
+     * identifier order, so the ranking is stable.
+     *
+     * @param charge   the entry type of service charges, whose amounts count as billed
+     * @param payment  the entry type of payments, whose amounts count as paid
+     * @param fromDate earliest due date to include
+     * @param toDate   latest due date to include
+     * @param pageable how many companies to return, as the size of the first page
+     * @return the companies billed most, at most the page size of them
+     */
+    @Query("select e.companyId as companyId, e.clientId as clientId, "
+            + "sum(case when e.entryType = :charge then e.totalAmount else 0 end) as totalBilled, "
+            + "sum(case when e.entryType = :payment then e.totalAmount else 0 end) as totalPaid, "
+            + "sum(e.totalAmount) as pending "
+            + "from LedgerEntry e where e.dueDate between :fromDate and :toDate "
+            + "group by e.companyId, e.clientId "
+            + "having sum(case when e.entryType = :charge then e.totalAmount else 0 end) > 0 "
+            + "order by sum(case when e.entryType = :charge then e.totalAmount else 0 end) desc, e.companyId")
+    List<CompanyBalanceRow> topCompaniesByBilled(@Param("charge") LedgerEntryType charge,
+                                                 @Param("payment") LedgerEntryType payment,
+                                                 @Param("fromDate") LocalDate fromDate,
+                                                 @Param("toDate") LocalDate toDate,
+                                                 Pageable pageable);
+
+    /**
+     * Reads the first entries of one type across every client, in the order asked for, such as the
+     * latest payments. Served by the due_date index when ordered by due date.
+     *
+     * @param entryType the type of entry, such as a payment
+     * @param pageable  how many entries to read, as the size of the first page, and their order
+     * @return the entries, at most the page size of them
+     */
+    List<LedgerEntry> findByEntryType(LedgerEntryType entryType, Pageable pageable);
+
+    /**
+     * Totals every entry of every client due within a range, for the firm-wide overview. Served by
+     * the due_date index.
+     *
+     * @param fromDate earliest due date to include
+     * @param toDate   latest due date to include
+     * @return one row per company, financial year and entry type with entries; empty when none matches
+     */
+    @Query(TOTALS + "where e.dueDate between :fromDate and :toDate" + BY_ROW)
+    List<LedgerTotalsRow> totalEntries(@Param("fromDate") LocalDate fromDate, @Param("toDate") LocalDate toDate);
+
+    /**
+     * Totals what was billed, received and discounted across every client on each day of a range,
+     * both ends inclusive, for the overview's monthly trend. Served by the due_date index.
+     *
+     * @param charge   the entry type of service charges, whose amounts count as billed
+     * @param payment  the entry type of payments, whose amounts count as paid
+     * @param fromDate earliest date to include
+     * @param toDate   latest date to include
+     * @return one row per day with entries; days without entries are left out
+     */
+    @Query("select e.dueDate as dueDate, "
+            + "sum(case when e.entryType = :charge then e.totalAmount else 0 end) as totalBilled, "
+            + "sum(case when e.entryType = :payment then e.totalAmount else 0 end) as totalPaid, "
+            + "sum(case when e.entryType = :charge then coalesce(e.discountAmount, 0) else 0 end) as totalDiscount "
+            + "from LedgerEntry e where e.dueDate between :fromDate and :toDate group by e.dueDate")
+    List<DailyTotalsRow> totalsByDay(@Param("charge") LedgerEntryType charge,
+                                     @Param("payment") LedgerEntryType payment,
+                                     @Param("fromDate") LocalDate fromDate,
+                                     @Param("toDate") LocalDate toDate);
+
+    /**
+     * Sums the service charges of each company by the date they fell due, for every date on or
+     * before the one given, oldest first, so payments can be applied to the oldest charges first.
+     *
+     * @param charge the entry type of service charges
+     * @param asOf   latest due date to include
+     * @return one row per company and due date with charges, earliest due first
+     */
+    @Query("select e.companyId as companyId, e.dueDate as dueDate, sum(e.totalAmount) as totalCharged "
+            + "from LedgerEntry e where e.entryType = :charge and e.dueDate <= :asOf "
+            + "group by e.companyId, e.dueDate order by e.dueDate, e.companyId")
+    List<CompanyChargeRow> chargesByCompanyAndDueDate(@Param("charge") LedgerEntryType charge,
+                                                      @Param("asOf") LocalDate asOf);
+
+    /**
+     * Totals what each company has paid on or before a date.
+     *
+     * @param payment the entry type of payments
+     * @param asOf    latest date received to include
+     * @return one row per company that has paid anything; other companies are left out
+     */
+    @Query("select e.companyId as companyId, sum(e.totalAmount) as totalPaid from LedgerEntry e "
+            + "where e.entryType = :payment and e.dueDate <= :asOf group by e.companyId")
+    List<CompanyPaidRow> totalPaidByCompany(@Param("payment") LedgerEntryType payment,
+                                            @Param("asOf") LocalDate asOf);
+
+    /**
      * Totals every entry of every company of one client due within a range, whichever page is being
      * read.
      *

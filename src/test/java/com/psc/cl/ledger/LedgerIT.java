@@ -23,6 +23,7 @@ import com.psc.cl.managercatalog.controller.ManagerCatalogApi;
 import com.psc.cl.managercatalog.model.Manager;
 import com.psc.cl.managercatalog.model.ManagerRole;
 import com.psc.cl.managercatalog.repository.ManagerRepository;
+import com.psc.cl.overview.controller.OverviewApi;
 import com.psc.cl.servicecatalog.controller.ServiceCatalogApi;
 import com.psc.cl.servicecatalog.repository.CatalogServiceRepository;
 import org.junit.jupiter.api.AfterEach;
@@ -768,8 +769,200 @@ class LedgerIT extends AbstractPostgresIT {
                 .andExpect(jsonPath("$.years[1].closingBalance").value(-1000.0))
                 // More received than billed in the year: nothing owing, so settled.
                 .andExpect(jsonPath("$.years[1].status").value("SETTLED"));
+        // One year only, keeping the client's span; with pendingOnly, Mehta Textiles' overpaid 2025-26
+        // is left out of the companies, though the year's figures still count it.
+        mockMvc.perform(get(ApiPaths.V1 + "/clients/" + clientId + "/ledger-status")
+                        .param("financialYear", "2025-26")
+                        .param("pendingOnly", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.yearCount").value(2))
+                .andExpect(jsonPath("$.years.length()").value(1))
+                .andExpect(jsonPath("$.years[0].financialYear").value("2025-26"))
+                .andExpect(jsonPath("$.years[0].companyCount").value(1))
+                .andExpect(jsonPath("$.years[0].closingBalance").value(-1000.0))
+                .andExpect(jsonPath("$.years[0].companies").isEmpty());
+        // In 2026-27 both companies still owe, so both stay.
+        mockMvc.perform(get(ApiPaths.V1 + "/clients/" + clientId + "/ledger-status")
+                        .param("financialYear", "2026-27")
+                        .param("pendingOnly", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.years[0].companies.length()").value(2));
+        mockMvc.perform(get(ApiPaths.V1 + "/clients/" + clientId + "/ledger-status").param("financialYear", "26-27"))
+                .andExpect(status().isBadRequest());
         mockMvc.perform(get(ApiPaths.V1 + "/clients/" + UUID.randomUUID() + "/ledger-status"))
                 .andExpect(status().isNotFound());
+
+        // The firm-wide overview: this is the only client, so its year's totals are the firm's.
+        mockMvc.perform(get(OverviewApi.BASE_PATH).param("financialYear", "2026-27"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalBilled").value(39235.0))
+                .andExpect(jsonPath("$.totalPaymentReceived").value(18605.0))
+                .andExpect(jsonPath("$.pending").value(20630.0))
+                .andExpect(jsonPath("$.totalDiscount").value(1750.0))
+                .andExpect(jsonPath("$.totalClients").value(1))
+                .andExpect(jsonPath("$.totalCompanies").value(2))
+                .andExpect(jsonPath("$.totalServices").value(2));
+        mockMvc.perform(get(OverviewApi.BASE_PATH).param("financialYear", "2025-26"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalBilled").value(0.0))
+                .andExpect(jsonPath("$.totalPaymentReceived").value(1000.0))
+                .andExpect(jsonPath("$.pending").value(-1000.0));
+        mockMvc.perform(get(OverviewApi.BASE_PATH))
+                .andExpect(status().isBadRequest());
+
+        // The clients owing most: in 2026-27 this client owes 20630.00; across every year 19630.00, the
+        // March payment counted too; in 2025-26 they are in credit, so nobody is listed.
+        String topPending = OverviewApi.BASE_PATH + "/top-pending-clients";
+        mockMvc.perform(get(topPending).param("financialYear", "2026-27"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.clients.length()").value(1))
+                .andExpect(jsonPath("$.clients[0].rank").value(1))
+                .andExpect(jsonPath("$.clients[0].clientId").value(clientId))
+                .andExpect(jsonPath("$.clients[0].clientName").value("Rohan Mehta"))
+                .andExpect(jsonPath("$.clients[0].managerName").value("Pranay Singhal"))
+                .andExpect(jsonPath("$.clients[0].totalBilled").value(39235.0))
+                .andExpect(jsonPath("$.clients[0].totalPaymentReceived").value(18605.0))
+                .andExpect(jsonPath("$.clients[0].pending").value(20630.0));
+        mockMvc.perform(get(topPending))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.limit").value(10))
+                .andExpect(jsonPath("$.clients[0].totalPaymentReceived").value(19605.0))
+                .andExpect(jsonPath("$.clients[0].pending").value(19630.0));
+        mockMvc.perform(get(topPending).param("financialYear", "2025-26"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.clients").isEmpty());
+        mockMvc.perform(get(topPending).param("limit", "0"))
+                .andExpect(status().isBadRequest());
+
+        // The managers whose clients owe most: the only manager, with the only client's figures.
+        String topManagers = OverviewApi.BASE_PATH + "/top-pending-managers";
+        mockMvc.perform(get(topManagers).param("financialYear", "2026-27"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.managers.length()").value(1))
+                .andExpect(jsonPath("$.managers[0].rank").value(1))
+                .andExpect(jsonPath("$.managers[0].managerId").value(managerId.toString()))
+                .andExpect(jsonPath("$.managers[0].managerName").value("Pranay Singhal"))
+                .andExpect(jsonPath("$.managers[0].clientCount").value(1))
+                .andExpect(jsonPath("$.managers[0].totalBilled").value(39235.0))
+                .andExpect(jsonPath("$.managers[0].totalPaymentReceived").value(18605.0))
+                .andExpect(jsonPath("$.managers[0].pending").value(20630.0));
+        mockMvc.perform(get(topManagers))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.managers[0].pending").value(19630.0));
+        mockMvc.perform(get(topManagers).param("financialYear", "2025-26"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.managers").isEmpty());
+
+        // The clients billed most: in 2026-27 the only client, billed 39235.00. In 2025-26 nothing was
+        // billed, only paid, so nobody is listed.
+        String topBilledClients = OverviewApi.BASE_PATH + "/top-billed-clients";
+        mockMvc.perform(get(topBilledClients).param("financialYear", "2026-27"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.clients.length()").value(1))
+                .andExpect(jsonPath("$.clients[0].rank").value(1))
+                .andExpect(jsonPath("$.clients[0].clientId").value(clientId))
+                .andExpect(jsonPath("$.clients[0].clientName").value("Rohan Mehta"))
+                .andExpect(jsonPath("$.clients[0].managerName").value("Pranay Singhal"))
+                .andExpect(jsonPath("$.clients[0].totalBilled").value(39235.0))
+                .andExpect(jsonPath("$.clients[0].totalPaymentReceived").value(18605.0))
+                .andExpect(jsonPath("$.clients[0].pending").value(20630.0));
+        mockMvc.perform(get(topBilledClients))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.clients[0].totalBilled").value(39235.0))
+                .andExpect(jsonPath("$.clients[0].pending").value(19630.0));
+        mockMvc.perform(get(topBilledClients).param("financialYear", "2025-26"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.clients").isEmpty());
+
+        // The managers whose clients were billed most: in 2026-27 the only manager, billed 39235.00. In
+        // 2025-26 nothing was billed, only paid, so nobody is listed.
+        String topBilledManagers = OverviewApi.BASE_PATH + "/top-billed-managers";
+        mockMvc.perform(get(topBilledManagers).param("financialYear", "2026-27"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.managers.length()").value(1))
+                .andExpect(jsonPath("$.managers[0].rank").value(1))
+                .andExpect(jsonPath("$.managers[0].managerId").value(managerId.toString()))
+                .andExpect(jsonPath("$.managers[0].managerName").value("Pranay Singhal"))
+                .andExpect(jsonPath("$.managers[0].clientCount").value(1))
+                .andExpect(jsonPath("$.managers[0].totalBilled").value(39235.0))
+                .andExpect(jsonPath("$.managers[0].totalPaymentReceived").value(18605.0))
+                .andExpect(jsonPath("$.managers[0].pending").value(20630.0));
+        mockMvc.perform(get(topBilledManagers))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.managers[0].totalBilled").value(39235.0))
+                .andExpect(jsonPath("$.managers[0].pending").value(19630.0));
+        mockMvc.perform(get(topBilledManagers).param("financialYear", "2025-26"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.managers").isEmpty());
+
+        // The companies owing most in 2026-27: the HUF's 18025.00, then Mehta Textiles' 2605.00.
+        String topCompanies = OverviewApi.BASE_PATH + "/top-pending-companies";
+        mockMvc.perform(get(topCompanies).param("financialYear", "2026-27"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.companies.length()").value(2))
+                .andExpect(jsonPath("$.companies[0].rank").value(1))
+                .andExpect(jsonPath("$.companies[0].companyId").value(hufId))
+                .andExpect(jsonPath("$.companies[0].companyName").value("Rohan Mehta HUF"))
+                .andExpect(jsonPath("$.companies[0].clientId").value(clientId))
+                .andExpect(jsonPath("$.companies[0].clientName").value("Rohan Mehta"))
+                .andExpect(jsonPath("$.companies[0].totalBilled").value(28025.0))
+                .andExpect(jsonPath("$.companies[0].totalPaymentReceived").value(10000.0))
+                .andExpect(jsonPath("$.companies[0].pending").value(18025.0))
+                .andExpect(jsonPath("$.companies[1].companyName").value("Mehta Textiles Pvt Ltd"))
+                .andExpect(jsonPath("$.companies[1].pending").value(2605.0));
+        // Across every year Mehta Textiles' March payment counts too.
+        mockMvc.perform(get(topCompanies).param("limit", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.companies.length()").value(1))
+                .andExpect(jsonPath("$.companies[0].pending").value(18025.0));
+        mockMvc.perform(get(topCompanies))
+                .andExpect(jsonPath("$.companies[1].pending").value(1605.0));
+
+        // The companies billed most in 2026-27: the HUF's 28025.00, then Mehta Textiles' 11210.00. Across
+        // every year the billing is the same, but Mehta Textiles' March payment lowers its pending; in
+        // 2025-26 nothing was billed, so nobody is listed.
+        String topBilledCompanies = OverviewApi.BASE_PATH + "/top-billed-companies";
+        mockMvc.perform(get(topBilledCompanies).param("financialYear", "2026-27"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.companies.length()").value(2))
+                .andExpect(jsonPath("$.companies[0].rank").value(1))
+                .andExpect(jsonPath("$.companies[0].companyId").value(hufId))
+                .andExpect(jsonPath("$.companies[0].companyName").value("Rohan Mehta HUF"))
+                .andExpect(jsonPath("$.companies[0].clientName").value("Rohan Mehta"))
+                .andExpect(jsonPath("$.companies[0].totalBilled").value(28025.0))
+                .andExpect(jsonPath("$.companies[0].pending").value(18025.0))
+                .andExpect(jsonPath("$.companies[1].companyName").value("Mehta Textiles Pvt Ltd"))
+                .andExpect(jsonPath("$.companies[1].totalBilled").value(11210.0))
+                .andExpect(jsonPath("$.companies[1].totalPaymentReceived").value(8605.0));
+        mockMvc.perform(get(topBilledCompanies))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.companies[1].totalBilled").value(11210.0))
+                .andExpect(jsonPath("$.companies[1].pending").value(1605.0));
+        mockMvc.perform(get(topBilledCompanies).param("financialYear", "2025-26"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.companies").isEmpty());
+
+        // The latest payments, most recently received first, amounts positive.
+        String recentPayments = OverviewApi.BASE_PATH + "/recent-payments";
+        mockMvc.perform(get(recentPayments))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.limit").value(20))
+                .andExpect(jsonPath("$.payments.length()").value(4))
+                .andExpect(jsonPath("$.payments[0].dateReceived").value("2026-10-10"))
+                .andExpect(jsonPath("$.payments[0].amount").value(10000.0))
+                .andExpect(jsonPath("$.payments[0].method").value("CHEQUE"))
+                .andExpect(jsonPath("$.payments[0].companyName").value("Rohan Mehta HUF"))
+                .andExpect(jsonPath("$.payments[0].clientName").value("Rohan Mehta"))
+                .andExpect(jsonPath("$.payments[1].dateReceived").value("2026-10-02"))
+                .andExpect(jsonPath("$.payments[2].dateReceived").value("2026-09-10"))
+                .andExpect(jsonPath("$.payments[3].dateReceived").value("2026-03-15"))
+                .andExpect(jsonPath("$.payments[3].companyName").value("Mehta Textiles Pvt Ltd"));
+        mockMvc.perform(get(recentPayments).param("limit", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.payments.length()").value(2))
+                .andExpect(jsonPath("$.payments[1].method").value("UPI"));
+        mockMvc.perform(get(recentPayments).param("limit", "101"))
+                .andExpect(status().isBadRequest());
 
         // The client, fetched or listed, carries what they still owe across every company and year.
         mockMvc.perform(get(ClientApi.BASE_PATH + "/" + clientId))

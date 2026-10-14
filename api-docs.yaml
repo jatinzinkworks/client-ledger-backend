@@ -9,6 +9,8 @@ servers:
 - url: /
   description: Default server
 tags:
+- name: Overview
+  description: The firm's position across every client
 - name: Global Settings
   description: "Tenant-wide configuration for the Client Ledger, such as payment terms"
 - name: Client Services
@@ -2117,6 +2119,509 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/overview:
+    get:
+      tags:
+      - Overview
+      summary: Show the firm's position for a financial year
+      description: "Returns, across every client and one Indian financial year (1\
+        \ April to 31 March): the total billed, the total payment received, what is\
+        \ pending (billed less received) and the total discount given, worked out\
+        \ as each client's ledger summary does. Charges count in the year they fell\
+        \ due and payments in the year they were received; earlier years' balances\
+        \ are not brought forward. Also returns how many clients, companies and assigned\
+        \ services there are now. previousToDate gives the same figures for the previous\
+        \ year up to the same point in it (today a year earlier while the year is\
+        \ running, the whole previous year once it is over), so this year to date\
+        \ compares fairly with last."
+      operationId: overview
+      parameters:
+      - name: financialYear
+        in: query
+        description: "Indian financial year to total, written as yyyy-yy"
+        required: true
+        schema:
+          type: string
+        example: 2026-27
+      responses:
+        "200":
+          description: The overview; every amount zero when the year has no ledger
+            entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OverviewResponse"
+        "400":
+          description: financialYear is missing or is not a year such as 2026-27
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/overview/top-pending-managers:
+    get:
+      tags:
+      - Overview
+      summary: Rank the managers whose clients owe most
+      description: "Returns the managers whose clients still owe, most first, with\
+        \ what those clients were billed and paid and what remains pending (billed\
+        \ less received) across all of them, and how many clients each manager has.\
+        \ Clients count towards the manager they are assigned to now, including their\
+        \ history from before. Given a financialYear, only charges falling due and\
+        \ payments received in that year count; without one, every year to date counts,\
+        \ as in each manager's totalPending. Managers whose clients are settled or\
+        \ in credit overall are left out; those owing the same are ranked in identifier\
+        \ order."
+      operationId: topPendingManagers
+      parameters:
+      - name: financialYear
+        in: query
+        description: "Indian financial year to rank by, written as yyyy-yy. Omit to\
+          \ rank by every year to date"
+        required: false
+        schema:
+          type: string
+        example: 2026-27
+      - name: limit
+        in: query
+        description: "Most managers to return, from 1 to 50"
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 10
+        example: 10
+      responses:
+        "200":
+          description: The ranking; no managers when nobody owes anything
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TopPendingManagersResponse"
+        "400":
+          description: "financialYear is not a year such as 2026-27, or limit is not\
+            \ a whole number from 1 to 50"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/overview/top-pending-companies:
+    get:
+      tags:
+      - Overview
+      summary: Rank the companies owing most
+      description: "Returns the companies still owing, most first, with what each\
+        \ was billed and paid and what remains pending (billed less received), and\
+        \ the client each belongs to. Given a financialYear, only charges falling\
+        \ due and payments received in that year count, as in each company's ledger\
+        \ summary; without one, every year to date counts. Companies settled or in\
+        \ credit are left out; those owing the same are ranked in identifier order."
+      operationId: topPendingCompanies
+      parameters:
+      - name: financialYear
+        in: query
+        description: "Indian financial year to rank by, written as yyyy-yy. Omit to\
+          \ rank by every year to date"
+        required: false
+        schema:
+          type: string
+        example: 2026-27
+      - name: limit
+        in: query
+        description: "Most companies to return, from 1 to 50"
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 10
+        example: 10
+      responses:
+        "200":
+          description: The ranking; no companies when nobody owes anything
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TopPendingCompaniesResponse"
+        "400":
+          description: "financialYear is not a year such as 2026-27, or limit is not\
+            \ a whole number from 1 to 50"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/overview/top-pending-clients:
+    get:
+      tags:
+      - Overview
+      summary: Rank the clients owing most
+      description: "Returns the clients still owing, most first, with what each was\
+        \ billed and paid and what remains pending (billed less received) across all\
+        \ of their companies, and their manager. Given a financialYear, only charges\
+        \ falling due and payments received in that year count, as in each client's\
+        \ ledger summary; without one, every year to date counts, as in the client\
+        \ list's totalPending. Clients settled or in credit are left out; those owing\
+        \ the same are ranked in identifier order."
+      operationId: topPendingClients
+      parameters:
+      - name: financialYear
+        in: query
+        description: "Indian financial year to rank by, written as yyyy-yy. Omit to\
+          \ rank by every year to date"
+        required: false
+        schema:
+          type: string
+        example: 2026-27
+      - name: limit
+        in: query
+        description: "Most clients to return, from 1 to 50"
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 10
+        example: 10
+      responses:
+        "200":
+          description: The ranking; no clients when nobody owes anything
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TopPendingClientsResponse"
+        "400":
+          description: "financialYear is not a year such as 2026-27, or limit is not\
+            \ a whole number from 1 to 50"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/overview/top-billed-managers:
+    get:
+      tags:
+      - Overview
+      summary: Rank the managers whose clients were billed most
+      description: "Returns the managers whose clients were billed anything, most\
+        \ billed first, with what was billed to those clients (service charges, GST\
+        \ included, after discount), what was received from them and what remains\
+        \ pending, and how many clients each manager has. Clients count towards the\
+        \ manager they are assigned to now, including their history from before. Given\
+        \ a financialYear, only charges falling due and payments received in that\
+        \ year count; without one, every year to date counts. Managers billed the\
+        \ same are ranked in identifier order."
+      operationId: topBilledManagers
+      parameters:
+      - name: financialYear
+        in: query
+        description: "Indian financial year to rank by, written as yyyy-yy. Omit to\
+          \ rank by every year to date"
+        required: false
+        schema:
+          type: string
+        example: 2026-27
+      - name: limit
+        in: query
+        description: "Most managers to return, from 1 to 50"
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 10
+        example: 10
+      responses:
+        "200":
+          description: The ranking; no managers when nothing was billed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TopBilledManagersResponse"
+        "400":
+          description: "financialYear is not a year such as 2026-27, or limit is not\
+            \ a whole number from 1 to 50"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/overview/top-billed-companies:
+    get:
+      tags:
+      - Overview
+      summary: Rank the companies billed most
+      description: "Returns the companies billed anything, most billed first, with\
+        \ what each was billed (service charges, GST included, after discount) and\
+        \ paid, what remains pending, and the client each belongs to. Given a financialYear,\
+        \ only charges falling due and payments received in that year count, as in\
+        \ each company's ledger summary; without one, every year to date counts. Companies\
+        \ billed the same are ranked in identifier order."
+      operationId: topBilledCompanies
+      parameters:
+      - name: financialYear
+        in: query
+        description: "Indian financial year to rank by, written as yyyy-yy. Omit to\
+          \ rank by every year to date"
+        required: false
+        schema:
+          type: string
+        example: 2026-27
+      - name: limit
+        in: query
+        description: "Most companies to return, from 1 to 50"
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 10
+        example: 10
+      responses:
+        "200":
+          description: The ranking; no companies when nothing was billed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TopBilledCompaniesResponse"
+        "400":
+          description: "financialYear is not a year such as 2026-27, or limit is not\
+            \ a whole number from 1 to 50"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/overview/top-billed-clients:
+    get:
+      tags:
+      - Overview
+      summary: Rank the clients billed most
+      description: "Returns the clients billed anything, most billed first, with what\
+        \ each was billed (service charges, GST included, after discount) and paid\
+        \ across all of their companies, what remains pending, and their manager.\
+        \ Given a financialYear, only charges falling due and payments received in\
+        \ that year count, as in each client's ledger summary; without one, every\
+        \ year to date counts. Clients billed the same are ranked in identifier order."
+      operationId: topBilledClients
+      parameters:
+      - name: financialYear
+        in: query
+        description: "Indian financial year to rank by, written as yyyy-yy. Omit to\
+          \ rank by every year to date"
+        required: false
+        schema:
+          type: string
+        example: 2026-27
+      - name: limit
+        in: query
+        description: "Most clients to return, from 1 to 50"
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 10
+        example: 10
+      responses:
+        "200":
+          description: The ranking; no clients when nothing was billed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TopBilledClientsResponse"
+        "400":
+          description: "financialYear is not a year such as 2026-27, or limit is not\
+            \ a whole number from 1 to 50"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/overview/recent-payments:
+    get:
+      tags:
+      - Overview
+      summary: List the latest payments received
+      description: "Returns the latest payments received across every client and company,\
+        \ most recently received first; payments received the same day come latest\
+        \ recorded first. Each carries its amount as a positive number, how and when\
+        \ it was received, and the company and client that made it. 20 are returned\
+        \ unless limit asks otherwise."
+      operationId: recentPayments
+      parameters:
+      - name: limit
+        in: query
+        description: "Most payments to return, from 1 to 100"
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 20
+        example: 20
+      responses:
+        "200":
+          description: The latest payments; none when nothing has been received
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecentPaymentsResponse"
+        "400":
+          description: limit is not a whole number from 1 to 100
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/overview/monthly:
+    get:
+      tags:
+      - Overview
+      summary: Show what was billed and received each month of a financial year
+      description: "Returns all twelve months of one Indian financial year, April\
+        \ first, each with what was billed across every client (service charges falling\
+        \ due in the month, GST included, after discount), what was received in the\
+        \ month and the discount given. Months without entries are listed with zeros."
+      operationId: monthlyTrend
+      parameters:
+      - name: financialYear
+        in: query
+        description: "Indian financial year to show, written as yyyy-yy"
+        required: true
+        schema:
+          type: string
+        example: 2026-27
+      responses:
+        "200":
+          description: The year's months
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MonthlyTrendResponse"
+        "400":
+          description: financialYear is missing or is not a year such as 2026-27
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/overview/billed-by-category:
+    get:
+      tags:
+      - Overview
+      summary: Split a financial year's billing across the practice areas
+      description: "Returns every service category (Compliance, Tax, Audit, Accounting\
+        \ and Advisory), billed most first, each with what its catalog services were\
+        \ billed in the year (service charges falling due in it, GST included, after\
+        \ discount) and how many of them were billed. Categories are those the services\
+        \ are in now. Given topServices, each category also lists that many of its\
+        \ most billed services."
+      operationId: billedByCategory
+      parameters:
+      - name: financialYear
+        in: query
+        description: "Indian financial year to split, written as yyyy-yy"
+        required: true
+        schema:
+          type: string
+        example: 2026-27
+      - name: topServices
+        in: query
+        description: "Most billed services to list in each category, from 0 to 10;\
+          \ 0 lists none"
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 0
+        example: 3
+      responses:
+        "200":
+          description: Every category; zero for those with nothing billed in the year
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BilledByCategoryResponse"
+        "400":
+          description: "financialYear is missing or is not a year such as 2026-27,\
+            \ or topServices is not a whole number from 0 to 10"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/overview/ageing:
+    get:
+      tags:
+      - Overview
+      summary: Show how long what the firm is owed has been due
+      description: "Returns, as of today, what remains unpaid across every company\
+        \ split into ranges of days past due: 0-30, 31-60, 61-90 and 90+, each with\
+        \ how many companies owe in it. Days past due run from the date a service\
+        \ charge fell due. Payments are not matched to charges, so each company's\
+        \ payments are applied to its oldest charges first; companies settled or in\
+        \ credit owe nothing. Also returns what has been due for longer than the payment\
+        \ terms' markOverdueAfterDays (60 when no payment terms are saved) as overdue."
+      operationId: ageing
+      responses:
+        "200":
+          description: The ageing; every range zero when nobody owes anything
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgeingResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /psc/cl/v1/clients/{clientId}/ledger-summary:
     get:
       tags:
@@ -2177,20 +2682,24 @@ paths:
     get:
       tags:
       - Ledger
-      summary: Show a client's balance for every financial year
+      summary: "Show a client's balance for every financial year, or for one"
       description: "Returns, for every Indian financial year (1 April to 31 March)\
-        \ since the client became one, latest first: what was billed before discount,\
-        \ the discount given, what was received, the closing balance (billed less\
-        \ discount less received) and a status. The current year runs to date and\
-        \ is PENDING while it has an amount owing; a closed year that ended with an\
-        \ amount owing is CARRIED; a year with nothing owing is SETTLED, as is one\
-        \ where more was received than billed, whose closing balance is then negative.\
-        \ Charges count in the year they fell due and payments in the year they were\
-        \ received; each year stands alone, so an earlier year's balance is not brought\
-        \ into the next. The first year is that of the client's earliest ledger entry,\
-        \ or of the day they were added if earlier; years with no entries are listed\
-        \ with zeros. Each year also carries the same figures for each company with\
-        \ entries in it."
+        \ since the client became one, latest first, or only for the financialYear\
+        \ given: what was billed before discount, the discount given, what was received,\
+        \ the closing balance (billed less discount less received) and a status. The\
+        \ current year runs to date and is PENDING while it has an amount owing; a\
+        \ closed year that ended with an amount owing is CARRIED; a year with nothing\
+        \ owing is SETTLED, as is one where more was received than billed, whose closing\
+        \ balance is then negative. Charges count in the year they fell due and payments\
+        \ in the year they were received; each year stands alone, so an earlier year's\
+        \ balance is not brought into the next. The first year is that of the client's\
+        \ earliest ledger entry, or of the day they were added if earlier; years with\
+        \ no entries are listed with zeros. clientSince and yearCount always cover\
+        \ every year since then, whichever years are listed. Each year also carries\
+        \ the same figures for each company with entries in it; with pendingOnly,\
+        \ only the companies still owing for the year (a closing balance above zero)\
+        \ are listed, while the year's own figures and companyCount still cover every\
+        \ company."
       operationId: clientLedgerStatus
       parameters:
       - name: clientId
@@ -2201,15 +2710,32 @@ paths:
           type: string
           format: uuid
         example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: financialYear
+        in: query
+        description: "Only list this Indian financial year, written as yyyy-yy. Omit\
+          \ to list every year since the client became one"
+        required: false
+        schema:
+          type: string
+        example: 2025-26
+      - name: pendingOnly
+        in: query
+        description: "List, in each year, only the companies still owing for it. The\
+          \ year's own figures still cover every company"
+        required: false
+        schema:
+          type: boolean
+          default: false
       responses:
         "200":
-          description: "The client's years, latest first"
+          description: "The client's years, latest first, or the one year asked for"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ClientLedgerStatusResponse"
         "400":
-          description: The identifier is not a valid UUID
+          description: "The identifier is not a valid UUID, financialYear is not a\
+            \ year such as 2026-27, or pendingOnly is not true or false"
           content:
             application/json:
               schema:
@@ -3738,6 +4264,697 @@ components:
       required:
       - deliveryDate
       - serviceId
+    OverviewResponse:
+      type: object
+      description: The firm's position for one financial year across every client
+      properties:
+        financialYear:
+          type: string
+          description: Indian financial year (1 April to 31 March) the amounts cover
+          example: 2026-27
+        fromDate:
+          type: string
+          format: date
+          description: First day of the financial year
+          example: 2026-04-01
+        toDate:
+          type: string
+          format: date
+          description: Last day of the financial year
+          example: 2027-03-31
+        totalBilled:
+          type: number
+          description: "Sum of the service charges falling due in the year across\
+            \ every client: taxable amounts plus GST, after discount"
+          example: 1845000.0
+        totalPaymentReceived:
+          type: number
+          description: Sum of the payments received in the year across every client
+          example: 1571500.0
+        pending:
+          type: number
+          description: Billed less received in the year; negative when more was received.
+            Earlier years' balances are not brought forward
+          example: 273500.0
+        totalDiscount:
+          type: number
+          description: Sum of the discounts given on the year's service charges
+          example: 63500.0
+        previousToDate:
+          $ref: "#/components/schemas/PeriodTotals"
+          description: "The same figures for the previous financial year, up to the\
+            \ same point in it: the same day a year earlier while the requested year\
+            \ is running, its whole year once the requested year is over. For comparing\
+            \ this year to date with last year to date"
+        totalClients:
+          type: integer
+          format: int64
+          description: "Number of clients, as of now"
+          example: 42
+        totalCompanies:
+          type: integer
+          format: int64
+          description: "Number of companies across every client, as of now"
+          example: 97
+        totalServices:
+          type: integer
+          format: int64
+          description: "Number of services assigned across every company of every\
+            \ client, as of now"
+          example: 268
+    PeriodTotals:
+      type: object
+      description: "The firm's figures over part of a financial year, for comparison"
+      properties:
+        financialYear:
+          type: string
+          description: Indian financial year the period falls in
+          example: 2025-26
+        fromDate:
+          type: string
+          format: date
+          description: "First day of the period: the first day of the financial year"
+          example: 2025-04-01
+        toDate:
+          type: string
+          format: date
+          description: Last day of the period
+          example: 2025-10-14
+        totalBilled:
+          type: number
+          description: "Sum of the service charges falling due in the period: taxable\
+            \ amounts plus GST, after discount"
+          example: 1647000.0
+        totalPaymentReceived:
+          type: number
+          description: Sum of the payments received in the period
+          example: 1402000.0
+        pending:
+          type: number
+          description: Billed less received in the period; negative when more was
+            received
+          example: 245000.0
+        totalDiscount:
+          type: number
+          description: Sum of the discounts given on the period's service charges
+          example: 58000.0
+    PendingManager:
+      type: object
+      description: A manager and what their clients still owe
+      properties:
+        rank:
+          type: integer
+          format: int32
+          description: "Position in the ranking, from 1 for the manager whose clients\
+            \ owe most"
+          example: 1
+        managerId:
+          type: string
+          format: uuid
+          description: Identifier of the manager
+          example: e9b2c4d1-7f35-4a68-91c0-3d8a5e2f6b47
+        managerName:
+          type: string
+          description: Full name of the manager
+          example: Pranay Singhal
+        clientCount:
+          type: integer
+          format: int64
+          description: Number of clients assigned to the manager now
+          example: 12
+        totalBilled:
+          type: number
+          description: "Sum of the service charges of the manager's clients in the\
+            \ period: taxable amounts plus GST, after discount"
+          example: 39235.0
+        totalPaymentReceived:
+          type: number
+          description: Sum of the payments received from the manager's clients in
+            the period
+          example: 18605.0
+        pending:
+          type: number
+          description: Billed less received in the period; always above zero here
+          example: 20630.0
+    TopPendingManagersResponse:
+      type: object
+      description: The managers whose clients owe most
+      properties:
+        financialYear:
+          type: string
+          description: Financial year the amounts cover. Absent when they cover every
+            year to date
+          example: 2026-27
+        limit:
+          type: integer
+          format: int32
+          description: The most managers asked for
+          example: 10
+        managers:
+          type: array
+          description: "The managers whose clients still owe, most first, at most\
+            \ limit of them; those whose clients are settled or in credit overall\
+            \ are left out"
+          items:
+            $ref: "#/components/schemas/PendingManager"
+    PendingCompany:
+      type: object
+      description: A company and what it still owes
+      properties:
+        rank:
+          type: integer
+          format: int32
+          description: "Position in the ranking, from 1 for the company owing most"
+          example: 1
+        companyId:
+          type: string
+          format: uuid
+          description: Identifier of the company
+          example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+        companyName:
+          type: string
+          description: Name of the company
+          example: Rohan Mehta HUF
+        clientId:
+          type: string
+          format: uuid
+          description: Identifier of the client the company belongs to
+          example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+        clientName:
+          type: string
+          description: Full name of the client the company belongs to
+          example: Rohan Mehta
+        totalBilled:
+          type: number
+          description: "Sum of the company's service charges in the period: taxable\
+            \ amounts plus GST, after discount"
+          example: 28025.0
+        totalPaymentReceived:
+          type: number
+          description: Sum of the company's payments received in the period
+          example: 10000.0
+        pending:
+          type: number
+          description: Billed less received in the period; always above zero here
+          example: 18025.0
+    TopPendingCompaniesResponse:
+      type: object
+      description: The companies owing most
+      properties:
+        financialYear:
+          type: string
+          description: Financial year the amounts cover. Absent when they cover every
+            year to date
+          example: 2026-27
+        limit:
+          type: integer
+          format: int32
+          description: The most companies asked for
+          example: 10
+        companies:
+          type: array
+          description: "The companies still owing, most first, at most limit of them;\
+            \ those settled or in credit are left out"
+          items:
+            $ref: "#/components/schemas/PendingCompany"
+    PendingClient:
+      type: object
+      description: A client and what they still owe
+      properties:
+        rank:
+          type: integer
+          format: int32
+          description: "Position in the ranking, from 1 for the client owing most"
+          example: 1
+        clientId:
+          type: string
+          format: uuid
+          description: Identifier of the client
+          example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+        clientName:
+          type: string
+          description: Full name of the client
+          example: Rohan Mehta
+        managerId:
+          type: string
+          format: uuid
+          description: Identifier of the manager who looks after the client
+          example: e9b2c4d1-7f35-4a68-91c0-3d8a5e2f6b47
+        managerName:
+          type: string
+          description: Full name of the manager who looks after the client
+          example: Pranay Singhal
+        totalBilled:
+          type: number
+          description: "Sum of the client's service charges in the period: taxable\
+            \ amounts plus GST, after discount"
+          example: 39235.0
+        totalPaymentReceived:
+          type: number
+          description: Sum of the client's payments received in the period
+          example: 18605.0
+        pending:
+          type: number
+          description: Billed less received in the period; always above zero here
+          example: 20630.0
+    TopPendingClientsResponse:
+      type: object
+      description: The clients owing most
+      properties:
+        financialYear:
+          type: string
+          description: Financial year the amounts cover. Absent when they cover every
+            year to date
+          example: 2026-27
+        limit:
+          type: integer
+          format: int32
+          description: The most clients asked for
+          example: 10
+        clients:
+          type: array
+          description: "The clients still owing, most first, at most limit of them;\
+            \ those settled or in credit are left out"
+          items:
+            $ref: "#/components/schemas/PendingClient"
+    BilledManager:
+      type: object
+      description: A manager and what was billed to their clients
+      properties:
+        rank:
+          type: integer
+          format: int32
+          description: "Position in the ranking, from 1 for the manager whose clients\
+            \ were billed most"
+          example: 1
+        managerId:
+          type: string
+          format: uuid
+          description: Identifier of the manager
+          example: e9b2c4d1-7f35-4a68-91c0-3d8a5e2f6b47
+        managerName:
+          type: string
+          description: Full name of the manager
+          example: Pranay Singhal
+        clientCount:
+          type: integer
+          format: int64
+          description: Number of clients assigned to the manager now
+          example: 12
+        totalBilled:
+          type: number
+          description: "Sum of the service charges of the manager's clients in the\
+            \ period: taxable amounts plus GST, after discount; always above zero\
+            \ here"
+          example: 39235.0
+        totalPaymentReceived:
+          type: number
+          description: Sum of the payments received from the manager's clients in
+            the period
+          example: 18605.0
+        pending:
+          type: number
+          description: Billed less received in the period; negative when more was
+            received
+          example: 20630.0
+    TopBilledManagersResponse:
+      type: object
+      description: The managers whose clients were billed most
+      properties:
+        financialYear:
+          type: string
+          description: Financial year the amounts cover. Absent when they cover every
+            year to date
+          example: 2026-27
+        limit:
+          type: integer
+          format: int32
+          description: The most managers asked for
+          example: 10
+        managers:
+          type: array
+          description: "The managers whose clients were billed anything, most billed\
+            \ first, at most limit of them"
+          items:
+            $ref: "#/components/schemas/BilledManager"
+    BilledCompany:
+      type: object
+      description: A company and what it was billed
+      properties:
+        rank:
+          type: integer
+          format: int32
+          description: "Position in the ranking, from 1 for the company billed most"
+          example: 1
+        companyId:
+          type: string
+          format: uuid
+          description: Identifier of the company
+          example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+        companyName:
+          type: string
+          description: Name of the company
+          example: Rohan Mehta HUF
+        clientId:
+          type: string
+          format: uuid
+          description: Identifier of the client the company belongs to
+          example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+        clientName:
+          type: string
+          description: Full name of the client the company belongs to
+          example: Rohan Mehta
+        totalBilled:
+          type: number
+          description: "Sum of the company's service charges in the period: taxable\
+            \ amounts plus GST, after discount; always above zero here"
+          example: 28025.0
+        totalPaymentReceived:
+          type: number
+          description: Sum of the company's payments received in the period
+          example: 10000.0
+        pending:
+          type: number
+          description: Billed less received in the period; negative when more was
+            received
+          example: 18025.0
+    TopBilledCompaniesResponse:
+      type: object
+      description: The companies billed most
+      properties:
+        financialYear:
+          type: string
+          description: Financial year the amounts cover. Absent when they cover every
+            year to date
+          example: 2026-27
+        limit:
+          type: integer
+          format: int32
+          description: The most companies asked for
+          example: 10
+        companies:
+          type: array
+          description: "The companies billed anything, most billed first, at most\
+            \ limit of them"
+          items:
+            $ref: "#/components/schemas/BilledCompany"
+    BilledClient:
+      type: object
+      description: A client and what they were billed
+      properties:
+        rank:
+          type: integer
+          format: int32
+          description: "Position in the ranking, from 1 for the client billed most"
+          example: 1
+        clientId:
+          type: string
+          format: uuid
+          description: Identifier of the client
+          example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+        clientName:
+          type: string
+          description: Full name of the client
+          example: Rohan Mehta
+        managerId:
+          type: string
+          format: uuid
+          description: Identifier of the manager who looks after the client
+          example: e9b2c4d1-7f35-4a68-91c0-3d8a5e2f6b47
+        managerName:
+          type: string
+          description: Full name of the manager who looks after the client
+          example: Pranay Singhal
+        totalBilled:
+          type: number
+          description: "Sum of the client's service charges in the period: taxable\
+            \ amounts plus GST, after discount; always above zero here"
+          example: 39235.0
+        totalPaymentReceived:
+          type: number
+          description: Sum of the client's payments received in the period
+          example: 18605.0
+        pending:
+          type: number
+          description: Billed less received in the period; negative when more was
+            received
+          example: 20630.0
+    TopBilledClientsResponse:
+      type: object
+      description: The clients billed most
+      properties:
+        financialYear:
+          type: string
+          description: Financial year the amounts cover. Absent when they cover every
+            year to date
+          example: 2026-27
+        limit:
+          type: integer
+          format: int32
+          description: The most clients asked for
+          example: 10
+        clients:
+          type: array
+          description: "The clients billed anything, most billed first, at most limit\
+            \ of them"
+          items:
+            $ref: "#/components/schemas/BilledClient"
+    RecentPayment:
+      type: object
+      description: "A payment received, with who made it"
+      properties:
+        paymentId:
+          type: string
+          format: uuid
+          description: Identifier of the payment's ledger entry
+          example: 5e8b1d24-7a3c-4f90-b6e2-1c9d8a7f3b05
+        dateReceived:
+          type: string
+          format: date
+          description: Date the payment was received
+          example: 2026-10-10
+        amount:
+          type: number
+          description: "Amount received, as a positive number"
+          example: 10000.0
+        method:
+          type: string
+          description: How the payment was received
+          enum:
+          - BANK_TRANSFER
+          - UPI
+          - CHEQUE
+          - CASH
+          example: UPI
+        reference:
+          type: string
+          description: "Reference of the payment, such as a UTR or cheque number.\
+            \ Absent when none was given"
+          example: UTR428193650127
+        comment:
+          type: string
+          description: Note about the payment. Absent when none was given
+          example: Part payment for Q2
+        companyId:
+          type: string
+          format: uuid
+          description: Identifier of the company that paid
+          example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+        companyName:
+          type: string
+          description: Name of the company that paid
+          example: Rohan Mehta HUF
+        clientId:
+          type: string
+          format: uuid
+          description: Identifier of the client the company belongs to
+          example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+        clientName:
+          type: string
+          description: Full name of the client the company belongs to
+          example: Rohan Mehta
+        recordedAt:
+          type: string
+          format: date-time
+          description: When the payment was recorded
+          example: 2026-10-10T09:30:00Z
+    RecentPaymentsResponse:
+      type: object
+      description: The latest payments received across every client
+      properties:
+        limit:
+          type: integer
+          format: int32
+          description: The most payments asked for
+          example: 20
+        payments:
+          type: array
+          description: "The latest payments, most recently received first; payments\
+            \ received the same day come latest recorded first. At most limit of them"
+          items:
+            $ref: "#/components/schemas/RecentPayment"
+    MonthlyTrend:
+      type: object
+      description: What was billed and received across every client in one month
+      properties:
+        month:
+          type: string
+          description: "The calendar month, written as yyyy-MM"
+          example: 2026-04
+        billed:
+          type: number
+          description: "Service charges falling due in the month, GST included, after\
+            \ discount"
+          example: 152000.0
+        received:
+          type: number
+          description: Payments received in the month
+          example: 131500.0
+        discount:
+          type: number
+          description: Discount given on the service charges falling due in the month
+          example: 5200.0
+    MonthlyTrendResponse:
+      type: object
+      description: What was billed and received across every client in each month
+        of a financial year
+      properties:
+        financialYear:
+          type: string
+          description: The Indian financial year
+          example: 2026-27
+        months:
+          type: array
+          description: "All twelve months of the year, April first; months without\
+            \ entries have every amount zero"
+          items:
+            $ref: "#/components/schemas/MonthlyTrend"
+    BilledByCategoryResponse:
+      type: object
+      description: A financial year's billing split across the practice areas
+      properties:
+        financialYear:
+          type: string
+          description: The Indian financial year
+          example: 2026-27
+        categories:
+          type: array
+          description: "Every practice area, billed most first; those billed the same\
+            \ in the catalog's order. Areas with nothing billed are listed with zero"
+          items:
+            $ref: "#/components/schemas/CategoryBilling"
+    CategoryBilling:
+      type: object
+      description: What one practice area was billed in a financial year
+      properties:
+        category:
+          type: string
+          description: The practice area
+          enum:
+          - COMPLIANCE
+          - TAX
+          - AUDIT
+          - ACCOUNTING
+          - ADVISORY
+          example: COMPLIANCE
+        billed:
+          type: number
+          description: "Service charges of the category's services falling due in\
+            \ the year, GST included, after discount"
+          example: 612000.0
+        serviceCount:
+          type: integer
+          format: int64
+          description: How many of the category's catalog services were billed in
+            the year
+          example: 6
+        topServices:
+          type: array
+          description: "The category's services billed most, most first; those billed\
+            \ the same in name order. At most topServices of them. Absent when topServices\
+            \ is 0"
+          items:
+            $ref: "#/components/schemas/CategoryService"
+    CategoryService:
+      type: object
+      description: A catalog service and what it was billed
+      properties:
+        catalogServiceId:
+          type: string
+          format: uuid
+          description: Identifier of the catalog service
+          example: 3f6c2a1e-9b4d-4e7a-8c15-2d0b7e9f4a61
+        serviceName:
+          type: string
+          description: Name of the catalog service
+          example: GST Return Filing
+        billed:
+          type: number
+          description: "Service charges falling due in the year, GST included, after\
+            \ discount"
+          example: 84000.0
+    AgeingBucket:
+      type: object
+      description: What is owed that has been due for a range of days
+      properties:
+        label:
+          type: string
+          description: "The range of days, as shown on the chart"
+          example: 0-30
+        fromDays:
+          type: integer
+          format: int32
+          description: Fewest days past due in the range
+          example: 0
+        toDays:
+          type: integer
+          format: int32
+          description: "Most days past due in the range. Absent for the last, open-ended\
+            \ range"
+          example: 30
+        amount:
+          type: number
+          description: What remains unpaid of the charges due for this many days
+          example: 125000.0
+        companyCount:
+          type: integer
+          format: int64
+          description: How many companies owe something in the range
+          example: 12
+    AgeingResponse:
+      type: object
+      description: "How long what the firm is owed has been due, across every client"
+      properties:
+        asOf:
+          type: string
+          format: date
+          description: "The day the ageing is worked out on: today"
+          example: 2026-10-14
+        overdueAfterDays:
+          type: integer
+          format: int32
+          description: "Days past due after which an unpaid charge is overdue, from\
+            \ the payment terms"
+          example: 60
+        buckets:
+          type: array
+          description: "The ranges of days past due, newest first: 0-30, 31-60, 61-90\
+            \ and 90+. Every range is listed, with zero when nothing is owed in it"
+          items:
+            $ref: "#/components/schemas/AgeingBucket"
+        total:
+          type: number
+          description: "Everything owed: the sum of the ranges"
+          example: 273500.0
+        overdue:
+          type: number
+          description: What has been due for more than overdueAfterDays
+          example: 48000.0
+        companyCount:
+          type: integer
+          format: int64
+          description: How many companies owe anything
+          example: 31
     ClientLedgerSummaryResponse:
       type: object
       description: "A client's billing and payments for one Indian financial year,\
@@ -3831,19 +5048,21 @@ components:
         clientSince:
           type: string
           format: date
-          description: "First day of the first financial year listed: that of the\
-            \ client's earliest ledger entry, or of the day they were added if earlier"
+          description: "First day of the client's first financial year: that of their\
+            \ earliest ledger entry, or of the day they were added if earlier, whichever\
+            \ years are listed"
           example: 2019-04-01
         yearCount:
           type: integer
           format: int32
-          description: "Number of financial years listed, from clientSince to the\
-            \ current year"
+          description: "Number of financial years from clientSince to the current\
+            \ year, whether every one is listed or only the year asked for"
           example: 8
         years:
           type: array
           description: "Every financial year from clientSince to the current one,\
-            \ latest first, including years with no entries"
+            \ latest first, including years with no entries; or only the year asked\
+            \ for"
           items:
             $ref: "#/components/schemas/FinancialYearStatus"
     CompanyYearStatus:
@@ -3950,7 +5169,8 @@ components:
         companies:
           type: array
           description: "The same figures for each company with ledger entries in the\
-            \ year, ordered by company name; they add up to the year's"
+            \ year, ordered by company name; they add up to the year's. With pendingOnly,\
+            \ only the companies still owing for the year"
           items:
             $ref: "#/components/schemas/CompanyYearStatus"
     CompanyTotals:

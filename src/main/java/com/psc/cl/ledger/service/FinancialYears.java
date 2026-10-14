@@ -46,7 +46,7 @@ public final class FinancialYears {
      * @param date the date to place
      * @return the financial year, such as 2026-27 for 15 May 2026
      */
-    static FinancialYear containing(LocalDate date) {
+    public static FinancialYear containing(LocalDate date) {
         return parse(of(date));
     }
 

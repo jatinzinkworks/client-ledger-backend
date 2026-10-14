@@ -9,6 +9,8 @@ import com.psc.cl.client.repository.ClientCompanyRepository;
 import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.client.repository.ServiceAssignmentRepository;
 import com.psc.cl.client.service.NextDueDates;
+import com.psc.cl.ledger.dto.ClientBalance;
+import com.psc.cl.ledger.dto.ClientCompanyBalance;
 import com.psc.cl.ledger.dto.ClientLedgerStatusResponse;
 import com.psc.cl.ledger.dto.ClientLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.CompanyBalance;
@@ -20,9 +22,12 @@ import com.psc.cl.ledger.dto.LedgerExport;
 import com.psc.cl.ledger.dto.LedgerListQuery;
 import com.psc.cl.ledger.dto.LedgerListResponse;
 import com.psc.cl.ledger.dto.LedgerSummary;
+import com.psc.cl.ledger.dto.ManagerBalance;
+import com.psc.cl.ledger.dto.MonthlyTotals;
 import com.psc.cl.ledger.dto.PageMetadata;
 import com.psc.cl.ledger.dto.PaymentListResponse;
 import com.psc.cl.ledger.dto.PaymentRequest;
+import com.psc.cl.ledger.dto.UnpaidCharge;
 import com.psc.cl.ledger.exception.FuturePaymentDateException;
 import com.psc.cl.ledger.exception.LedgerEntryNotFoundException;
 import com.psc.cl.ledger.exception.NotAPaymentException;
@@ -31,9 +36,15 @@ import com.psc.cl.ledger.model.FinancialYear;
 import com.psc.cl.ledger.model.LedgerEntry;
 import com.psc.cl.ledger.model.LedgerEntryType;
 import com.psc.cl.ledger.repository.CatalogServiceBilledRow;
+import com.psc.cl.ledger.repository.ClientBalanceRow;
 import com.psc.cl.ledger.repository.ClientPendingRow;
+import com.psc.cl.ledger.repository.CompanyBalanceRow;
+import com.psc.cl.ledger.repository.CompanyChargeRow;
+import com.psc.cl.ledger.repository.CompanyPaidRow;
+import com.psc.cl.ledger.repository.DailyTotalsRow;
 import com.psc.cl.ledger.repository.LedgerEntryRepository;
 import com.psc.cl.ledger.repository.LedgerTotalsRow;
+import com.psc.cl.ledger.repository.ManagerBalanceRow;
 import com.psc.cl.ledger.repository.ManagerPendingRow;
 import com.psc.cl.ledger.repository.ServiceBilledRow;
 import com.psc.cl.servicecatalog.model.BillingFrequency;
@@ -52,6 +63,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -85,6 +97,9 @@ public class LedgerServiceImpl implements LedgerService {
      */
     private static final List<String> TIE_BREAKERS = List.of("dueDate", "serviceName", "createdAt", "id");
 
+    /** Order of the latest payments: most recently received, then most recently recorded, first. */
+    private static final Sort LATEST_RECEIVED_FIRST = Sort.by(Sort.Direction.DESC, "dueDate", "createdAt", "id");
+
     /** Order of an export's ledger: earliest due first, as the lists sort by default. */
     private static final Sort EXPORT_ORDER = Sort.by(TIE_BREAKERS.toArray(String[]::new));
 
@@ -93,6 +108,9 @@ public class LedgerServiceImpl implements LedgerService {
 
     /** What clients with no ledger entries owe, at the ledger's scale. */
     private static final BigDecimal NOTHING_PENDING = new BigDecimal("0.00");
+
+    /** Zero at the ledger's scale, to start a sum from. */
+    private static final BigDecimal NO_AMOUNT = new BigDecimal("0.00");
 
     /** Stands in for an open start of a date range; PostgreSQL dates cannot go back to LocalDate.MIN. */
     private static final LocalDate EARLIEST_DATE = LocalDate.of(1, 1, 1);
@@ -330,7 +348,8 @@ public class LedgerServiceImpl implements LedgerService {
 
     @Override
     @Transactional(readOnly = true)
-    public ClientLedgerStatusResponse clientLedgerStatus(UUID clientId) {
+    public ClientLedgerStatusResponse clientLedgerStatus(UUID clientId, FinancialYear financialYear,
+                                                         boolean pendingOnly) {
         Client client = clientRepository.findById(clientId).orElseThrow(() -> new ClientNotFoundException(clientId));
         Map<UUID, String> companyNames = client.getCompanies().stream()
                 .collect(Collectors.toMap(ClientCompany::getId, ClientCompany::getCompanyName));
@@ -340,13 +359,15 @@ public class LedgerServiceImpl implements LedgerService {
         LocalDate today = LocalDate.now(clock);
         FinancialYear currentYear = FinancialYears.containing(today);
         List<FinancialYear> years = yearsLatestFirst(firstYear(client, rows, today), lastYear(rows, currentYear));
+        // The client's span stays the same when one year is asked for, even one outside it.
+        List<FinancialYear> listed = financialYear == null ? years : List.of(financialYear);
 
         return ClientLedgerStatusResponse.builder()
                 .clientId(clientId)
                 .clientName(fullName(client))
                 .clientSince(years.getLast().firstDay())
                 .yearCount(years.size())
-                .years(LedgerSummaries.statusesByYear(rows, companyNames, years, currentYear))
+                .years(LedgerSummaries.statusesByYear(rows, companyNames, listed, currentYear, pendingOnly))
                 .build();
     }
 
@@ -488,6 +509,157 @@ public class LedgerServiceImpl implements LedgerService {
         return ledgerEntryRepository.totalBilledByService(companyId, LedgerEntryType.SERVICE_CHARGE,
                         financialYear.firstDay(), financialYear.lastDay()).stream()
                 .collect(Collectors.toMap(ServiceBilledRow::getCompanyServiceId, ServiceBilledRow::getTotalBilled));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ClientBalance> topClientsByPending(FinancialYear financialYear, int limit) {
+        LocalDate from = financialYear == null ? EARLIEST_DATE : financialYear.firstDay();
+        LocalDate to = financialYear == null ? LATEST_DATE : financialYear.lastDay();
+        return clientBalances(ledgerEntryRepository.topClientsByPending(LedgerEntryType.SERVICE_CHARGE,
+                LedgerEntryType.PAYMENT, from, to, PageRequest.of(0, limit)));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ClientBalance> topClientsByBilled(FinancialYear financialYear, int limit) {
+        LocalDate from = financialYear == null ? EARLIEST_DATE : financialYear.firstDay();
+        LocalDate to = financialYear == null ? LATEST_DATE : financialYear.lastDay();
+        return clientBalances(ledgerEntryRepository.topClientsByBilled(LedgerEntryType.SERVICE_CHARGE,
+                LedgerEntryType.PAYMENT, from, to, PageRequest.of(0, limit)));
+    }
+
+    private static List<ClientBalance> clientBalances(List<ClientBalanceRow> rows) {
+        return rows.stream()
+                .map(row -> new ClientBalance(row.getClientId(), twoPlacesOf(row.getTotalBilled()),
+                        twoPlacesOf(row.getTotalPaid()).negate(), twoPlacesOf(row.getPending())))
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ManagerBalance> topManagersByPending(FinancialYear financialYear, int limit) {
+        LocalDate from = financialYear == null ? EARLIEST_DATE : financialYear.firstDay();
+        LocalDate to = financialYear == null ? LATEST_DATE : financialYear.lastDay();
+        return managerBalances(ledgerEntryRepository.topManagersByPending(LedgerEntryType.SERVICE_CHARGE,
+                LedgerEntryType.PAYMENT, from, to, PageRequest.of(0, limit)));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ManagerBalance> topManagersByBilled(FinancialYear financialYear, int limit) {
+        LocalDate from = financialYear == null ? EARLIEST_DATE : financialYear.firstDay();
+        LocalDate to = financialYear == null ? LATEST_DATE : financialYear.lastDay();
+        return managerBalances(ledgerEntryRepository.topManagersByBilled(LedgerEntryType.SERVICE_CHARGE,
+                LedgerEntryType.PAYMENT, from, to, PageRequest.of(0, limit)));
+    }
+
+    private static List<ManagerBalance> managerBalances(List<ManagerBalanceRow> rows) {
+        return rows.stream()
+                .map(row -> new ManagerBalance(row.getManagerId(), twoPlacesOf(row.getTotalBilled()),
+                        twoPlacesOf(row.getTotalPaid()).negate(), twoPlacesOf(row.getPending())))
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ClientCompanyBalance> topCompaniesByPending(FinancialYear financialYear, int limit) {
+        LocalDate from = financialYear == null ? EARLIEST_DATE : financialYear.firstDay();
+        LocalDate to = financialYear == null ? LATEST_DATE : financialYear.lastDay();
+        return companyBalances(ledgerEntryRepository.topCompaniesByPending(LedgerEntryType.SERVICE_CHARGE,
+                LedgerEntryType.PAYMENT, from, to, PageRequest.of(0, limit)));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ClientCompanyBalance> topCompaniesByBilled(FinancialYear financialYear, int limit) {
+        LocalDate from = financialYear == null ? EARLIEST_DATE : financialYear.firstDay();
+        LocalDate to = financialYear == null ? LATEST_DATE : financialYear.lastDay();
+        return companyBalances(ledgerEntryRepository.topCompaniesByBilled(LedgerEntryType.SERVICE_CHARGE,
+                LedgerEntryType.PAYMENT, from, to, PageRequest.of(0, limit)));
+    }
+
+    private static List<ClientCompanyBalance> companyBalances(List<CompanyBalanceRow> rows) {
+        return rows.stream()
+                .map(row -> new ClientCompanyBalance(row.getCompanyId(), row.getClientId(),
+                        twoPlacesOf(row.getTotalBilled()), twoPlacesOf(row.getTotalPaid()).negate(),
+                        twoPlacesOf(row.getPending())))
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<LedgerEntryResponse> recentPayments(int limit) {
+        // A payment's due date is the date it was received; the identifier settles a full tie.
+        return ledgerEntryRepository.findByEntryType(LedgerEntryType.PAYMENT,
+                        PageRequest.of(0, limit, LATEST_RECEIVED_FIRST)).stream()
+                .map(LedgerEntryResponse::from)
+                .toList();
+    }
+
+    /** Sums of the 0 in a CASE come back at its scale, so bring them to the ledger's two places. */
+    private static BigDecimal twoPlacesOf(BigDecimal sum) {
+        return sum.setScale(2, RoundingMode.UNNECESSARY);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public LedgerSummary totalsForYear(FinancialYear financialYear) {
+        // The same totals the ledger lists and summaries use, over every client.
+        return totalsBetween(financialYear.firstDay(), financialYear.lastDay());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public LedgerSummary totalsBetween(LocalDate fromDate, LocalDate toDate) {
+        return LedgerSummaries.of(ledgerEntryRepository.totalEntries(fromDate, toDate));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<MonthlyTotals> monthlyTotals(FinancialYear financialYear) {
+        Map<YearMonth, List<DailyTotalsRow>> rowsByMonth = ledgerEntryRepository.totalsByDay(
+                        LedgerEntryType.SERVICE_CHARGE, LedgerEntryType.PAYMENT,
+                        financialYear.firstDay(), financialYear.lastDay()).stream()
+                .collect(Collectors.groupingBy(row -> YearMonth.from(row.getDueDate())));
+
+        List<MonthlyTotals> months = new ArrayList<>();
+        YearMonth last = YearMonth.from(financialYear.lastDay());
+        for (YearMonth month = YearMonth.from(financialYear.firstDay()); !month.isAfter(last);
+             month = month.plusMonths(1)) {
+            List<DailyTotalsRow> rows = rowsByMonth.getOrDefault(month, List.of());
+            months.add(new MonthlyTotals(month, sumOf(rows, DailyTotalsRow::getTotalBilled),
+                    sumOf(rows, DailyTotalsRow::getTotalPaid).negate(), sumOf(rows, DailyTotalsRow::getTotalDiscount)));
+        }
+        return months;
+    }
+
+    private static BigDecimal sumOf(List<DailyTotalsRow> rows, Function<DailyTotalsRow, BigDecimal> amount) {
+        return rows.stream().map(amount).map(LedgerServiceImpl::twoPlacesOf).reduce(NO_AMOUNT, BigDecimal::add);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<UnpaidCharge> unpaidCharges(LocalDate asOf) {
+        // What each company has paid, as a positive amount, still to be applied to its charges.
+        Map<UUID, BigDecimal> unapplied = ledgerEntryRepository.totalPaidByCompany(LedgerEntryType.PAYMENT, asOf)
+                .stream()
+                .collect(Collectors.toMap(CompanyPaidRow::getCompanyId, row -> row.getTotalPaid().negate()));
+
+        // The rows come oldest first, so each payment settles the oldest charges it can.
+        List<UnpaidCharge> unpaid = new ArrayList<>();
+        for (CompanyChargeRow row : ledgerEntryRepository.chargesByCompanyAndDueDate(
+                LedgerEntryType.SERVICE_CHARGE, asOf)) {
+            BigDecimal available = unapplied.getOrDefault(row.getCompanyId(), NO_AMOUNT);
+            BigDecimal applied = available.min(row.getTotalCharged()).max(NO_AMOUNT);
+            unapplied.put(row.getCompanyId(), available.subtract(applied));
+            BigDecimal remaining = row.getTotalCharged().subtract(applied);
+            if (remaining.signum() > 0) {
+                unpaid.add(new UnpaidCharge(row.getCompanyId(), row.getDueDate(), remaining));
+            }
+        }
+        log.debug("Found {} unpaid charges as of {}", unpaid.size(), asOf);
+        return unpaid;
     }
 
     @Override

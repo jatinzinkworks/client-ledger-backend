@@ -57,7 +57,8 @@ public class FinancialYearStatus {
     LedgerYearStatus status;
 
     @ArraySchema(arraySchema = @Schema(description = "The same figures for each company with ledger entries in "
-            + "the year, ordered by company name; they add up to the year's"),
+            + "the year, ordered by company name; they add up to the year's. With pendingOnly, only the "
+            + "companies still owing for the year"),
             schema = @Schema(implementation = CompanyYearStatus.class))
     List<CompanyYearStatus> companies;
 }

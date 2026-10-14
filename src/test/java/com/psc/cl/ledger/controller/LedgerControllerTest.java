@@ -4,6 +4,7 @@ import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.endsWith;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -20,9 +21,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.psc.cl.client.exception.ClientNotFoundException;
 import com.psc.cl.client.exception.CompanyNotFoundException;
 import com.psc.cl.config.ApiPaths;
+import com.psc.cl.ledger.dto.BulkPostingResponse;
 import com.psc.cl.ledger.dto.ClientLedgerStatusResponse;
 import com.psc.cl.ledger.dto.ClientLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.CompanyLedgerSummaryResponse;
+import com.psc.cl.ledger.dto.CompanyPostingFailure;
+import com.psc.cl.ledger.dto.CompanyPostingResult;
 import com.psc.cl.ledger.dto.CompanyTotals;
 import com.psc.cl.ledger.dto.CompanyYearStatus;
 import com.psc.cl.ledger.dto.FinancialYearStatus;
@@ -46,6 +50,7 @@ import com.psc.cl.ledger.exception.NotAPaymentException;
 import com.psc.cl.ledger.exception.PaymentNotCorrectableException;
 import com.psc.cl.ledger.model.LedgerEntryType;
 import com.psc.cl.ledger.model.PaymentMethod;
+import com.psc.cl.ledger.service.BulkPostingService;
 import com.psc.cl.ledger.service.FinancialYears;
 import com.psc.cl.ledger.service.LedgerService;
 import com.psc.cl.servicecatalog.model.BillingFrequency;
@@ -97,6 +102,9 @@ class LedgerControllerTest {
 
     @MockitoBean
     private LedgerService ledgerService;
+
+    @MockitoBean
+    private BulkPostingService bulkPostingService;
 
     @Test
     @DisplayName("returns 200 with the entries created and every financial figure")
@@ -903,7 +911,7 @@ class LedgerControllerTest {
     @Test
     @DisplayName("returns a client's years, each with its figures, status and companies")
     void givesClientLedgerStatus() throws Exception {
-        when(ledgerService.clientLedgerStatus(CLIENT_ID)).thenReturn(ClientLedgerStatusResponse.builder()
+        when(ledgerService.clientLedgerStatus(CLIENT_ID, null, false)).thenReturn(ClientLedgerStatusResponse.builder()
                 .clientId(CLIENT_ID)
                 .clientName("Rohan Mehta")
                 .clientSince(LocalDate.of(2025, 4, 1))
@@ -954,9 +962,45 @@ class LedgerControllerTest {
     }
 
     @Test
+    @DisplayName("passes the financial year and the pending-only flag through to the ledger status")
+    void givesClientLedgerStatusForOneYearPendingOnly() throws Exception {
+        when(ledgerService.clientLedgerStatus(CLIENT_ID, FinancialYears.parse("2025-26"), true))
+                .thenReturn(ClientLedgerStatusResponse.builder()
+                        .clientId(CLIENT_ID)
+                        .yearCount(2)
+                        .years(List.of(FinancialYearStatus.builder()
+                                .financialYear("2025-26")
+                                .status(LedgerYearStatus.CARRIED)
+                                .companies(List.of())
+                                .build()))
+                        .build());
+
+        mockMvc.perform(get(ApiPaths.V1 + "/clients/" + CLIENT_ID + "/ledger-status")
+                        .param("financialYear", "2025-26")
+                        .param("pendingOnly", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.years.length()").value(1))
+                .andExpect(jsonPath("$.years[0].financialYear").value("2025-26"));
+    }
+
+    @Test
+    @DisplayName("returns 400 for the ledger status with a malformed financial year or pending-only flag")
+    void rejectsInvalidLedgerStatusParameters() throws Exception {
+        String statusUrl = ApiPaths.V1 + "/clients/" + CLIENT_ID + "/ledger-status";
+        mockMvc.perform(get(statusUrl).param("financialYear", "2025"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+        mockMvc.perform(get(statusUrl).param("pendingOnly", "maybe"))
+                .andExpect(status().isBadRequest());
+
+        verify(ledgerService, never()).clientLedgerStatus(any(), any(), anyBoolean());
+    }
+
+    @Test
     @DisplayName("returns 404 for the ledger status of an unknown client")
     void givesLedgerStatusOfUnknownClient() throws Exception {
-        when(ledgerService.clientLedgerStatus(CLIENT_ID)).thenThrow(new ClientNotFoundException(CLIENT_ID));
+        when(ledgerService.clientLedgerStatus(CLIENT_ID, null, false))
+                .thenThrow(new ClientNotFoundException(CLIENT_ID));
 
         mockMvc.perform(get(ApiPaths.V1 + "/clients/" + CLIENT_ID + "/ledger-status"))
                 .andExpect(status().isNotFound())
@@ -1152,5 +1196,40 @@ class LedgerControllerTest {
                 .totalAmount(new BigDecimal("5605.00"))
                 .createdAt(Instant.now())
                 .build();
+    }
+
+    @Test
+    @DisplayName("posts the due services of every company without any input, listing what was posted and failed")
+    void postsAllDueServices() throws Exception {
+        UUID clientId = UUID.randomUUID();
+        UUID postedCompany = UUID.randomUUID();
+        UUID failedCompany = UUID.randomUUID();
+        when(bulkPostingService.postAllDueServices()).thenReturn(BulkPostingResponse.builder()
+                .asOf(LocalDate.of(2026, 10, 14))
+                .companyCount(3)
+                .entriesPosted(2)
+                .companies(List.of(CompanyPostingResult.builder()
+                        .clientId(clientId)
+                        .companyId(postedCompany)
+                        .companyName("Mehta Textiles Pvt Ltd")
+                        .entriesPosted(2)
+                        .build()))
+                .failures(List.of(CompanyPostingFailure.builder()
+                        .clientId(clientId)
+                        .companyId(failedCompany)
+                        .companyName("Rohan Mehta HUF")
+                        .error("Catalog service does not exist")
+                        .build()))
+                .build());
+
+        mockMvc.perform(post(ApiPaths.V1 + "/ledger-entries/post-due"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.asOf").value("2026-10-14"))
+                .andExpect(jsonPath("$.companyCount").value(3))
+                .andExpect(jsonPath("$.entriesPosted").value(2))
+                .andExpect(jsonPath("$.companies[0].companyId").value(postedCompany.toString()))
+                .andExpect(jsonPath("$.companies[0].entriesPosted").value(2))
+                .andExpect(jsonPath("$.failures[0].companyId").value(failedCompany.toString()))
+                .andExpect(jsonPath("$.failures[0].error").value("Catalog service does not exist"));
     }
 }

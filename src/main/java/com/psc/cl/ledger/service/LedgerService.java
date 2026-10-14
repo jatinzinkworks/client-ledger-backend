@@ -1,5 +1,7 @@
 package com.psc.cl.ledger.service;
 
+import com.psc.cl.ledger.dto.ClientBalance;
+import com.psc.cl.ledger.dto.ClientCompanyBalance;
 import com.psc.cl.ledger.dto.ClientLedgerStatusResponse;
 import com.psc.cl.ledger.dto.ClientLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.CompanyBalance;
@@ -9,11 +11,16 @@ import com.psc.cl.ledger.dto.LedgerEntryUpdateRequest;
 import com.psc.cl.ledger.dto.LedgerExport;
 import com.psc.cl.ledger.dto.LedgerListQuery;
 import com.psc.cl.ledger.dto.LedgerListResponse;
+import com.psc.cl.ledger.dto.LedgerSummary;
+import com.psc.cl.ledger.dto.ManagerBalance;
+import com.psc.cl.ledger.dto.MonthlyTotals;
 import com.psc.cl.ledger.dto.PaymentListResponse;
 import com.psc.cl.ledger.dto.PaymentRequest;
+import com.psc.cl.ledger.dto.UnpaidCharge;
 import com.psc.cl.ledger.model.FinancialYear;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -131,16 +138,19 @@ public interface LedgerService {
     ClientLedgerSummaryResponse summarizeClient(UUID clientId, FinancialYear financialYear);
 
     /**
-     * A client's balance for every financial year since they became a client, latest first: billed
-     * before discount, discount, received, the year's closing balance and its status, across all of
-     * their companies and for each company. The first year is that of the client's earliest ledger
-     * entry, or of the day they were added if earlier; the last is the current year. Years without
-     * entries are listed with zero figures.
+     * A client's balance for every financial year since they became a client, latest first, or for
+     * one year: billed before discount, discount, received, the year's closing balance and its
+     * status, across all of their companies and for each company. The first year is that of the
+     * client's earliest ledger entry, or of the day they were added if earlier; the last is the
+     * current year. Years without entries are listed with zero figures. clientSince and yearCount
+     * always cover that whole span, whichever years are listed.
      *
-     * @param clientId the client
+     * @param clientId      the client
+     * @param financialYear the only year to list, or null for every year
+     * @param pendingOnly   whether each year lists only the companies still owing for it
      * @return the client's years
      */
-    ClientLedgerStatusResponse clientLedgerStatus(UUID clientId);
+    ClientLedgerStatusResponse clientLedgerStatus(UUID clientId, FinancialYear financialYear, boolean pendingOnly);
 
     /**
      * Exports a client's ledger for one financial year as an Excel workbook: a Summary sheet with
@@ -230,6 +240,120 @@ public interface LedgerService {
      *         billed in the year are left out, so callers should treat them as zero
      */
     Map<UUID, BigDecimal> billedByService(UUID companyId, FinancialYear financialYear);
+
+    /**
+     * The clients owing most, most first: billed less received, in one financial year or across
+     * every year. Only clients still owing are included; those settled or in credit are left out.
+     *
+     * @param financialYear the year to rank by, or null for every year to date
+     * @param limit         the most clients to return, at least one
+     * @return the clients, at most limit of them; empty when nobody owes anything
+     */
+    List<ClientBalance> topClientsByPending(FinancialYear financialYear, int limit);
+
+    /**
+     * The managers whose clients owe most, most first: billed less received across all of their
+     * clients, in one financial year or across every year. Clients count towards the manager they
+     * are assigned to now. Only managers whose clients still owe overall are included.
+     *
+     * @param financialYear the year to rank by, or null for every year to date
+     * @param limit         the most managers to return, at least one
+     * @return the managers, at most limit of them; empty when nobody owes anything
+     */
+    List<ManagerBalance> topManagersByPending(FinancialYear financialYear, int limit);
+
+    /**
+     * The managers whose clients were billed most, most first: the service charges of all of their
+     * clients, in one financial year or across every year, with what was received and remains.
+     * Clients count towards the manager they are assigned to now. Only managers whose clients were
+     * billed anything are included.
+     *
+     * @param financialYear the year to rank by, or null for every year to date
+     * @param limit         the most managers to return, at least one
+     * @return the managers, at most limit of them; empty when nothing was billed
+     */
+    List<ManagerBalance> topManagersByBilled(FinancialYear financialYear, int limit);
+
+    /**
+     * The companies owing most, most first: billed less received, in one financial year or across
+     * every year. Only companies still owing are included; those settled or in credit are left out.
+     *
+     * @param financialYear the year to rank by, or null for every year to date
+     * @param limit         the most companies to return, at least one
+     * @return the companies, at most limit of them; empty when nobody owes anything
+     */
+    List<ClientCompanyBalance> topCompaniesByPending(FinancialYear financialYear, int limit);
+
+    /**
+     * The companies billed most, most first: their service charges in one financial year or across
+     * every year, with what was received and remains. Only companies billed anything are included.
+     *
+     * @param financialYear the year to rank by, or null for every year to date
+     * @param limit         the most companies to return, at least one
+     * @return the companies, at most limit of them; empty when nothing was billed
+     */
+    List<ClientCompanyBalance> topCompaniesByBilled(FinancialYear financialYear, int limit);
+
+    /**
+     * The latest payments received across every client and company: the most recently received
+     * first, and those received the same day latest recorded first.
+     *
+     * @param limit the most payments to return, at least one
+     * @return the payments, at most limit of them; their amounts as stored, negative
+     */
+    List<LedgerEntryResponse> recentPayments(int limit);
+
+    /**
+     * The clients billed most, most first: their service charges in one financial year or across
+     * every year, with what was received and remains. Only clients billed anything are included.
+     *
+     * @param financialYear the year to rank by, or null for every year to date
+     * @param limit         the most clients to return, at least one
+     * @return the clients, at most limit of them; empty when nothing was billed
+     */
+    List<ClientBalance> topClientsByBilled(FinancialYear financialYear, int limit);
+
+    /**
+     * Totals every ledger entry of every client in one financial year, the same way a client's
+     * summary totals theirs: totalAmount is what was billed, totalPaid what was received, and balance
+     * the difference. For the firm-wide overview.
+     *
+     * @param financialYear the financial year
+     * @return the totals; every amount zero when the year has no entries
+     */
+    LedgerSummary totalsForYear(FinancialYear financialYear);
+
+    /**
+     * Totals every ledger entry of every client dated within a range, both ends inclusive, as
+     * {@link #totalsForYear} does for a whole year. For comparing part of one year with another.
+     *
+     * @param fromDate earliest date to include
+     * @param toDate   latest date to include
+     * @return the totals; every amount zero when the range has no entries, or ends before it starts
+     */
+    LedgerSummary totalsBetween(LocalDate fromDate, LocalDate toDate);
+
+    /**
+     * What was billed, received and discounted across every client in each calendar month of one
+     * financial year, April first. Service charges count in the month they fell due; payments in
+     * the month they were received. For the overview's monthly trend.
+     *
+     * @param financialYear the financial year
+     * @return all twelve months, earliest first; months without entries have every amount zero
+     */
+    List<MonthlyTotals> monthlyTotals(FinancialYear financialYear);
+
+    /**
+     * What every company still owes, by the date the charges fell due. Payments are not matched to
+     * charges, so each company's payments are applied to its oldest charges first; what is left is
+     * unpaid. Companies settled or in credit have nothing unpaid. For the overview's receivables
+     * ageing.
+     *
+     * @param asOf the day to work it out on: charges falling due and payments received after it are
+     *             left out
+     * @return the unpaid charges, earliest due first; empty when nobody owes anything
+     */
+    List<UnpaidCharge> unpaidCharges(LocalDate asOf);
 
     /**
      * The balance of each company of a client for one financial year: billed, received and pending.

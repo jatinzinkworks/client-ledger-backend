@@ -2,6 +2,7 @@ package com.psc.cl.ledger.controller;
 
 import com.psc.cl.config.ApiPaths;
 import com.psc.cl.dto.ErrorResponse;
+import com.psc.cl.ledger.dto.BulkPostingResponse;
 import com.psc.cl.ledger.dto.ClientLedgerStatusResponse;
 import com.psc.cl.ledger.dto.ClientLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.CompanyLedgerSummaryResponse;
@@ -75,6 +76,9 @@ public interface LedgerApi {
     /** Path the ledger of one company of a client for a financial year is downloaded from as an Excel workbook. */
     String COMPANY_EXPORT_PATH = ApiPaths.V1 + "/clients/{clientId}/companies/{companyId}/ledger-export";
 
+    /** Path the due services of every company of every client are posted at in one go. */
+    String POST_ALL_DUE_PATH = ApiPaths.V1 + "/ledger-entries/post-due";
+
     /** Shared by the list endpoints' range filter. */
     String FROM_DATE_DESCRIPTION = "Only return entries due on or after this date (ISO yyyy-MM-dd). "
             + "Omit to leave the range open at the start";
@@ -145,6 +149,24 @@ public interface LedgerApi {
             @Parameter(description = "Identifier of the company to bill", required = true,
                     example = "4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28")
             @PathVariable UUID companyId);
+
+    @Operation(
+            summary = "Post due services to the ledgers of every company",
+            description = "Takes no input. Goes through every company of every client and posts its due "
+                    + "services to its ledger, exactly as posting for one company does: every service fallen "
+                    + "due on or before today and not yet billed is billed once. Each company is posted on its "
+                    + "own, so a failure for one is listed under failures and the others are still posted. "
+                    + "Running it again when nothing new is due creates nothing.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200",
+                    description = "The run's outcome, including any companies that failed",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = BulkPostingResponse.class))),
+            @ApiResponse(responseCode = "500", description = "Unexpected server error",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class)))})
+    @PostMapping(POST_ALL_DUE_PATH)
+    ResponseEntity<BulkPostingResponse> postAllDueServices();
 
     @Operation(
             summary = "Fetch a ledger entry of a company",
@@ -250,24 +272,30 @@ public interface LedgerApi {
             @RequestParam String financialYear);
 
     @Operation(
-            summary = "Show a client's balance for every financial year",
+            summary = "Show a client's balance for every financial year, or for one",
             description = "Returns, for every Indian financial year (1 April to 31 March) since the client "
-                    + "became one, latest first: what was billed before discount, the discount given, what "
+                    + "became one, latest first, or only for the financialYear given: what was billed before "
+                    + "discount, the discount given, what "
                     + "was received, the closing balance (billed less discount less received) and a status. "
                     + "The current year runs to date and is PENDING while it has an amount owing; a closed "
                     + "year that ended with an amount owing is CARRIED; a year with nothing owing is SETTLED, "
                     + "as is one where more was received than billed, whose closing balance is then "
                     + "negative. Charges count in the year they fell due and payments in the year they were "
-                    + "received; each year stands alone, so an "
-                    + "earlier year's balance is not brought into the next. The first year is that of the "
-                    + "client's earliest ledger entry, or of the day they were added if earlier; years with no "
-                    + "entries are listed with zeros. Each year also carries the same figures for each company "
-                    + "with entries in it.")
+                    + "received; each year stands alone, so an earlier year's balance is not brought into the "
+                    + "next. The first year is that of the client's earliest ledger entry, or of the day they "
+                    + "were added if earlier; years with no entries are listed with zeros. clientSince and "
+                    + "yearCount always cover every year since then, whichever years are listed. Each year also "
+                    + "carries the same figures for each company with entries in it; with pendingOnly, only the "
+                    + "companies still owing for the year (a closing balance above zero) are listed, while the "
+                    + "year's own figures and companyCount still cover every company.")
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "The client's years, latest first",
+            @ApiResponse(responseCode = "200",
+                    description = "The client's years, latest first, or the one year asked for",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ClientLedgerStatusResponse.class))),
-            @ApiResponse(responseCode = "400", description = "The identifier is not a valid UUID",
+            @ApiResponse(responseCode = "400",
+                    description = "The identifier is not a valid UUID, financialYear is not a year such as "
+                            + "2026-27, or pendingOnly is not true or false",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "404", description = "No client carries this identifier",
@@ -280,7 +308,13 @@ public interface LedgerApi {
     ResponseEntity<ClientLedgerStatusResponse> clientLedgerStatus(
             @Parameter(description = "Identifier of the client", required = true,
                     example = "7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35")
-            @PathVariable UUID clientId);
+            @PathVariable UUID clientId,
+            @Parameter(description = "Only list this Indian financial year, written as yyyy-yy. Omit to list "
+                    + "every year since the client became one", example = "2025-26")
+            @RequestParam(required = false) String financialYear,
+            @Parameter(description = "List, in each year, only the companies still owing for it. The year's "
+                    + "own figures still cover every company")
+            @RequestParam(defaultValue = "false") boolean pendingOnly);
 
     @Operation(
             summary = "Export a client's ledger for a financial year as an Excel workbook",

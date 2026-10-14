@@ -17,21 +17,27 @@ import com.psc.cl.client.model.ServiceAssignment;
 import com.psc.cl.client.repository.ClientCompanyRepository;
 import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.client.repository.ServiceAssignmentRepository;
+import com.psc.cl.ledger.dto.ClientBalance;
+import com.psc.cl.ledger.dto.ClientCompanyBalance;
 import com.psc.cl.ledger.dto.ClientLedgerStatusResponse;
 import com.psc.cl.ledger.dto.ClientLedgerSummaryResponse;
-import com.psc.cl.ledger.dto.CompanyYearStatus;
-import com.psc.cl.ledger.dto.FinancialYearStatus;
-import com.psc.cl.ledger.dto.LedgerYearStatus;
 import com.psc.cl.ledger.dto.CompanyBalance;
 import com.psc.cl.ledger.dto.CompanyLedgerSummaryResponse;
+import com.psc.cl.ledger.dto.CompanyYearStatus;
+import com.psc.cl.ledger.dto.FinancialYearStatus;
 import com.psc.cl.ledger.dto.LedgerEntryResponse;
 import com.psc.cl.ledger.dto.LedgerEntryUpdateRequest;
 import com.psc.cl.ledger.dto.LedgerExport;
 import com.psc.cl.ledger.dto.LedgerListQuery;
 import com.psc.cl.ledger.dto.LedgerListResponse;
 import com.psc.cl.ledger.dto.LedgerSortField;
+import com.psc.cl.ledger.dto.LedgerSummary;
+import com.psc.cl.ledger.dto.LedgerYearStatus;
+import com.psc.cl.ledger.dto.ManagerBalance;
+import com.psc.cl.ledger.dto.MonthlyTotals;
 import com.psc.cl.ledger.dto.PaymentListResponse;
 import com.psc.cl.ledger.dto.PaymentRequest;
+import com.psc.cl.ledger.dto.UnpaidCharge;
 import com.psc.cl.ledger.exception.FuturePaymentDateException;
 import com.psc.cl.ledger.exception.LedgerEntryNotFoundException;
 import com.psc.cl.ledger.exception.NotAPaymentException;
@@ -41,8 +47,14 @@ import com.psc.cl.ledger.model.LedgerEntry;
 import com.psc.cl.ledger.model.LedgerEntryType;
 import com.psc.cl.ledger.model.PaymentMethod;
 import com.psc.cl.ledger.repository.CatalogServiceBilledRow;
+import com.psc.cl.ledger.repository.ClientBalanceRow;
 import com.psc.cl.ledger.repository.ClientPendingRow;
+import com.psc.cl.ledger.repository.CompanyBalanceRow;
+import com.psc.cl.ledger.repository.CompanyChargeRow;
+import com.psc.cl.ledger.repository.CompanyPaidRow;
+import com.psc.cl.ledger.repository.DailyTotalsRow;
 import com.psc.cl.ledger.repository.LedgerEntryRepository;
+import com.psc.cl.ledger.repository.ManagerBalanceRow;
 import com.psc.cl.ledger.repository.ManagerPendingRow;
 import com.psc.cl.ledger.repository.PostedPeriod;
 import com.psc.cl.ledger.repository.ServiceBilledRow;
@@ -64,6 +76,7 @@ import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
@@ -743,7 +756,7 @@ class LedgerServiceImplTest {
                                 "5605.00"),
                         LedgerSummariesTest.payment(COMPANY_ID, "2022-23", 1, "-500.00")));
 
-        ClientLedgerStatusResponse status = ledgerService.clientLedgerStatus(CLIENT_ID);
+        ClientLedgerStatusResponse status = ledgerService.clientLedgerStatus(CLIENT_ID, null, false);
 
         assertThat(status.getClientId()).isEqualTo(CLIENT_ID);
         assertThat(status.getClientName()).isEqualTo("Rohan Mehta");
@@ -762,6 +775,29 @@ class LedgerServiceImplTest {
     }
 
     @Test
+    @DisplayName("lists only the year asked for, keeping the client's whole span in clientSince and yearCount")
+    void givesClientLedgerStatusForOneYear() {
+        client.setFirstName("Rohan");
+        client.setLastName("Mehta");
+        client.setCreatedAt(Instant.parse("2024-06-01T04:30:00Z"));
+        when(clientRepository.findById(CLIENT_ID)).thenReturn(Optional.of(client));
+        when(ledgerEntryRepository.totalClientEntries(CLIENT_ID, LocalDate.of(1, 1, 1), LocalDate.of(9999, 12, 31)))
+                .thenReturn(List.of(
+                        LedgerSummariesTest.row(COMPANY_ID, "2026-27", 1, "5000.00", "250.00", "4750.00", "855.00",
+                                "5605.00"),
+                        LedgerSummariesTest.payment(COMPANY_ID, "2022-23", 1, "-500.00")));
+
+        ClientLedgerStatusResponse status = ledgerService.clientLedgerStatus(CLIENT_ID,
+                FinancialYears.parse("2022-23"), false);
+
+        assertThat(status.getYears()).extracting(FinancialYearStatus::getFinancialYear).containsExactly("2022-23");
+        assertThat(status.getYears().getFirst().getReceived()).isEqualTo(new BigDecimal("500.00"));
+        assertThat(status.getYears().getFirst().isCurrent()).isFalse();
+        assertThat(status.getClientSince()).isEqualTo(LocalDate.of(2022, 4, 1));
+        assertThat(status.getYearCount()).isEqualTo(5);
+    }
+
+    @Test
     @DisplayName("lists every year since a client was added, even with no entries")
     void givesClientLedgerStatusWithoutEntries() {
         client.setFirstName("Asha");
@@ -770,7 +806,7 @@ class LedgerServiceImplTest {
         when(clientRepository.findById(CLIENT_ID)).thenReturn(Optional.of(client));
         when(ledgerEntryRepository.totalClientEntries(any(), any(), any())).thenReturn(List.of());
 
-        ClientLedgerStatusResponse status = ledgerService.clientLedgerStatus(CLIENT_ID);
+        ClientLedgerStatusResponse status = ledgerService.clientLedgerStatus(CLIENT_ID, null, false);
 
         assertThat(status.getClientSince()).isEqualTo(LocalDate.of(2024, 4, 1));
         assertThat(status.getYears()).extracting(FinancialYearStatus::getFinancialYear)
@@ -786,10 +822,371 @@ class LedgerServiceImplTest {
     void givesLedgerStatusOfUnknownClient() {
         when(clientRepository.findById(CLIENT_ID)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> ledgerService.clientLedgerStatus(CLIENT_ID))
+        assertThatThrownBy(() -> ledgerService.clientLedgerStatus(CLIENT_ID, null, false))
                 .isInstanceOf(ClientNotFoundException.class);
 
         verify(ledgerEntryRepository, never()).totalClientEntries(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("ranks clients owing most in the year, received turned positive, at two places")
+    void ranksClientsByPendingInYear() {
+        when(ledgerEntryRepository.topClientsByPending(LedgerEntryType.SERVICE_CHARGE, LedgerEntryType.PAYMENT,
+                LocalDate.of(2026, 4, 1), LocalDate.of(2027, 3, 31), PageRequest.of(0, 10)))
+                .thenReturn(List.of(clientBalance(CLIENT_ID, "39235.00", "-18605.00", "20630.00")));
+
+        List<ClientBalance> top = ledgerService.topClientsByPending(FinancialYears.parse("2026-27"), 10);
+
+        assertThat(top).containsExactly(new ClientBalance(CLIENT_ID, new BigDecimal("39235.00"),
+                new BigDecimal("18605.00"), new BigDecimal("20630.00")));
+    }
+
+    @Test
+    @DisplayName("ranks clients owing most across every year when no year is given")
+    void ranksClientsByPendingAcrossEveryYear() {
+        // A client never paid sums the CASE's 0, which comes back without decimal places.
+        when(ledgerEntryRepository.topClientsByPending(LedgerEntryType.SERVICE_CHARGE, LedgerEntryType.PAYMENT,
+                LocalDate.of(1, 1, 1), LocalDate.of(9999, 12, 31), PageRequest.of(0, 3)))
+                .thenReturn(List.of(clientBalance(CLIENT_ID, "5605.00", "0", "5605.00")));
+
+        List<ClientBalance> top = ledgerService.topClientsByPending(null, 3);
+
+        assertThat(top.getFirst().totalPaymentReceived()).isEqualTo(new BigDecimal("0.00"));
+    }
+
+    @Test
+    @DisplayName("ranks managers by what their clients owe in the year, received turned positive")
+    void ranksManagersByPending() {
+        UUID managerId = UUID.randomUUID();
+        when(ledgerEntryRepository.topManagersByPending(LedgerEntryType.SERVICE_CHARGE, LedgerEntryType.PAYMENT,
+                LocalDate.of(2026, 4, 1), LocalDate.of(2027, 3, 31), PageRequest.of(0, 10)))
+                .thenReturn(List.of(new ManagerBalanceRow() {
+                    @Override
+                    public UUID getManagerId() {
+                        return managerId;
+                    }
+
+                    @Override
+                    public BigDecimal getTotalBilled() {
+                        return new BigDecimal("39235.00");
+                    }
+
+                    @Override
+                    public BigDecimal getTotalPaid() {
+                        return new BigDecimal("-18605.00");
+                    }
+
+                    @Override
+                    public BigDecimal getPending() {
+                        return new BigDecimal("20630.00");
+                    }
+                }));
+
+        List<ManagerBalance> top = ledgerService.topManagersByPending(FinancialYears.parse("2026-27"), 10);
+
+        assertThat(top).containsExactly(new ManagerBalance(managerId, new BigDecimal("39235.00"),
+                new BigDecimal("18605.00"), new BigDecimal("20630.00")));
+    }
+
+    @Test
+    @DisplayName("ranks clients by what they were billed in the year, received turned positive, even in credit")
+    void ranksClientsByBilled() {
+        when(ledgerEntryRepository.topClientsByBilled(LedgerEntryType.SERVICE_CHARGE, LedgerEntryType.PAYMENT,
+                LocalDate.of(2026, 4, 1), LocalDate.of(2027, 3, 31), PageRequest.of(0, 10)))
+                .thenReturn(List.of(clientBalance(CLIENT_ID, "5605.00", "-6000.00", "-395.00")));
+
+        List<ClientBalance> top = ledgerService.topClientsByBilled(FinancialYears.parse("2026-27"), 10);
+
+        assertThat(top).containsExactly(new ClientBalance(CLIENT_ID, new BigDecimal("5605.00"),
+                new BigDecimal("6000.00"), new BigDecimal("-395.00")));
+    }
+
+    @Test
+    @DisplayName("ranks clients by billed across every year when no year is given")
+    void ranksClientsByBilledAcrossEveryYear() {
+        when(ledgerEntryRepository.topClientsByBilled(LedgerEntryType.SERVICE_CHARGE, LedgerEntryType.PAYMENT,
+                LocalDate.of(1, 1, 1), LocalDate.of(9999, 12, 31), PageRequest.of(0, 5))).thenReturn(List.of());
+
+        assertThat(ledgerService.topClientsByBilled(null, 5)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("ranks managers by what was billed to their clients, received turned positive")
+    void ranksManagersByBilled() {
+        UUID managerId = UUID.randomUUID();
+        when(ledgerEntryRepository.topManagersByBilled(LedgerEntryType.SERVICE_CHARGE, LedgerEntryType.PAYMENT,
+                LocalDate.of(1, 1, 1), LocalDate.of(9999, 12, 31), PageRequest.of(0, 10)))
+                .thenReturn(List.of(new ManagerBalanceRow() {
+                    @Override
+                    public UUID getManagerId() {
+                        return managerId;
+                    }
+
+                    @Override
+                    public BigDecimal getTotalBilled() {
+                        return new BigDecimal("5605.00");
+                    }
+
+                    @Override
+                    public BigDecimal getTotalPaid() {
+                        return new BigDecimal("-6000.00");
+                    }
+
+                    @Override
+                    public BigDecimal getPending() {
+                        return new BigDecimal("-395.00");
+                    }
+                }));
+
+        List<ManagerBalance> top = ledgerService.topManagersByBilled(null, 10);
+
+        // Ranked by billed, so a manager whose clients are in credit is still listed.
+        assertThat(top).containsExactly(new ManagerBalance(managerId, new BigDecimal("5605.00"),
+                new BigDecimal("6000.00"), new BigDecimal("-395.00")));
+    }
+
+    @Test
+    @DisplayName("ranks managers across every year when no year is given")
+    void ranksManagersByPendingAcrossEveryYear() {
+        when(ledgerEntryRepository.topManagersByPending(LedgerEntryType.SERVICE_CHARGE, LedgerEntryType.PAYMENT,
+                LocalDate.of(1, 1, 1), LocalDate.of(9999, 12, 31), PageRequest.of(0, 5))).thenReturn(List.of());
+
+        assertThat(ledgerService.topManagersByPending(null, 5)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("ranks companies owing most in the year, with their client, received turned positive")
+    void ranksCompaniesByPending() {
+        when(ledgerEntryRepository.topCompaniesByPending(LedgerEntryType.SERVICE_CHARGE, LedgerEntryType.PAYMENT,
+                LocalDate.of(2026, 4, 1), LocalDate.of(2027, 3, 31), PageRequest.of(0, 10)))
+                .thenReturn(List.of(new CompanyBalanceRow() {
+                    @Override
+                    public UUID getCompanyId() {
+                        return COMPANY_ID;
+                    }
+
+                    @Override
+                    public UUID getClientId() {
+                        return CLIENT_ID;
+                    }
+
+                    @Override
+                    public BigDecimal getTotalBilled() {
+                        return new BigDecimal("11210.00");
+                    }
+
+                    @Override
+                    public BigDecimal getTotalPaid() {
+                        return new BigDecimal("-8605.00");
+                    }
+
+                    @Override
+                    public BigDecimal getPending() {
+                        return new BigDecimal("2605.00");
+                    }
+                }));
+
+        List<ClientCompanyBalance> top = ledgerService.topCompaniesByPending(FinancialYears.parse("2026-27"), 10);
+
+        assertThat(top).containsExactly(new ClientCompanyBalance(COMPANY_ID, CLIENT_ID, new BigDecimal("11210.00"),
+                new BigDecimal("8605.00"), new BigDecimal("2605.00")));
+    }
+
+    @Test
+    @DisplayName("ranks companies by what they were billed, with their client, received turned positive")
+    void ranksCompaniesByBilled() {
+        when(ledgerEntryRepository.topCompaniesByBilled(LedgerEntryType.SERVICE_CHARGE, LedgerEntryType.PAYMENT,
+                LocalDate.of(1, 1, 1), LocalDate.of(9999, 12, 31), PageRequest.of(0, 10)))
+                .thenReturn(List.of(new CompanyBalanceRow() {
+                    @Override
+                    public UUID getCompanyId() {
+                        return COMPANY_ID;
+                    }
+
+                    @Override
+                    public UUID getClientId() {
+                        return CLIENT_ID;
+                    }
+
+                    @Override
+                    public BigDecimal getTotalBilled() {
+                        return new BigDecimal("11210.00");
+                    }
+
+                    @Override
+                    public BigDecimal getTotalPaid() {
+                        return new BigDecimal("-12000.00");
+                    }
+
+                    @Override
+                    public BigDecimal getPending() {
+                        return new BigDecimal("-790.00");
+                    }
+                }));
+
+        List<ClientCompanyBalance> top = ledgerService.topCompaniesByBilled(null, 10);
+
+        // Ranked by billed, so a company in credit is still listed.
+        assertThat(top).containsExactly(new ClientCompanyBalance(COMPANY_ID, CLIENT_ID, new BigDecimal("11210.00"),
+                new BigDecimal("12000.00"), new BigDecimal("-790.00")));
+    }
+
+    @Test
+    @DisplayName("lists the latest payments, latest received then latest recorded first")
+    void listsRecentPayments() {
+        LedgerEntry payment = storedPayment(COMPANY_ID, LocalDate.of(2026, 10, 10), "-10000.00");
+        when(ledgerEntryRepository.findByEntryType(LedgerEntryType.PAYMENT,
+                PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "dueDate", "createdAt", "id"))))
+                .thenReturn(List.of(payment));
+
+        List<LedgerEntryResponse> recent = ledgerService.recentPayments(20);
+
+        assertThat(recent).extracting(LedgerEntryResponse::getId).containsExactly(payment.getId());
+        assertThat(recent.getFirst().getTotalAmount()).isEqualTo(new BigDecimal("-10000.00"));
+    }
+
+    @Test
+    @DisplayName("applies each company's payments to its oldest charges first, leaving the rest unpaid")
+    void appliesPaymentsOldestChargeFirst() {
+        UUID otherCompany = UUID.randomUUID();
+        UUID settledCompany = UUID.randomUUID();
+        when(ledgerEntryRepository.totalPaidByCompany(LedgerEntryType.PAYMENT, TODAY)).thenReturn(List.of(
+                companyPaid(COMPANY_ID, "-15000.00"), companyPaid(settledCompany, "-9000.00")));
+        when(ledgerEntryRepository.chargesByCompanyAndDueDate(LedgerEntryType.SERVICE_CHARGE, TODAY))
+                .thenReturn(List.of(
+                        companyCharge(COMPANY_ID, LocalDate.of(2026, 6, 1), "10000.00"),
+                        companyCharge(settledCompany, LocalDate.of(2026, 6, 15), "8000.00"),
+                        companyCharge(otherCompany, LocalDate.of(2026, 7, 1), "3000.00"),
+                        companyCharge(COMPANY_ID, LocalDate.of(2026, 7, 1), "10000.00"),
+                        companyCharge(COMPANY_ID, LocalDate.of(2026, 8, 1), "10000.00")));
+
+        List<UnpaidCharge> unpaid = ledgerService.unpaidCharges(TODAY);
+
+        assertThat(unpaid).containsExactly(
+                new UnpaidCharge(otherCompany, LocalDate.of(2026, 7, 1), new BigDecimal("3000.00")),
+                new UnpaidCharge(COMPANY_ID, LocalDate.of(2026, 7, 1), new BigDecimal("5000.00")),
+                new UnpaidCharge(COMPANY_ID, LocalDate.of(2026, 8, 1), new BigDecimal("10000.00")));
+    }
+
+    @Test
+    @DisplayName("totals every month of the year, April first, with zeros for months without entries")
+    void totalsEveryMonthOfYear() {
+        when(ledgerEntryRepository.totalsByDay(LedgerEntryType.SERVICE_CHARGE, LedgerEntryType.PAYMENT,
+                LocalDate.of(2026, 4, 1), LocalDate.of(2027, 3, 31))).thenReturn(List.of(
+                dailyTotals(LocalDate.of(2026, 4, 1), "11800.00", "0.00", "1000.00"),
+                dailyTotals(LocalDate.of(2026, 4, 20), "0.00", "-5000.00", "0.00"),
+                dailyTotals(LocalDate.of(2027, 3, 31), "2360.00", "-1000.00", "0.00")));
+
+        List<MonthlyTotals> months = ledgerService.monthlyTotals(FinancialYears.parse("2026-27"));
+
+        assertThat(months).hasSize(12);
+        assertThat(months.getFirst()).isEqualTo(new MonthlyTotals(YearMonth.of(2026, 4),
+                new BigDecimal("11800.00"), new BigDecimal("5000.00"), new BigDecimal("1000.00")));
+        assertThat(months.get(1)).isEqualTo(new MonthlyTotals(YearMonth.of(2026, 5),
+                new BigDecimal("0.00"), new BigDecimal("0.00"), new BigDecimal("0.00")));
+        assertThat(months.getLast()).isEqualTo(new MonthlyTotals(YearMonth.of(2027, 3),
+                new BigDecimal("2360.00"), new BigDecimal("1000.00"), new BigDecimal("0.00")));
+    }
+
+    private static CompanyPaidRow companyPaid(UUID companyId, String paid) {
+        return new CompanyPaidRow() {
+            @Override
+            public UUID getCompanyId() {
+                return companyId;
+            }
+
+            @Override
+            public BigDecimal getTotalPaid() {
+                return new BigDecimal(paid);
+            }
+        };
+    }
+
+    private static CompanyChargeRow companyCharge(UUID companyId, LocalDate dueDate, String charged) {
+        return new CompanyChargeRow() {
+            @Override
+            public UUID getCompanyId() {
+                return companyId;
+            }
+
+            @Override
+            public LocalDate getDueDate() {
+                return dueDate;
+            }
+
+            @Override
+            public BigDecimal getTotalCharged() {
+                return new BigDecimal(charged);
+            }
+        };
+    }
+
+    private static DailyTotalsRow dailyTotals(LocalDate date, String billed, String paid, String discount) {
+        return new DailyTotalsRow() {
+            @Override
+            public LocalDate getDueDate() {
+                return date;
+            }
+
+            @Override
+            public BigDecimal getTotalBilled() {
+                return new BigDecimal(billed);
+            }
+
+            @Override
+            public BigDecimal getTotalPaid() {
+                return new BigDecimal(paid);
+            }
+
+            @Override
+            public BigDecimal getTotalDiscount() {
+                return new BigDecimal(discount);
+            }
+        };
+    }
+
+    private static ClientBalanceRow clientBalance(UUID clientId, String billed, String paid, String pending) {
+        return new ClientBalanceRow() {
+            @Override
+            public UUID getClientId() {
+                return clientId;
+            }
+
+            @Override
+            public BigDecimal getTotalBilled() {
+                return new BigDecimal(billed);
+            }
+
+            @Override
+            public BigDecimal getTotalPaid() {
+                return new BigDecimal(paid);
+            }
+
+            @Override
+            public BigDecimal getPending() {
+                return new BigDecimal(pending);
+            }
+        };
+    }
+
+    @Test
+    @DisplayName("totals every client's entries in the financial year, as a client's summary does")
+    void totalsYearAcrossClients() {
+        UUID otherCompany = UUID.randomUUID();
+        when(ledgerEntryRepository.totalEntries(LocalDate.of(2026, 4, 1), LocalDate.of(2027, 3, 31)))
+                .thenReturn(List.of(
+                        LedgerSummariesTest.row(COMPANY_ID, "2026-27", 2, "10000.00", "500.00", "9500.00", "1710.00",
+                                "11210.00"),
+                        LedgerSummariesTest.row(otherCompany, "2026-27", 1, "25000.00", "1250.00", "23750.00",
+                                "4275.00", "28025.00"),
+                        LedgerSummariesTest.payment(otherCompany, "2026-27", 1, "-10000.00")));
+
+        LedgerSummary totals = ledgerService.totalsForYear(FinancialYears.parse("2026-27"));
+
+        assertThat(totals.getTotalAmount()).isEqualTo(new BigDecimal("39235.00"));
+        assertThat(totals.getTotalPaid()).isEqualTo(new BigDecimal("10000.00"));
+        assertThat(totals.getBalance()).isEqualTo(new BigDecimal("29235.00"));
+        assertThat(totals.getTotalDiscountAmount()).isEqualTo(new BigDecimal("1750.00"));
     }
 
     @Test

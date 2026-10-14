@@ -24,15 +24,16 @@ public class ClientLedgerStatusResponse {
     @Schema(description = "Full name of the client", example = "Rohan Mehta")
     String clientName;
 
-    @Schema(description = "First day of the first financial year listed: that of the client's earliest ledger "
-            + "entry, or of the day they were added if earlier", example = "2019-04-01")
+    @Schema(description = "First day of the client's first financial year: that of their earliest ledger entry, "
+            + "or of the day they were added if earlier, whichever years are listed", example = "2019-04-01")
     LocalDate clientSince;
 
-    @Schema(description = "Number of financial years listed, from clientSince to the current year", example = "8")
+    @Schema(description = "Number of financial years from clientSince to the current year, whether every one "
+            + "is listed or only the year asked for", example = "8")
     int yearCount;
 
     @ArraySchema(arraySchema = @Schema(description = "Every financial year from clientSince to the current one, "
-            + "latest first, including years with no entries"),
+            + "latest first, including years with no entries; or only the year asked for"),
             schema = @Schema(implementation = FinancialYearStatus.class))
     List<FinancialYearStatus> years;
 }
