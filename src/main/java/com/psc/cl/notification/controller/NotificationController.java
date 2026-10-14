@@ -2,6 +2,7 @@ package com.psc.cl.notification.controller;
 
 import com.psc.cl.notification.dto.BulkLedgerSummaryEmailResponse;
 import com.psc.cl.notification.dto.LedgerSummaryEmailResponse;
+import com.psc.cl.notification.dto.PaymentReminderResponse;
 import com.psc.cl.notification.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -38,5 +39,11 @@ public class NotificationController implements NotificationApi {
     public ResponseEntity<BulkLedgerSummaryEmailResponse> sendAllClientLedgerSummaries() {
         log.debug("Received request to email every client their ledger summary");
         return ResponseEntity.ok(notificationService.sendAllClientLedgerSummaries());
+    }
+
+    @Override
+    public ResponseEntity<PaymentReminderResponse> sendPaymentReminders() {
+        log.debug("Received request to send payment reminders to every client with an amount pending");
+        return ResponseEntity.ok(notificationService.sendPaymentReminders());
     }
 }

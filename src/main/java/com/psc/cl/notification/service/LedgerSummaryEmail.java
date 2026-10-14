@@ -53,12 +53,19 @@ record LedgerSummaryEmail(String subject, String html, String text) {
      * @param topic       what the subject line says the summary is for
      * @param accountHtml the account the intro speaks of, already HTML-escaped where needed
      * @param accountText the same in plain text
-     * @param companies   the per-company breakdown; empty for a single company's summary
+     * @param pending      billed less received in the year
+     * @param totalPending billed less received across every year; the same as pending for a summary
+     * @param companies    the per-company breakdown; empty for a single company's summary
      */
     private record Content(String topic, String accountHtml, String accountText, String financialYear,
                            LocalDate fromDate, LocalDate toDate, BigDecimal billed, BigDecimal discount,
-                           BigDecimal received, BigDecimal pending, LastPayment lastPayment,
-                           List<CompanyLine> companies) {
+                           BigDecimal received, BigDecimal pending, BigDecimal totalPending,
+                           LastPayment lastPayment, List<CompanyLine> companies) {
+
+        /** What was carried into the year from earlier ones; zero for a summary. */
+        BigDecimal earlierBalance() {
+            return totalPending.subtract(pending);
+        }
     }
 
     /**
@@ -78,8 +85,8 @@ record LedgerSummaryEmail(String subject, String html, String text) {
                         "the account of " + summary.getCompanyName(),
                         summary.getFinancialYear(), summary.getFromDate(), summary.getToDate(),
                         summary.getTotalBilled(), summary.getTotalDiscount(), summary.getTotalPaymentReceived(),
-                        summary.getPending(), summary.getLastPayment(), List.of()),
-                clientName, firm, asOf, attachmentName);
+                        summary.getPending(), summary.getPending(), summary.getLastPayment(), List.of()),
+                Purpose.SUMMARY, clientName, firm, asOf, attachmentName);
     }
 
     /**
@@ -97,31 +104,133 @@ record LedgerSummaryEmail(String subject, String html, String text) {
     static LedgerSummaryEmail forClient(ClientLedgerSummaryResponse summary, List<CompanyLine> companies,
                                         String clientName, FirmDetails firm, LocalDate asOf,
                                         String attachmentName) {
+        return of(clientContent(summary, summary.getPending(), companies), Purpose.SUMMARY, clientName, firm, asOf,
+                attachmentName);
+    }
+
+    /**
+     * Writes a payment reminder for a client owing across their companies: the same figures and
+     * per-company lines for the year as {@link #forClient}, framed as a request to pay everything
+     * pending across every year. When earlier years left a balance, the figures add it to the year's
+     * so they come to the amount asked for.
+     *
+     * @param summary        the client's summary for the year
+     * @param totalPending   what the client owes across every year: the amount asked for
+     * @param companies      each of the client's companies with its figures for the year, in the order
+     *                       to list them
+     * @param clientName     the name to greet the client by
+     * @param firm           the firm's details for the signature and footer, or null when none are saved
+     * @param asOf           the day the figures are as of
+     * @param attachmentName the name of the attached Excel ledger
+     * @return the email
+     */
+    static LedgerSummaryEmail paymentReminderForClient(ClientLedgerSummaryResponse summary, BigDecimal totalPending,
+                                                       List<CompanyLine> companies, String clientName,
+                                                       FirmDetails firm, LocalDate asOf, String attachmentName) {
+        return of(clientContent(summary, totalPending, companies), Purpose.PAYMENT_REMINDER, clientName, firm,
+                asOf, attachmentName);
+    }
+
+    private static Content clientContent(ClientLedgerSummaryResponse summary, BigDecimal totalPending,
+                                         List<CompanyLine> companies) {
         String account = companies.size() <= 1 ? "your account"
                 : "your account across all " + companies.size() + " of your companies";
-        return of(new Content("all of your companies", account, account,
-                        summary.getFinancialYear(), summary.getFromDate(), summary.getToDate(),
-                        summary.getTotalBilled(), summary.getTotalDiscount(), summary.getTotalPaymentReceived(),
-                        summary.getPending(), summary.getLastPayment(), companies),
-                clientName, firm, asOf, attachmentName);
+        return new Content("all of your companies", account, account,
+                summary.getFinancialYear(), summary.getFromDate(), summary.getToDate(),
+                summary.getTotalBilled(), summary.getTotalDiscount(), summary.getTotalPaymentReceived(),
+                summary.getPending(), totalPending, summary.getLastPayment(), companies);
     }
 
-    private static LedgerSummaryEmail of(Content content, String clientName, FirmDetails firm, LocalDate asOf,
-                                         String attachmentName) {
+    /** What the email is for, which decides its subject, heading, opening and closing. */
+    private enum Purpose {
+        SUMMARY,
+        PAYMENT_REMINDER
+    }
+
+    private static LedgerSummaryEmail of(Content content, Purpose purpose, String clientName, FirmDetails firm,
+                                         LocalDate asOf, String attachmentName) {
         String firmName = firm == null ? null : firm.getFirmName();
-        String subject = (firmName == null ? "" : firmName + ": ") + "Your ledger summary for " + content.topic()
-                + ", FY " + content.financialYear();
-        return new LedgerSummaryEmail(subject, html(content, clientName, firm, asOf, attachmentName),
-                text(content, clientName, firm, asOf, attachmentName));
+        String subject = (firmName == null ? "" : firmName + ": ") + switch (purpose) {
+            case SUMMARY -> "Your ledger summary for " + content.topic() + ", FY " + content.financialYear();
+            case PAYMENT_REMINDER -> "Payment reminder: " + rupees(content.totalPending()) + " pending";
+        };
+        return new LedgerSummaryEmail(subject, html(content, purpose, clientName, firm, asOf, attachmentName),
+                text(content, purpose, clientName, firm, asOf, attachmentName));
     }
 
-    private static String html(Content content, String clientName, FirmDetails firm, LocalDate asOf,
-                               String attachmentName) {
+    /** The heading under the firm's name, the page title, and how a summary or reminder opens and closes. */
+    private static String heading(Purpose purpose) {
+        return purpose == Purpose.SUMMARY ? "Ledger summary" : "Payment reminder";
+    }
+
+    private static String introHtml(Content content, Purpose purpose, LocalDate asOf) {
+        String year = "the financial year " + escape(content.financialYear()) + " ("
+                + DATE.format(content.fromDate()) + " to " + DATE.format(content.toDate()) + ")";
+        return purpose == Purpose.SUMMARY
+                ? "Here is where " + content.accountHtml() + " stands for " + year + ", as of "
+                        + DATE.format(asOf) + "."
+                : "This is a friendly reminder that <strong>" + escape(rupees(content.totalPending()))
+                        + "</strong> is pending on " + content.accountHtml() + " as of " + DATE.format(asOf)
+                        + ". The details for " + year + " are below.";
+    }
+
+    private static String introText(Content content, Purpose purpose, LocalDate asOf) {
+        String year = "the financial year " + content.financialYear() + " (" + DATE.format(content.fromDate())
+                + " to " + DATE.format(content.toDate()) + ")";
+        return purpose == Purpose.SUMMARY
+                ? "Here is where " + content.accountText() + " stands for " + year + ", as of "
+                        + DATE.format(asOf) + "."
+                : "This is a friendly reminder that " + rupees(content.totalPending()) + " is pending on "
+                        + content.accountText() + " as of " + DATE.format(asOf) + ". The details for " + year
+                        + " are below.";
+    }
+
+    /**
+     * One line of the figures table.
+     *
+     * @param highlight whether it is the bottom line, the amount that stands
+     */
+    private record Figure(String label, String amount, boolean highlight) {
+    }
+
+    /**
+     * The year's billed, discount and received, then what is pending. When earlier years left a
+     * balance, the year's own balance and that earlier balance come before the total pending, so the
+     * lines add up to the bottom one.
+     */
+    private static List<Figure> figures(Content content) {
+        List<Figure> figures = new ArrayList<>();
+        figures.add(new Figure("Total billed", rupees(content.billed()), false));
+        figures.add(new Figure("Discount given", rupees(content.discount()), false));
+        figures.add(new Figure("Payments received", rupees(content.received()), false));
+        if (content.earlierBalance().signum() == 0) {
+            figures.add(new Figure(pendingLabel(content.pending()), rupees(content.pending().abs()), true));
+        } else {
+            figures.add(new Figure("Balance for FY " + content.financialYear(), pendingCell(content.pending()),
+                    false));
+            figures.add(new Figure("Balance from earlier years", pendingCell(content.earlierBalance()), false));
+            figures.add(new Figure("Total " + pendingLabel(content.totalPending()).toLowerCase(Locale.ENGLISH),
+                    rupees(content.totalPending().abs()), true));
+        }
+        return figures;
+    }
+
+    /** The closing paragraph, with the attachment's name; HTML-escaped by the caller where needed. */
+    private static String closing(Purpose purpose, String attachment) {
+        return purpose == Purpose.SUMMARY
+                ? "The full ledger for the year is attached as " + attachment + ". If anything does not look "
+                        + "right, please reply to this email."
+                : "Please arrange payment of the pending amount at your earliest convenience. The full ledger "
+                        + "for the year is attached as " + attachment + ". If you have already paid, please "
+                        + "reply with the payment details so we can update our records.";
+    }
+
+    private static String html(Content content, Purpose purpose, String clientName, FirmDetails firm,
+                               LocalDate asOf, String attachmentName) {
         StringBuilder rows = new StringBuilder();
-        rows.append(row("Total billed", rupees(content.billed()), false));
-        rows.append(row("Discount given", rupees(content.discount()), false));
-        rows.append(row("Payments received", rupees(content.received()), false));
-        rows.append(row(pendingLabel(content.pending()), rupees(content.pending().abs()), true));
+        for (Figure figure : figures(content)) {
+            rows.append(row(figure.label(), figure.amount(), figure.highlight()));
+        }
 
         String lastPayment = content.lastPayment() == null ? ""
                 : "<p style=\"margin:16px 0 0;font-size:14px;color:#555555;\">"
@@ -142,20 +251,18 @@ record LedgerSummaryEmail(String subject, String html, String text) {
                 style="max-width:600px;width:100%%;background-color:#ffffff;border-radius:8px;overflow:hidden;">
                 <tr><td style="background-color:%s;padding:24px 32px;color:#ffffff;">
                 <div style="font-size:20px;font-weight:bold;">%s</div>
-                <div style="font-size:14px;opacity:0.85;margin-top:4px;">Ledger summary &middot; FY %s</div>
+                <div style="font-size:14px;opacity:0.85;margin-top:4px;">%s &middot; FY %s</div>
                 </td></tr>
                 <tr><td style="padding:32px;">
                 <p style="margin:0 0 16px;font-size:15px;">Dear %s,</p>
-                <p style="margin:0 0 24px;font-size:15px;line-height:1.5;">Here is where %s stands for the \
-                financial year %s (%s to %s), as of %s.</p>
+                <p style="margin:0 0 24px;font-size:15px;line-height:1.5;">%s</p>
                 <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" \
                 style="border-collapse:collapse;font-size:15px;">
                 %s
                 </table>
                 %s
                 %s
-                <p style="margin:24px 0 0;font-size:15px;line-height:1.5;">The full ledger for the year is \
-                attached as <em>%s</em>. If anything does not look right, please reply to this email.</p>
+                <p style="margin:24px 0 0;font-size:15px;line-height:1.5;">%s</p>
                 <p style="margin:24px 0 0;font-size:15px;">Regards,<br>%s</p>
                 </td></tr>
                 <tr><td style="background-color:#f0f2f5;padding:16px 32px;font-size:12px;color:#777777;\
@@ -166,20 +273,17 @@ record LedgerSummaryEmail(String subject, String html, String text) {
                 </body>
                 </html>
                 """.formatted(
-                escape("Ledger summary for " + content.topic()),
+                escape(heading(purpose) + " for " + content.topic()),
                 BRAND_COLOUR,
-                escape(firmName.isEmpty() ? "Ledger summary" : firmName),
+                escape(firmName.isEmpty() ? heading(purpose) : firmName),
+                heading(purpose),
                 escape(content.financialYear()),
                 escape(clientName),
-                content.accountHtml(),
-                escape(content.financialYear()),
-                DATE.format(content.fromDate()),
-                DATE.format(content.toDate()),
-                DATE.format(asOf),
+                introHtml(content, purpose, asOf),
                 rows,
                 lastPayment,
                 breakdownHtml(content.companies()),
-                escape(attachmentName),
+                closing(purpose, "<em>" + escape(attachmentName) + "</em>"),
                 escape(firmName.isEmpty() ? "Accounts team" : firmName),
                 escape(String.join(" | ", footer(firm))));
     }
@@ -222,21 +326,18 @@ record LedgerSummaryEmail(String subject, String html, String text) {
         return "<td align=\"right\" style=\"" + CELL + "\">" + escape(amount) + "</td>";
     }
 
-    private static String text(Content content, String clientName, FirmDetails firm, LocalDate asOf,
-                               String attachmentName) {
+    private static String text(Content content, Purpose purpose, String clientName, FirmDetails firm,
+                               LocalDate asOf, String attachmentName) {
         String firmName = firm == null || firm.getFirmName() == null ? "Accounts team" : firm.getFirmName();
         StringBuilder text = new StringBuilder()
                 .append("Dear ").append(clientName).append(",\n\n")
-                .append("Here is where ").append(content.accountText())
-                .append(" stands for the financial year ").append(content.financialYear())
-                .append(" (").append(DATE.format(content.fromDate())).append(" to ")
-                .append(DATE.format(content.toDate())).append("), as of ").append(DATE.format(asOf))
-                .append(".\n\n")
-                .append("Total billed:       ").append(rupees(content.billed())).append('\n')
-                .append("Discount given:     ").append(rupees(content.discount())).append('\n')
-                .append("Payments received:  ").append(rupees(content.received())).append('\n')
-                .append(pendingLabel(content.pending())).append(": ")
-                .append(rupees(content.pending().abs())).append('\n');
+                .append(introText(content, purpose, asOf)).append("\n\n");
+        for (Figure figure : figures(content)) {
+            // Lines above the bottom one are padded so their amounts line up.
+            String label = figure.label() + ":";
+            text.append(label).append(figure.highlight() ? " " : " ".repeat(Math.max(1, 20 - label.length())))
+                    .append(figure.amount()).append('\n');
+        }
         if (content.lastPayment() != null) {
             text.append('\n').append(lastPaymentLine(content.lastPayment())).append('\n');
         }
@@ -248,8 +349,7 @@ record LedgerSummaryEmail(String subject, String html, String text) {
                         .append(", pending ").append(pendingCell(company.pending())).append('\n');
             }
         }
-        text.append("\nThe full ledger for the year is attached as ").append(attachmentName)
-                .append(". If anything does not look right, please reply to this email.\n\n")
+        text.append('\n').append(closing(purpose, attachmentName)).append("\n\n")
                 .append("Regards,\n").append(firmName).append('\n');
         List<String> footer = footer(firm);
         if (!footer.isEmpty()) {

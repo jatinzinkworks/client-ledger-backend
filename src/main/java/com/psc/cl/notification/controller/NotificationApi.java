@@ -4,6 +4,7 @@ import com.psc.cl.config.ApiPaths;
 import com.psc.cl.dto.ErrorResponse;
 import com.psc.cl.notification.dto.BulkLedgerSummaryEmailResponse;
 import com.psc.cl.notification.dto.LedgerSummaryEmailResponse;
+import com.psc.cl.notification.dto.PaymentReminderResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -34,6 +35,9 @@ public interface NotificationApi {
 
     /** Path every client is emailed their ledger summary from in one go. */
     String ALL_LEDGER_SUMMARY_EMAILS_PATH = ApiPaths.V1 + "/notifications/ledger-summary-emails";
+
+    /** Path payment reminders are sent to every client with an amount pending from. */
+    String PAYMENT_REMINDERS_PATH = ApiPaths.V1 + "/notifications/payment-reminders";
 
     @Operation(
             summary = "Email a client the ledger summary of one of their companies",
@@ -128,4 +132,31 @@ public interface NotificationApi {
                             schema = @Schema(implementation = ErrorResponse.class)))})
     @PostMapping(ALL_LEDGER_SUMMARY_EMAILS_PATH)
     ResponseEntity<BulkLedgerSummaryEmailResponse> sendAllClientLedgerSummaries();
+
+    @Operation(
+            summary = "Email a payment reminder to every client with an amount pending",
+            description = "Takes no input. Emails every client who owes something across every financial year "
+                    + "(billed less received across all of their companies, to date, is more than zero) an "
+                    + "individual payment reminder for that whole amount, under the subject \"Payment "
+                    + "reminder\". It carries the same details as the ledger summary email for the current "
+                    + "Indian financial year: billed, discount, received, the last payment and each company's "
+                    + "figures, with the year's Excel ledger attached; when earlier years left a balance, it "
+                    + "is shown alongside the year's so the figures add up to the amount asked for. It goes to "
+                    + "the client, copying in their manager. Clients settled or in credit overall are skipped. "
+                    + "Each client is emailed on its own, so one that fails is listed under failures and the "
+                    + "others are still reminded. The response returns once every client has been tried.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200",
+                    description = "The run's outcome, including any clients that could not be reminded",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = PaymentReminderResponse.class))),
+            @ApiResponse(responseCode = "502",
+                    description = "Email is not configured; no client was emailed",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "500", description = "Unexpected server error",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class)))})
+    @PostMapping(PAYMENT_REMINDERS_PATH)
+    ResponseEntity<PaymentReminderResponse> sendPaymentReminders();
 }

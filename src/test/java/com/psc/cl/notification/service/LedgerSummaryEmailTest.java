@@ -131,6 +131,72 @@ class LedgerSummaryEmailTest {
                         + "pending ₹235.00 in credit");
     }
 
+    @Test
+    @DisplayName("frames a payment reminder around the amount pending, with the same figures and company lines")
+    void writesPaymentReminder() {
+        LedgerSummaryEmail email = LedgerSummaryEmail.paymentReminderForClient(reminderSummary("24235.00"),
+                new BigDecimal("24235.00"), reminderCompanies(), "Rohan", firm(), AS_OF,
+                "Rohan_Mehta_Ledger_FY2026-27.xlsx");
+
+        assertThat(email.subject()).isEqualTo("Sharma & Associates: Payment reminder: \u20B924,235.00 pending");
+        assertThat(email.html())
+                .contains("Payment reminder &middot; FY 2026-27")
+                .contains("This is a friendly reminder that <strong>\u20B924,235.00</strong> is pending on your "
+                        + "account as of 14 Oct 2026")
+                .contains("Total billed")
+                .contains("Amount pending")
+                .doesNotContain("Balance from earlier years")
+                .contains("By company")
+                .contains("Please arrange payment of the pending amount")
+                .doesNotContain("Ledger summary &middot;");
+        assertThat(email.text())
+                .contains("This is a friendly reminder that \u20B924,235.00 is pending on your account as of "
+                        + "14 Oct 2026. The details for the financial year 2026-27 (1 Apr 2026 to 31 Mar 2027) "
+                        + "are below.")
+                .contains("Payments received:  \u20B915,000.00")
+                .contains("Amount pending: \u20B924,235.00")
+                .contains("- Mehta Textiles Pvt Ltd: billed \u20B939,235.00")
+                .contains("If you have already paid, please reply with the payment details");
+    }
+
+    @Test
+    @DisplayName("adds the balance from earlier years to the year's, so the figures come to the amount asked for")
+    void writesPaymentReminderWithEarlierBalance() {
+        LedgerSummaryEmail email = LedgerSummaryEmail.paymentReminderForClient(reminderSummary("-500.00"),
+                new BigDecimal("12000.00"), reminderCompanies(), "Rohan", null, AS_OF,
+                "Rohan_Mehta_Ledger_FY2026-27.xlsx");
+
+        assertThat(email.subject()).isEqualTo("Payment reminder: \u20B912,000.00 pending");
+        assertThat(email.html())
+                .contains("<strong>\u20B912,000.00</strong> is pending")
+                .contains("Balance for FY 2026-27")
+                .contains("\u20B9500.00 in credit")
+                .contains("Balance from earlier years")
+                .contains("\u20B912,500.00")
+                .contains("Total amount pending");
+        assertThat(email.text())
+                .contains("Balance for FY 2026-27: \u20B9500.00 in credit")
+                .contains("Balance from earlier years: \u20B912,500.00")
+                .contains("Total amount pending: \u20B912,000.00");
+    }
+
+    private static ClientLedgerSummaryResponse reminderSummary(String pending) {
+        return ClientLedgerSummaryResponse.builder()
+                .financialYear("2026-27")
+                .fromDate(LocalDate.of(2026, 4, 1))
+                .toDate(LocalDate.of(2027, 3, 31))
+                .totalBilled(new BigDecimal("39235.00"))
+                .totalDiscount(new BigDecimal("1750.00"))
+                .totalPaymentReceived(new BigDecimal("15000.00"))
+                .pending(new BigDecimal(pending))
+                .build();
+    }
+
+    private static List<LedgerSummaryEmail.CompanyLine> reminderCompanies() {
+        return List.of(new LedgerSummaryEmail.CompanyLine("Mehta Textiles Pvt Ltd", new BigDecimal("39235.00"),
+                new BigDecimal("15000.00"), new BigDecimal("24235.00")));
+    }
+
     private static CompanyLedgerSummaryResponse summary(String companyName, String pending, boolean paid) {
         return CompanyLedgerSummaryResponse.builder()
                 .companyName(companyName)

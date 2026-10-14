@@ -2,6 +2,7 @@ package com.psc.cl.notification.service;
 
 import com.psc.cl.notification.dto.BulkLedgerSummaryEmailResponse;
 import com.psc.cl.notification.dto.LedgerSummaryEmailResponse;
+import com.psc.cl.notification.dto.PaymentReminderResponse;
 
 import java.util.UUID;
 
@@ -48,4 +49,17 @@ public interface NotificationService {
      *         before any client is tried
      */
     BulkLedgerSummaryEmailResponse sendAllClientLedgerSummaries();
+
+    /**
+     * Emails a payment reminder to every client with an amount pending across every financial year and
+     * all of their companies. It asks for that whole amount, with the same figures, company lines and
+     * attached ledger for the current year as {@link #sendClientLedgerSummary}, plus any balance carried
+     * from earlier years. Clients settled or in credit overall are skipped. Each client is emailed on
+     * its own, so a failure for one is reported and the others are still reminded.
+     *
+     * @return which clients were reminded, how many were skipped, and which could not be reminded
+     * @throws com.psc.cl.notification.exception.EmailDeliveryException when email is not configured,
+     *         before any client is tried
+     */
+    PaymentReminderResponse sendPaymentReminders();
 }

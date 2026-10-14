@@ -19,7 +19,9 @@ import com.psc.cl.notification.config.NotificationProperties;
 import com.psc.cl.notification.dto.BulkLedgerSummaryEmailResponse;
 import com.psc.cl.notification.dto.ClientEmailFailure;
 import com.psc.cl.notification.dto.ClientEmailResult;
+import com.psc.cl.notification.dto.ClientReminderResult;
 import com.psc.cl.notification.dto.LedgerSummaryEmailResponse;
+import com.psc.cl.notification.dto.PaymentReminderResponse;
 import com.psc.cl.notification.exception.EmailDeliveryException;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
@@ -34,6 +36,7 @@ import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 
 import java.io.UnsupportedEncodingException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.LocalDate;
@@ -94,22 +97,90 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     public LedgerSummaryEmailResponse sendClientLedgerSummary(UUID clientId) {
-        LocalDate today = LocalDate.now(clock);
-        FinancialYear year = FinancialYears.containing(today);
-
+        FinancialYear year = FinancialYears.containing(LocalDate.now(clock));
         // Summarising first checks the client exists, so a bad path is a 404 before anything else.
         ClientLedgerSummaryResponse summary = ledgerService.summarizeClient(clientId, year);
+        return sendClientEmail(clientId, summary, year, null);
+    }
+
+    @Override
+    public PaymentReminderResponse sendPaymentReminders() {
+        // Every email would fail the same way, so an unconfigured sender is reported once, up front.
+        requireSender();
+        FinancialYear year = FinancialYears.containing(LocalDate.now(clock));
+        List<Client> clients = clientRepository.findAll(Sort.by("firstName", "lastName", "id"));
+        // What each client owes across every year, in one query; clients without entries are left out.
+        Map<UUID, BigDecimal> pendingByClient = clients.isEmpty() ? Map.of()
+                : ledgerService.pendingByClient(clients.stream().map(Client::getId).toList());
+        log.info("Sending payment reminders to the clients owing among {}", clients.size());
+
+        List<ClientReminderResult> sent = new ArrayList<>();
+        List<ClientEmailFailure> failures = new ArrayList<>();
+        int skipped = 0;
+        for (Client client : clients) {
+            BigDecimal totalPending = pendingByClient.getOrDefault(client.getId(), BigDecimal.ZERO);
+            if (totalPending.signum() <= 0) {
+                // Settled or in credit across every year: nothing to remind them of.
+                skipped++;
+                continue;
+            }
+            String clientName = client.getFirstName() + " " + client.getLastName();
+            try {
+                ClientLedgerSummaryResponse summary = ledgerService.summarizeClient(client.getId(), year);
+                sendClientEmail(client.getId(), summary, year, totalPending);
+                sent.add(ClientReminderResult.builder()
+                        .clientId(client.getId())
+                        .clientName(clientName)
+                        .pending(totalPending)
+                        .build());
+            } catch (RuntimeException e) {
+                // Reported in the response and logged; the remaining clients are still reminded.
+                log.error("Failed to send a payment reminder to client {}", client.getId(), e);
+                failures.add(ClientEmailFailure.builder()
+                        .clientId(client.getId())
+                        .clientName(clientName)
+                        .error(e.getMessage())
+                        .build());
+            }
+        }
+        log.info("Sent payment reminders to {} clients; {} had nothing pending; {} failed", sent.size(), skipped,
+                failures.size());
+
+        return PaymentReminderResponse.builder()
+                .financialYear(year.label())
+                .clientCount(clients.size())
+                .sentCount(sent.size())
+                .skippedCount(skipped)
+                .sent(sent)
+                .failures(failures)
+                .build();
+    }
+
+    /**
+     * Emails a client their figures across all of their companies for the year, with the year's ledger
+     * attached: as a summary, or as a reminder to pay what they owe across every year.
+     *
+     * @param reminderPending what the client owes across every year, to send a payment reminder for; null
+     *                        to send a summary
+     */
+    private LedgerSummaryEmailResponse sendClientEmail(UUID clientId, ClientLedgerSummaryResponse summary,
+                                                       FinancialYear year, BigDecimal reminderPending) {
+        boolean paymentReminder = reminderPending != null;
+        LocalDate today = LocalDate.now(clock);
         Client client = requireClient(clientId);
         List<String> cc = managerEmail(client);
         FirmDetails firm = firm();
         List<LedgerSummaryEmail.CompanyLine> companies = companyLines(clientId, year);
         LedgerExport ledger = ledgerService.exportClient(clientId, year);
 
-        LedgerSummaryEmail email = LedgerSummaryEmail.forClient(summary, companies, client.getFirstName(), firm,
-                today, ledger.fileName());
+        LedgerSummaryEmail email = paymentReminder
+                ? LedgerSummaryEmail.paymentReminderForClient(summary, reminderPending, companies,
+                        client.getFirstName(), firm, today, ledger.fileName())
+                : LedgerSummaryEmail.forClient(summary, companies, client.getFirstName(), firm, today,
+                        ledger.fileName());
         send(client.getEmail(), cc, firm, email, ledger);
-        log.info("Emailed the FY {} ledger summary across {} companies to client {}", year.label(), companies.size(),
-                clientId);
+        log.info("Emailed the FY {} {} across {} companies to client {}", year.label(),
+                paymentReminder ? "payment reminder" : "ledger summary", companies.size(), clientId);
 
         return response(client, null, year, cc, email, ledger);
     }

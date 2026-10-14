@@ -14,7 +14,9 @@ import com.psc.cl.config.ApiPaths;
 import com.psc.cl.notification.dto.BulkLedgerSummaryEmailResponse;
 import com.psc.cl.notification.dto.ClientEmailFailure;
 import com.psc.cl.notification.dto.ClientEmailResult;
+import com.psc.cl.notification.dto.ClientReminderResult;
 import com.psc.cl.notification.dto.LedgerSummaryEmailResponse;
+import com.psc.cl.notification.dto.PaymentReminderResponse;
 import com.psc.cl.notification.exception.EmailDeliveryException;
 import com.psc.cl.notification.service.NotificationService;
 import org.junit.jupiter.api.DisplayName;
@@ -24,6 +26,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -155,6 +158,43 @@ class NotificationControllerTest {
                 .thenThrow(new EmailDeliveryException("Email is not configured"));
 
         mockMvc.perform(post(ApiPaths.V1 + "/notifications/ledger-summary-emails"))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.code").value("EXTERNAL_SERVICE_ERROR"));
+    }
+
+    @Test
+    @DisplayName("sends payment reminders without any input, listing who was reminded and how many were skipped")
+    void sendsPaymentReminders() throws Exception {
+        when(notificationService.sendPaymentReminders()).thenReturn(PaymentReminderResponse.builder()
+                .financialYear("2026-27")
+                .clientCount(3)
+                .sentCount(1)
+                .skippedCount(2)
+                .sent(List.of(ClientReminderResult.builder()
+                        .clientId(CLIENT_ID)
+                        .clientName("Rohan Mehta")
+                        .pending(new BigDecimal("24235.00"))
+                        .build()))
+                .failures(List.of())
+                .build());
+
+        mockMvc.perform(post(ApiPaths.V1 + "/notifications/payment-reminders"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.clientCount").value(3))
+                .andExpect(jsonPath("$.sentCount").value(1))
+                .andExpect(jsonPath("$.skippedCount").value(2))
+                .andExpect(jsonPath("$.sent[0].clientId").value(CLIENT_ID.toString()))
+                .andExpect(jsonPath("$.sent[0].pending").value(24235.0))
+                .andExpect(jsonPath("$.failures").isEmpty());
+    }
+
+    @Test
+    @DisplayName("returns 502 when sending payment reminders while email is not configured")
+    void reportsRemindersNotConfigured() throws Exception {
+        when(notificationService.sendPaymentReminders())
+                .thenThrow(new EmailDeliveryException("Email is not configured"));
+
+        mockMvc.perform(post(ApiPaths.V1 + "/notifications/payment-reminders"))
                 .andExpect(status().isBadGateway())
                 .andExpect(jsonPath("$.code").value("EXTERNAL_SERVICE_ERROR"));
     }

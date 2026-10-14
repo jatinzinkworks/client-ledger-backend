@@ -29,6 +29,7 @@ import com.psc.cl.notification.config.NotificationProperties;
 import com.psc.cl.notification.dto.BulkLedgerSummaryEmailResponse;
 import com.psc.cl.notification.dto.ClientEmailResult;
 import com.psc.cl.notification.dto.LedgerSummaryEmailResponse;
+import com.psc.cl.notification.dto.PaymentReminderResponse;
 import com.psc.cl.notification.exception.EmailDeliveryException;
 import jakarta.mail.Address;
 import jakarta.mail.Message;
@@ -291,6 +292,93 @@ class NotificationServiceImplTest {
 
         verify(clientRepository, never()).findAll(any(Sort.class));
         verify(mailSender, never()).send(any(MimeMessage.class));
+    }
+
+    @Test
+    @DisplayName("reminds only the clients owing across every year, for that whole amount, skipping those in credit")
+    void sendsPaymentReminders() throws MessagingException {
+        Client settled = new Client();
+        settled.setId(UUID.randomUUID());
+        settled.setFirstName("Anita");
+        settled.setLastName("Shah");
+        when(clientRepository.findAll(any(Sort.class))).thenReturn(List.of(settled, client()));
+        // The client owes 24,235.00 for this year and 5,765.00 carried from earlier ones.
+        when(ledgerService.pendingByClient(List.of(settled.getId(), CLIENT_ID))).thenReturn(Map.of(
+                settled.getId(), new BigDecimal("-100.00"), CLIENT_ID, new BigDecimal("30000.00")));
+        when(ledgerService.summarizeClient(CLIENT_ID, YEAR)).thenReturn(clientSummary(CLIENT_ID, "24235.00"));
+        when(clientRepository.findById(CLIENT_ID)).thenReturn(Optional.of(client()));
+        when(managerRepository.findById(MANAGER_ID)).thenReturn(Optional.of(manager()));
+        when(firmDetailsRepository.findFirstByOrderByCreatedAtAsc()).thenReturn(Optional.empty());
+        when(ledgerService.companyBalances(CLIENT_ID, YEAR)).thenReturn(Map.of());
+        when(clientCompanyRepository.findByClientIdOrderByCompanyNameAsc(CLIENT_ID)).thenReturn(List.of());
+        when(ledgerService.exportClient(CLIENT_ID, YEAR))
+                .thenReturn(new LedgerExport("Rohan_Mehta_Ledger_FY2026-27.xlsx", new byte[] {1}));
+        when(mailSender.createMimeMessage()).thenReturn(new MimeMessage((Session) null));
+
+        PaymentReminderResponse response = service("ledger@sharma.example", null).sendPaymentReminders();
+
+        ArgumentCaptor<MimeMessage> sent = ArgumentCaptor.forClass(MimeMessage.class);
+        verify(mailSender).send(sent.capture());
+        assertThat(addresses(sent.getValue().getRecipients(Message.RecipientType.TO)))
+                .containsExactly("rohan@example.com");
+        assertThat(addresses(sent.getValue().getRecipients(Message.RecipientType.CC)))
+                .containsExactly("pranay@sharma.example");
+        assertThat(sent.getValue().getSubject()).isEqualTo("Payment reminder: \u20B930,000.00 pending");
+        verify(ledgerService, never()).summarizeClient(settled.getId(), YEAR);
+        verify(ledgerService, never()).exportClient(settled.getId(), YEAR);
+
+        assertThat(response.getFinancialYear()).isEqualTo("2026-27");
+        assertThat(response.getClientCount()).isEqualTo(2);
+        assertThat(response.getSentCount()).isEqualTo(1);
+        assertThat(response.getSkippedCount()).isEqualTo(1);
+        assertThat(response.getSent()).singleElement().satisfies(reminded -> {
+            assertThat(reminded.getClientId()).isEqualTo(CLIENT_ID);
+            assertThat(reminded.getPending()).isEqualTo(new BigDecimal("30000.00"));
+        });
+        assertThat(response.getFailures()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("reports a client whose reminder fails and still reminds the rest")
+    void continuesRemindersPastFailure() {
+        UUID failingId = UUID.randomUUID();
+        Client failing = new Client();
+        failing.setId(failingId);
+        failing.setFirstName("Anita");
+        failing.setLastName("Shah");
+        when(clientRepository.findAll(any(Sort.class))).thenReturn(List.of(failing));
+        when(ledgerService.pendingByClient(List.of(failingId))).thenReturn(Map.of(failingId, new BigDecimal("500.00")));
+        when(ledgerService.summarizeClient(failingId, YEAR)).thenReturn(clientSummary(failingId, "500.00"));
+        when(clientRepository.findById(failingId)).thenReturn(Optional.empty());
+
+        PaymentReminderResponse response = service("ledger@sharma.example", null).sendPaymentReminders();
+
+        assertThat(response.getSentCount()).isZero();
+        assertThat(response.getFailures()).singleElement()
+                .satisfies(failure -> assertThat(failure.getClientName()).isEqualTo("Anita Shah"));
+        verify(mailSender, never()).send(any(MimeMessage.class));
+    }
+
+    @Test
+    @DisplayName("refuses to send reminders when no from address is configured, trying none")
+    void rejectsRemindersWhenNotConfigured() {
+        assertThatThrownBy(() -> service(null, null).sendPaymentReminders())
+                .isInstanceOf(EmailDeliveryException.class);
+
+        verify(clientRepository, never()).findAll(any(Sort.class));
+    }
+
+    private static ClientLedgerSummaryResponse clientSummary(UUID clientId, String pending) {
+        return ClientLedgerSummaryResponse.builder()
+                .clientId(clientId)
+                .financialYear("2026-27")
+                .fromDate(LocalDate.of(2026, 4, 1))
+                .toDate(LocalDate.of(2027, 3, 31))
+                .totalBilled(new BigDecimal("39235.00"))
+                .totalPaymentReceived(new BigDecimal("15000.00"))
+                .pending(new BigDecimal(pending))
+                .totalDiscount(new BigDecimal("1750.00"))
+                .build();
     }
 
     private static ClientCompany company(UUID id, String name) {
