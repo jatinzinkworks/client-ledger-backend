@@ -4,6 +4,7 @@ import com.psc.cl.client.dto.ClientRequest;
 import com.psc.cl.client.dto.ClientResponse;
 import com.psc.cl.client.dto.ClientSummaryResponse;
 import com.psc.cl.client.dto.ClientUpdateRequest;
+import com.psc.cl.client.dto.WhatsAppOptInRequest;
 import com.psc.cl.config.ApiPaths;
 import com.psc.cl.dto.ErrorResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -19,6 +20,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -41,6 +43,9 @@ public interface ClientApi {
 
     /** Path of a single client, relative to {@link #BASE_PATH}. */
     String BY_ID_PATH = "/{id}";
+
+    /** Path of a client's WhatsApp opt-in, relative to {@link #BASE_PATH}. */
+    String WHATSAPP_OPT_IN_PATH = BY_ID_PATH + "/whatsapp-opt-in";
 
     @Operation(
             summary = "Create a client",
@@ -94,7 +99,8 @@ public interface ClientApi {
             description = "Replaces a client's own fields wholesale. The client's companies are left "
                     + "as they are; add or delete them through the company endpoints. An omitted "
                     + "client discount resets to zero. Companies without a discount of their own take the "
-                    + "new client discount.")
+                    + "new client discount. The client's WhatsApp opt-in is left as it is; record it with "
+                    + "PATCH /clients/{id}/whatsapp-opt-in.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Client updated",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
@@ -119,6 +125,39 @@ public interface ClientApi {
                     description = "New content for the client, excluding their companies",
                     required = true)
             @Valid @RequestBody ClientUpdateRequest request);
+
+    @Operation(
+            summary = "Record a client's WhatsApp opt-in",
+            description = "Sets whether the client agrees to receive WhatsApp messages from the firm, such as "
+                    + "payment reminders, and changes nothing else. WhatsApp messages are only sent to clients "
+                    + "who have opted in. This, and creating a client, are the only ways to change it: updating "
+                    + "a client leaves it as it is. When a client changes from opted out to opted in, and the "
+                    + "WHATSAPP_OPT_IN_CONFIRMATION_TEMPLATE setting names a template, they are sent a WhatsApp "
+                    + "message confirming it in the background once the change is saved. The response does not "
+                    + "wait for it and does not depend on it: if it cannot be sent, the opt-in still stands and "
+                    + "the failure is logged.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Opt-in recorded; the client as now stored",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ClientResponse.class))),
+            @ApiResponse(responseCode = "400",
+                    description = "whatsappOptIn is missing, or the identifier is not a valid UUID",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "No client carries this identifier",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "500", description = "Unexpected server error",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class)))})
+    @PatchMapping(value = WHATSAPP_OPT_IN_PATH, consumes = MediaType.APPLICATION_JSON_VALUE)
+    ResponseEntity<ClientResponse> updateWhatsAppOptIn(
+            @Parameter(description = "Identifier of the client", required = true,
+                    example = "7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35")
+            @PathVariable UUID id,
+            @io.swagger.v3.oas.annotations.parameters.RequestBody(
+                    description = "Whether the client agrees to receive WhatsApp messages", required = true)
+            @Valid @RequestBody WhatsAppOptInRequest request);
 
     @Operation(
             summary = "Delete a client",

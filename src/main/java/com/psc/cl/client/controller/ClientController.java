@@ -4,6 +4,7 @@ import com.psc.cl.client.dto.ClientRequest;
 import com.psc.cl.client.dto.ClientResponse;
 import com.psc.cl.client.dto.ClientSummaryResponse;
 import com.psc.cl.client.dto.ClientUpdateRequest;
+import com.psc.cl.client.dto.WhatsAppOptInRequest;
 import com.psc.cl.client.service.ClientService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -38,6 +39,12 @@ public class ClientController implements ClientApi {
     public ResponseEntity<ClientResponse> updateClient(UUID id, ClientUpdateRequest request) {
         log.debug("Received request to update client {}", id);
         return ResponseEntity.ok(clientService.updateClient(id, request));
+    }
+
+    @Override
+    public ResponseEntity<ClientResponse> updateWhatsAppOptIn(UUID id, WhatsAppOptInRequest request) {
+        log.debug("Received request to set the WhatsApp opt-in of client {}", id);
+        return ResponseEntity.ok(clientService.updateWhatsAppOptIn(id, request));
     }
 
     @Override

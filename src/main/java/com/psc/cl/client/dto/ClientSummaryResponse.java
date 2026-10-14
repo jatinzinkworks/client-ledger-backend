@@ -49,6 +49,10 @@ public class ClientSummaryResponse {
     @Schema(description = "Discount granted to the client, as a percentage", example = "10.00")
     BigDecimal discountPercent;
 
+    @Schema(description = "Whether the client has agreed to receive WhatsApp messages from the firm",
+            example = "true")
+    boolean whatsappOptIn;
+
     @ArraySchema(arraySchema = @Schema(description = "Names of the companies the client holds, ordered by name"),
             schema = @Schema(example = "Mehta Textiles Pvt Ltd"))
     List<String> companyNames;
@@ -76,6 +80,7 @@ public class ClientSummaryResponse {
                 .managerId(entity.getManagerId())
                 .managerName(ClientResponse.managerName(manager))
                 .discountPercent(entity.getDiscountPercent())
+                .whatsappOptIn(entity.isWhatsappOptIn())
                 .companyNames(entity.getCompanies().stream()
                         .map(ClientCompany::getCompanyName)
                         .sorted(String.CASE_INSENSITIVE_ORDER)

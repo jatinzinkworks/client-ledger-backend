@@ -5,11 +5,13 @@ import com.psc.cl.client.dto.ClientRequest;
 import com.psc.cl.client.dto.ClientResponse;
 import com.psc.cl.client.dto.ClientSummaryResponse;
 import com.psc.cl.client.dto.ClientUpdateRequest;
+import com.psc.cl.client.dto.WhatsAppOptInRequest;
 import com.psc.cl.client.exception.AssignedManagerNotFoundException;
 import com.psc.cl.client.exception.ClientHasServicesException;
 import com.psc.cl.client.exception.ClientNotFoundException;
 import com.psc.cl.client.model.Client;
 import com.psc.cl.client.model.ClientCompany;
+import com.psc.cl.client.model.ClientOptedInToWhatsApp;
 import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.client.repository.ServiceAssignmentRepository;
 import com.psc.cl.ledger.service.LedgerService;
@@ -18,6 +20,7 @@ import com.psc.cl.managercatalog.repository.ManagerRepository;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -53,6 +56,8 @@ public class ClientServiceImpl implements ClientService {
 
     private final LedgerService ledgerService;
 
+    private final ApplicationEventPublisher eventPublisher;
+
     @Override
     @Transactional
     public ClientResponse createClient(ClientRequest request) {
@@ -60,11 +65,16 @@ public class ClientServiceImpl implements ClientService {
 
         Client client = new Client();
         applyClient(request, client);
+        // Consent is recorded here or through updateWhatsAppOptIn only, never by a client update.
+        client.setWhatsappOptIn(Boolean.TRUE.equals(request.whatsappOptIn()));
         request.companies().forEach(company -> client.addCompany(Companies.newCompany(company)));
 
         Client saved = clientRepository.save(client);
         log.info("Created client {} assigned to manager {} with {} company(ies)",
                 saved.getId(), saved.getManagerId(), saved.getCompanies().size());
+        if (saved.isWhatsappOptIn()) {
+            eventPublisher.publishEvent(new ClientOptedInToWhatsApp(saved.getId()));
+        }
 
         return ClientResponse.from(saved, manager);
     }
@@ -80,6 +90,23 @@ public class ClientServiceImpl implements ClientService {
         log.info("Updated client {} assigned to manager {}", id, client.getManagerId());
 
         return ClientResponse.from(client, manager);
+    }
+
+    @Override
+    @Transactional
+    public ClientResponse updateWhatsAppOptIn(UUID id, WhatsAppOptInRequest request) {
+        Client client = clientRepository.findById(id).orElseThrow(() -> new ClientNotFoundException(id));
+        boolean wasOptedIn = client.isWhatsappOptIn();
+        client.setWhatsappOptIn(request.whatsappOptIn());
+        // Flushing here stamps updatedAt before it is returned.
+        clientRepository.flush();
+        log.info("Client {} {} WhatsApp messages", id, client.isWhatsappOptIn() ? "opted in to" : "opted out of");
+        // Only a change to opted in is news; saving an opted-in client again is not.
+        if (!wasOptedIn && client.isWhatsappOptIn()) {
+            eventPublisher.publishEvent(new ClientOptedInToWhatsApp(id));
+        }
+
+        return ClientResponse.from(client, requireManager(client.getManagerId()));
     }
 
     @Override
@@ -134,7 +161,11 @@ public class ClientServiceImpl implements ClientService {
                 .toList();
     }
 
-    /** An omitted discount resets to the default, so nothing is left behind from a previous version. */
+    /**
+     * An omitted discount resets to the default, so nothing is left behind from a previous version.
+     * The WhatsApp opt-in is not among these fields: it records the client's consent, so it changes
+     * only when that is recorded, never as a side effect of editing the client.
+     */
     private void applyClient(ClientDetails request, Client client) {
         client.setFirstName(request.firstName().trim());
         client.setLastName(request.lastName().trim());

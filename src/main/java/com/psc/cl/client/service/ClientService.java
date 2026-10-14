@@ -4,6 +4,7 @@ import com.psc.cl.client.dto.ClientRequest;
 import com.psc.cl.client.dto.ClientResponse;
 import com.psc.cl.client.dto.ClientSummaryResponse;
 import com.psc.cl.client.dto.ClientUpdateRequest;
+import com.psc.cl.client.dto.WhatsAppOptInRequest;
 
 import java.util.List;
 import java.util.UUID;
@@ -30,7 +31,8 @@ public interface ClientService {
      * Replaces a client's own fields wholesale, leaving their companies as they are.
      *
      * <p>An omitted client discount resets to zero. Companies without a discount of their own
-     * take the new client discount.
+     * take the new client discount. The WhatsApp opt-in is left as it is; see
+     * {@link #updateWhatsAppOptIn}.
      *
      * @param id      the client to replace
      * @param request the new content
@@ -41,6 +43,20 @@ public interface ClientService {
      *         when the assigned manager does not exist
      */
     ClientResponse updateClient(UUID id, ClientUpdateRequest request);
+
+    /**
+     * Records whether a client agrees to receive WhatsApp messages, leaving everything else of theirs
+     * as it is. WhatsApp messages, such as payment reminders, are only sent to clients who have.
+     * A change from opted out to opted in publishes
+     * {@link com.psc.cl.client.model.ClientOptedInToWhatsApp}.
+     *
+     * @param id      the client
+     * @param request whether the client agrees
+     * @return the updated client
+     * @throws com.psc.cl.client.exception.ClientNotFoundException
+     *         when no client carries this identifier
+     */
+    ClientResponse updateWhatsAppOptIn(UUID id, WhatsAppOptInRequest request);
 
     /**
      * Removes a client together with their companies.
