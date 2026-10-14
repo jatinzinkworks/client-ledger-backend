@@ -13,6 +13,8 @@ tags:
   description: The firm's position across every client
 - name: Global Settings
   description: "Tenant-wide configuration for the Client Ledger, such as payment terms"
+- name: Notifications
+  description: Emails sent to clients about their accounts
 - name: Client Services
   description: Services from the Service Catalog delivered to a client's companies
 - name: Clients
@@ -1191,6 +1193,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/notifications/ledger-summary-emails:
+    post:
+      tags:
+      - Notifications
+      summary: Email every client their ledger summary
+      description: "Takes no input. Emails every client, one after another, their\
+        \ ledger summary for the current Indian financial year across all of their\
+        \ companies, exactly as emailing one client does: to the client, copying in\
+        \ their manager, with the year's Excel ledger attached. Each client is emailed\
+        \ on its own, so one that fails is listed under failures and the others are\
+        \ still emailed. Clients with nothing billed or received in the year are emailed\
+        \ too. The response returns once every client has been tried, so it takes\
+        \ longer the more clients there are."
+      operationId: sendAllClientLedgerSummaries
+      responses:
+        "200":
+          description: "The run's outcome, including any clients that could not be\
+            \ emailed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkLedgerSummaryEmailResponse"
+        "502":
+          description: Email is not configured; no client was emailed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /psc/cl/v1/managers:
     get:
       tags:
@@ -1247,6 +1283,31 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/ledger-entries/post-due:
+    post:
+      tags:
+      - Ledger
+      summary: Post due services to the ledgers of every company
+      description: "Takes no input. Goes through every company of every client and\
+        \ posts its due services to its ledger, exactly as posting for one company\
+        \ does: every service fallen due on or before today and not yet billed is\
+        \ billed once. Each company is posted on its own, so a failure for one is\
+        \ listed under failures and the others are still posted. Running it again\
+        \ when nothing new is due creates nothing."
+      operationId: postAllDueServices
+      responses:
+        "200":
+          description: "The run's outcome, including any companies that failed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkPostingResponse"
         "500":
           description: Unexpected server error
           content:
@@ -1604,6 +1665,62 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/clients/{clientId}/ledger-summary-email:
+    post:
+      tags:
+      - Notifications
+      summary: Email a client the ledger summary across all of their companies
+      description: "Emails the client a summary of their ledger for the current Indian\
+        \ financial year (1 April to 31 March) across all of their companies together:\
+        \ what was billed, the discount given, what was received, what is pending\
+        \ and the last payment, followed by each company's billed, received and pending\
+        \ amounts. The year's full ledger is attached as an Excel workbook with a\
+        \ sheet per company. It goes to the client's email address, copying in their\
+        \ manager, from the address set in MAIL_FROM; replies go to the firm's email\
+        \ from Global Settings when one is saved. The email is sent before the response\
+        \ returns."
+      operationId: sendClientLedgerSummary
+      parameters:
+      - name: clientId
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      responses:
+        "200":
+          description: The email was sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LedgerSummaryEmailResponse"
+        "400":
+          description: The identifier is not a valid UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No client carries this identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: "Email is not configured, or the mail server refused the email\
+            \ or could not be reached; nothing was sent"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /psc/cl/v1/clients/{clientId}/companies/{companyId}/services:
     get:
       tags:
@@ -1919,6 +2036,69 @@ paths:
         "404":
           description: "No client carries this identifier, or the client holds no\
             \ such company"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/clients/{clientId}/companies/{companyId}/ledger-summary-email:
+    post:
+      tags:
+      - Notifications
+      summary: Email a client the ledger summary of one of their companies
+      description: "Emails the client a summary of the company's ledger for the current\
+        \ Indian financial year (1 April to 31 March): what was billed, the discount\
+        \ given, what was received, what is pending and the last payment, with the\
+        \ year's full ledger attached as an Excel workbook. It goes to the client's\
+        \ email address, copying in their manager, from the address set in MAIL_FROM;\
+        \ replies go to the firm's email from Global Settings when one is saved. The\
+        \ email is sent before the response returns."
+      operationId: sendLedgerSummary
+      parameters:
+      - name: clientId
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: companyId
+        in: path
+        description: Identifier of the company to summarise
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+      responses:
+        "200":
+          description: The email was sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LedgerSummaryEmailResponse"
+        "400":
+          description: An identifier is not a valid UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "No client carries this identifier, or the client holds no\
+            \ such company"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: "Email is not configured, or the mail server refused the email\
+            \ or could not be reached; nothing was sent"
           content:
             application/json:
               schema:
@@ -4013,6 +4193,143 @@ components:
       - discountPercent
       - gstRatePercent
       - serviceFee
+    BulkLedgerSummaryEmailResponse:
+      type: object
+      description: The outcome of emailing every client their ledger summary
+      properties:
+        financialYear:
+          type: string
+          description: "Indian financial year summarised: the current one"
+          example: 2026-27
+        clientCount:
+          type: integer
+          format: int32
+          description: How many clients there are
+          example: 42
+        sentCount:
+          type: integer
+          format: int32
+          description: How many clients were emailed
+          example: 41
+        sent:
+          type: array
+          description: "The clients emailed, by name"
+          items:
+            $ref: "#/components/schemas/ClientEmailResult"
+        failures:
+          type: array
+          description: The clients that could not be emailed; empty when every email
+            was sent. The other clients are emailed regardless
+          items:
+            $ref: "#/components/schemas/ClientEmailFailure"
+    ClientEmailResult:
+      type: object
+      description: A client emailed their ledger summary in a run
+      properties:
+        clientId:
+          type: string
+          format: uuid
+          description: Identifier of the client
+          example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+        clientName:
+          type: string
+          description: Name of the client
+          example: Rohan Mehta
+    ClientEmailFailure:
+      type: object
+      description: A client whose ledger summary could not be emailed in a run
+      properties:
+        clientId:
+          type: string
+          format: uuid
+          description: Identifier of the client
+          example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+        clientName:
+          type: string
+          description: Name of the client
+          example: Rohan Mehta
+        error:
+          type: string
+          description: Why the email was not sent; nothing was sent to the client
+          example: "The ledger summary email could not be sent: the mail server refused\
+            \ it or could not be reached"
+    BulkPostingResponse:
+      type: object
+      description: The outcome of posting the due services of every company of every
+        client
+      properties:
+        asOf:
+          type: string
+          format: date
+          description: "The day services were posted as due on: today"
+          example: 2026-10-14
+        companyCount:
+          type: integer
+          format: int32
+          description: How many companies were looked at
+          example: 97
+        entriesPosted:
+          type: integer
+          format: int32
+          description: How many ledger entries were posted across every company
+          example: 41
+        companies:
+          type: array
+          description: "The companies something was posted for, in client then company\
+            \ order; those with nothing due are left out"
+          items:
+            $ref: "#/components/schemas/CompanyPostingResult"
+        failures:
+          type: array
+          description: The companies posting failed for; empty when every company
+            succeeded. Other companies are posted regardless
+          items:
+            $ref: "#/components/schemas/CompanyPostingFailure"
+    CompanyPostingResult:
+      type: object
+      description: What was posted to one company's ledger in a run
+      properties:
+        clientId:
+          type: string
+          format: uuid
+          description: Identifier of the client
+          example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+        companyId:
+          type: string
+          format: uuid
+          description: Identifier of the company
+          example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+        companyName:
+          type: string
+          description: Name of the company
+          example: Mehta Textiles Pvt Ltd
+        entriesPosted:
+          type: integer
+          format: int32
+          description: How many ledger entries were posted for the company
+          example: 3
+    CompanyPostingFailure:
+      type: object
+      description: A company whose due services could not be posted in a run
+      properties:
+        clientId:
+          type: string
+          format: uuid
+          description: Identifier of the client
+          example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+        companyId:
+          type: string
+          format: uuid
+          description: Identifier of the company
+          example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+        companyName:
+          type: string
+          description: Name of the company
+          example: Mehta Textiles Pvt Ltd
+        error:
+          type: string
+          description: Why posting failed; nothing was posted for the company
+          example: Catalog service 3f6c2a1e-9b4d-4e7a-8c15-2d0b7e9f4a61 does not exist
     PaymentTermsRequest:
       type: object
       description: Payment terms to store under Global Settings
@@ -4234,6 +4551,48 @@ components:
       - lastName
       - managerId
       - phone
+    LedgerSummaryEmailResponse:
+      type: object
+      description: Confirms a ledger summary email was sent
+      properties:
+        clientId:
+          type: string
+          format: uuid
+          description: Identifier of the client
+          example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+        companyId:
+          type: string
+          format: uuid
+          description: Identifier of the company summarised. Absent when the summary
+            spans all of the client's companies
+          example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+        financialYear:
+          type: string
+          description: "Indian financial year summarised: the current one"
+          example: 2026-27
+        to:
+          type: string
+          description: "Address the email was sent to: the client's"
+          example: rohan.mehta@example.com
+        cc:
+          type: array
+          description: "Addresses copied in: the client's manager"
+          items:
+            type: string
+            example: pranay.singhal@example.com
+        subject:
+          type: string
+          description: Subject of the email
+          example: "Your ledger summary for Mehta Textiles Pvt Ltd, FY 2026-27"
+        attachmentName:
+          type: string
+          description: Name of the Excel ledger attached
+          example: Mehta_Textiles_Pvt_Ltd_Ledger_FY2026-27.xlsx
+        sentAt:
+          type: string
+          format: date-time
+          description: When the email was handed to the SMTP server
+          example: 2026-10-14T05:30:00Z
     ServiceAssignmentRequest:
       type: object
       description: Catalog service to deliver to the company

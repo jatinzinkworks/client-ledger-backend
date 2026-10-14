@@ -35,9 +35,35 @@ spring:
   jackson:
     default-property-inclusion: non_null
 
+  mail:
+    # SMTP server emails to clients are sent through, such as smtp.gmail.com or smtp.office365.com.
+    # Credentials come only from the environment; for Gmail and Microsoft 365 use an app password.
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:jatin.marwaha@gmail.com}
+    password: ${MAIL_PASSWORD:oufsyalaubwcpuqa}
+    default-encoding: UTF-8
+    properties:
+      mail:
+        smtp:
+          auth: ${MAIL_SMTP_AUTH:true}
+          starttls:
+            enable: ${MAIL_SMTP_STARTTLS:true}
+            required: ${MAIL_SMTP_STARTTLS:true}
+          # Milliseconds; keeps a slow or unreachable server from holding a request open.
+          connectiontimeout: ${MAIL_TIMEOUT_MS:10000}
+          timeout: ${MAIL_TIMEOUT_MS:10000}
+          writetimeout: ${MAIL_TIMEOUT_MS:10000}
+
 client-ledger:
   # Zone whose calendar decides "today" for billing, such as which services are due for the ledger.
   business-time-zone: ${BUSINESS_TIME_ZONE:Asia/Kolkata}
+
+  notification:
+    # Address emails are sent from; must be one the SMTP account may send as. Defaults to its username.
+    from: ${MAIL_FROM:${MAIL_USERNAME:jatin.marwaha@gmail.com}}
+    # Name shown beside the from address; the firm's name from Global Settings when left empty.
+    from-name: ${MAIL_FROM_NAME:Jatin Marwaha}
 
 server:
   port: ${SERVER_PORT:8080}
@@ -51,6 +77,10 @@ management:
     health:
       probes:
         enabled: true
+  health:
+    mail:
+      # Off by default so an unreachable SMTP server does not mark the service down for its probes.
+      enabled: ${MAIL_HEALTH_ENABLED:false}
 
 springdoc:
   api-docs:

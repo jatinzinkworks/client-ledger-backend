@@ -26,6 +26,14 @@ public interface ClientCompanyRepository extends JpaRepository<ClientCompany, UU
     Optional<ClientCompany> findByIdAndClientId(UUID id, UUID clientId);
 
     /**
+     * Lists the companies of one client, by name.
+     *
+     * @param clientId the client
+     * @return the client's companies; empty when they have none or the client does not exist
+     */
+    List<ClientCompany> findByClientIdOrderByCompanyNameAsc(UUID clientId);
+
+    /**
      * Lists every company of every client with its client and name, in one query and without loading
      * the entities, ordered by client and then company so the order is stable.
      *
