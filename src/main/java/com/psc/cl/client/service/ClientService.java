@@ -1,5 +1,6 @@
 package com.psc.cl.client.service;
 
+import com.psc.cl.client.dto.ClientManagerBulkUpdateRequest;
 import com.psc.cl.client.dto.ClientRequest;
 import com.psc.cl.client.dto.ClientResponse;
 import com.psc.cl.client.dto.ClientSummaryResponse;
@@ -18,12 +19,15 @@ public interface ClientService {
      * Adds a new client together with their companies.
      *
      * <p>The client discount defaults to zero, and every company that does not set its own
-     * discount is given the client's.
+     * discount is given the client's. Each company bringing an opening balance other than zero has
+     * it recorded in its ledger, in the same transaction.
      *
      * @param request the client to create
      * @return the created client, including the generated identifiers
      * @throws com.psc.cl.client.exception.AssignedManagerNotFoundException
      *         when the assigned manager does not exist
+     * @throws com.psc.cl.ledger.exception.FutureOpeningBalanceDateException
+     *         when an opening balance is dated after today; nothing is created
      */
     ClientResponse createClient(ClientRequest request);
 
@@ -59,6 +63,20 @@ public interface ClientService {
     ClientResponse updateWhatsAppOptIn(UUID id, WhatsAppOptInRequest request);
 
     /**
+     * Assigns several clients to one manager at once, all or nothing: when any client named does not
+     * exist, none is reassigned. Only the assigned manager changes; everything else about each client
+     * is left as it is. A client named more than once is assigned once.
+     *
+     * @param request the manager and the clients to assign to them
+     * @return the updated clients, in the order the request first named them
+     * @throws com.psc.cl.client.exception.AssignedManagerNotFoundException
+     *         when the manager does not exist
+     * @throws com.psc.cl.client.exception.ClientsNotFoundException
+     *         when any identifier names no client, listing each such identifier
+     */
+    List<ClientSummaryResponse> updateManager(ClientManagerBulkUpdateRequest request);
+
+    /**
      * Removes a client together with their companies.
      *
      * @param id the client to remove
@@ -66,6 +84,8 @@ public interface ClientService {
      *         when no client carries this identifier
      * @throws com.psc.cl.client.exception.ClientHasServicesException
      *         when services are still assigned to any of the client's companies
+     * @throws com.psc.cl.client.exception.ClientHasLedgerEntriesException
+     *         when any of the client's companies has ledger entries, such as payments or an opening balance
      */
     void deleteClient(UUID id);
 

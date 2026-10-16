@@ -13,7 +13,7 @@ public interface NotificationService {
 
     /**
      * Emails a client the summary of one of their companies' ledgers for the current financial year,
-     * with the year's full ledger attached as an Excel workbook. It goes to the client's email,
+     * with the year's ledger statement attached as a PDF. It goes to the client's email,
      * copying in their manager.
      *
      * @param clientId  the client
@@ -28,8 +28,9 @@ public interface NotificationService {
 
     /**
      * Emails a client the summary of their ledger for the current financial year across all of their
-     * companies together, with a line for each company, and the year's full ledger attached as an
-     * Excel workbook with a sheet per company. It goes to the client's email, copying in their manager.
+     * companies together, with a line for each company, and the year's ledger statement attached as a
+     * PDF with each company's details on a page of its own. It goes to the client's email, copying in
+     * their manager.
      *
      * @param clientId the client
      * @return who the email went to and what it held

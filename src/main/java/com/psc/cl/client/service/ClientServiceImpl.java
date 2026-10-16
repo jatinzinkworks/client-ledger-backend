@@ -1,19 +1,24 @@
 package com.psc.cl.client.service;
 
 import com.psc.cl.client.dto.ClientDetails;
+import com.psc.cl.client.dto.ClientManagerBulkUpdateRequest;
 import com.psc.cl.client.dto.ClientRequest;
 import com.psc.cl.client.dto.ClientResponse;
 import com.psc.cl.client.dto.ClientSummaryResponse;
 import com.psc.cl.client.dto.ClientUpdateRequest;
+import com.psc.cl.client.dto.NewCompanyRequest;
 import com.psc.cl.client.dto.WhatsAppOptInRequest;
 import com.psc.cl.client.exception.AssignedManagerNotFoundException;
+import com.psc.cl.client.exception.ClientHasLedgerEntriesException;
 import com.psc.cl.client.exception.ClientHasServicesException;
 import com.psc.cl.client.exception.ClientNotFoundException;
+import com.psc.cl.client.exception.ClientsNotFoundException;
 import com.psc.cl.client.model.Client;
 import com.psc.cl.client.model.ClientCompany;
 import com.psc.cl.client.model.ClientOptedInToWhatsApp;
 import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.client.repository.ServiceAssignmentRepository;
+import com.psc.cl.exception.ResourceInUseException;
 import com.psc.cl.ledger.service.LedgerService;
 import com.psc.cl.managercatalog.model.Manager;
 import com.psc.cl.managercatalog.repository.ManagerRepository;
@@ -27,6 +32,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -70,8 +76,9 @@ public class ClientServiceImpl implements ClientService {
         request.companies().forEach(company -> client.addCompany(Companies.newCompany(company)));
 
         Client saved = clientRepository.save(client);
-        log.info("Created client {} assigned to manager {} with {} company(ies)",
-                saved.getId(), saved.getManagerId(), saved.getCompanies().size());
+        int openingBalances = recordOpeningBalances(saved, request.companies());
+        log.info("Created client {} assigned to manager {} with {} company(ies), {} with an opening balance",
+                saved.getId(), saved.getManagerId(), saved.getCompanies().size(), openingBalances);
         if (saved.isWhatsappOptIn()) {
             eventPublisher.publishEvent(new ClientOptedInToWhatsApp(saved.getId()));
         }
@@ -111,6 +118,47 @@ public class ClientServiceImpl implements ClientService {
 
     @Override
     @Transactional
+    public List<ClientSummaryResponse> updateManager(ClientManagerBulkUpdateRequest request) {
+        Manager manager = requireAssignableManager(request.managerId());
+        // Every mention of a client asks for the same manager, so a repeat is assigned once.
+        Set<UUID> clientIds = new LinkedHashSet<>(request.clientIds());
+
+        // One query for every client, and every unknown identifier reported together.
+        Map<UUID, Client> clientsById = clientRepository.findByIdIn(clientIds).stream()
+                .collect(Collectors.toMap(Client::getId, Function.identity()));
+        List<UUID> missing = clientIds.stream()
+                .filter(id -> !clientsById.containsKey(id))
+                .toList();
+        if (!missing.isEmpty()) {
+            throw new ClientsNotFoundException(missing);
+        }
+
+        List<Client> clients = clientIds.stream().map(clientsById::get).toList();
+        clients.forEach(client -> {
+            log.debug("Reassigning client {} from manager {} to {}", client.getId(), client.getManagerId(),
+                    manager.getId());
+            client.setManagerId(manager.getId());
+        });
+
+        try {
+            // Flushing here stamps updatedAt before the clients are returned.
+            clientRepository.flush();
+        } catch (DataIntegrityViolationException ex) {
+            // The foreign key caught the manager being deleted concurrently, after the check above.
+            log.warn("Reassigning clients to manager {} was rejected by the database", manager.getId(), ex);
+            throw new AssignedManagerNotFoundException(manager.getId());
+        }
+        log.info("Assigned {} client(s) to manager {}", clients.size(), manager.getId());
+
+        Map<UUID, BigDecimal> pending = ledgerService.pendingByClient(List.copyOf(clientIds));
+        return clients.stream()
+                .map(client -> ClientSummaryResponse.from(client, manager,
+                        pending.getOrDefault(client.getId(), NOTHING_PENDING)))
+                .toList();
+    }
+
+    @Override
+    @Transactional
     public void deleteClient(UUID id) {
         Client client = clientRepository.findById(id).orElseThrow(() -> new ClientNotFoundException(id));
 
@@ -120,14 +168,20 @@ public class ClientServiceImpl implements ClientService {
         if (!companyIds.isEmpty() && serviceAssignmentRepository.existsByCompanyIdIn(companyIds)) {
             throw new ClientHasServicesException(id);
         }
+        // Payments and opening balances need no service, so a client without services may still have them.
+        if (ledgerService.clientHasEntries(id)) {
+            throw new ClientHasLedgerEntriesException(id);
+        }
 
         try {
             clientRepository.delete(client);
             clientRepository.flush();
         } catch (DataIntegrityViolationException ex) {
-            // The foreign key caught a service assigned concurrently, after the check above.
-            log.warn("Delete of client {} was rejected by the database: services are assigned", id, ex);
-            throw new ClientHasServicesException(id);
+            // A foreign key caught a service assigned, or a ledger entry recorded, after the checks above.
+            log.warn("Delete of client {} was rejected by the database: services or ledger entries were added",
+                    id, ex);
+            throw new ResourceInUseException("Client " + id + " was given a service or a ledger entry while it "
+                    + "was being deleted, and cannot be deleted.");
         }
         log.info("Deleted client {} with {} company(ies)", id, companyIds.size());
     }
@@ -159,6 +213,27 @@ public class ClientServiceImpl implements ClientService {
                         assignedManager(managersById.get(client.getManagerId()), client.getManagerId()),
                         pending.getOrDefault(client.getId(), NOTHING_PENDING)))
                 .toList();
+    }
+
+    /**
+     * Records the opening balance of each new company that brings one, in the same transaction, so a
+     * balance that cannot be recorded leaves no client behind either.
+     *
+     * @param client    the saved client, its companies in the order of the request
+     * @param companies the companies as requested
+     * @return how many opening balances were recorded
+     */
+    private int recordOpeningBalances(Client client, List<NewCompanyRequest> companies) {
+        int recorded = 0;
+        for (int i = 0; i < companies.size(); i++) {
+            NewCompanyRequest company = companies.get(i);
+            if (company.hasOpeningBalance()) {
+                ledgerService.recordOpeningBalance(client.getId(), client.getCompanies().get(i).getId(),
+                        company.openingBalance(), company.openingBalanceDate());
+                recorded++;
+            }
+        }
+        return recorded;
     }
 
     /**

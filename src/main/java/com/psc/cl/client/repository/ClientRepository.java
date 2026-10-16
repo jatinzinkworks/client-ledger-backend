@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -41,6 +42,16 @@ public interface ClientRepository extends JpaRepository<Client, UUID> {
      */
     @EntityGraph(attributePaths = "companies")
     List<Client> findByManagerId(UUID managerId, Sort sort);
+
+    /**
+     * Loads the given clients together with their companies in one query. Identifiers that name no
+     * client are skipped.
+     *
+     * @param ids the clients to load
+     * @return the clients found, with companies initialised, in no particular order
+     */
+    @EntityGraph(attributePaths = "companies")
+    List<Client> findByIdIn(Collection<UUID> ids);
 
     /**
      * Reads a client and locks its row until the transaction ends, so concurrent deletions of the

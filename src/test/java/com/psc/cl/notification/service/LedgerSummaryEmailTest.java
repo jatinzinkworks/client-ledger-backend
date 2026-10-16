@@ -60,6 +60,59 @@ class LedgerSummaryEmailTest {
     }
 
     @Test
+    @DisplayName("shows an opening balance as a figure of its own, and as a column of the company breakdown")
+    void showsOpeningBalance() {
+        ClientLedgerSummaryResponse summary = ClientLedgerSummaryResponse.builder()
+                .clientName("Rohan Mehta")
+                .financialYear("2026-27")
+                .fromDate(LocalDate.of(2026, 4, 1))
+                .toDate(LocalDate.of(2027, 3, 31))
+                .totalBilled(new BigDecimal("39235.00"))
+                .openingBalance(new BigDecimal("25000.00"))
+                .totalPaymentReceived(new BigDecimal("15000.00"))
+                .pending(new BigDecimal("49235.00"))
+                .build();
+        List<LedgerSummaryEmail.CompanyLine> companies = List.of(
+                new LedgerSummaryEmail.CompanyLine("Mehta Textiles Pvt Ltd", new BigDecimal("39235.00"),
+                        new BigDecimal("25000.00"), new BigDecimal("15000.00"), new BigDecimal("49235.00")),
+                new LedgerSummaryEmail.CompanyLine("Rohan Mehta HUF", new BigDecimal("0.00"),
+                        new BigDecimal("-2000.00"), new BigDecimal("0.00"), new BigDecimal("-2000.00")));
+
+        LedgerSummaryEmail email = LedgerSummaryEmail.forClient(summary, companies, "Rohan", firm(), AS_OF,
+                "Rohan_Mehta_Ledger_FY2026-27.pdf");
+
+        assertThat(email.html())
+                .contains("Opening balance")
+                .contains("₹25,000.00")
+                .contains("₹2,000.00 in credit");
+        assertThat(email.text())
+                .contains("Opening balance:    ₹25,000.00")
+                .contains("Total billed:       ₹39,235.00")
+                .contains("opening balance ₹25,000.00")
+                .contains("Amount pending: ₹49,235.00");
+    }
+
+    @Test
+    @DisplayName("leaves the opening balance out when there is none")
+    void leavesZeroOpeningBalanceOut() {
+        LedgerSummaryEmail email = LedgerSummaryEmail.forClient(reminderSummary("24235.00"), reminderCompanies(),
+                "Rohan", firm(), AS_OF, ATTACHMENT);
+
+        assertThat(email.html()).doesNotContain("Opening balance");
+        assertThat(email.text()).doesNotContainIgnoringCase("opening balance");
+    }
+
+    @Test
+    @DisplayName("tells the client what they were billed and paid, never the discount they were given")
+    void leavesDiscountOut() {
+        LedgerSummaryEmail email = LedgerSummaryEmail.forCompany(
+                summary("Mehta Textiles Pvt Ltd", "24235.00", true), "Rohan", firm(), AS_OF, ATTACHMENT);
+
+        assertThat(email.html()).doesNotContainIgnoringCase("discount").doesNotContain("₹1,750.00");
+        assertThat(email.text()).doesNotContainIgnoringCase("discount").doesNotContain("₹1,750.00");
+    }
+
+    @Test
     @DisplayName("escapes values taken from the data in the HTML body")
     void escapesHtml() {
         LedgerSummaryEmail email = LedgerSummaryEmail.forCompany(summary("<b>Mehta</b> & Sons", "0.00", false),
@@ -105,9 +158,9 @@ class LedgerSummaryEmailTest {
                 .build();
         List<LedgerSummaryEmail.CompanyLine> companies = List.of(
                 new LedgerSummaryEmail.CompanyLine("Mehta Textiles Pvt Ltd", new BigDecimal("39235.00"),
-                        new BigDecimal("15000.00"), new BigDecimal("24235.00")),
+                        BigDecimal.ZERO, new BigDecimal("15000.00"), new BigDecimal("24235.00")),
                 new LedgerSummaryEmail.CompanyLine("Rohan Mehta & Sons", new BigDecimal("10765.00"),
-                        new BigDecimal("11000.00"), new BigDecimal("-235.00")));
+                        BigDecimal.ZERO, new BigDecimal("11000.00"), new BigDecimal("-235.00")));
 
         LedgerSummaryEmail email = LedgerSummaryEmail.forClient(summary, companies, "Rohan", firm(), AS_OF,
                 "Rohan_Mehta_Ledger_FY2026-27.xlsx");
@@ -194,7 +247,7 @@ class LedgerSummaryEmailTest {
 
     private static List<LedgerSummaryEmail.CompanyLine> reminderCompanies() {
         return List.of(new LedgerSummaryEmail.CompanyLine("Mehta Textiles Pvt Ltd", new BigDecimal("39235.00"),
-                new BigDecimal("15000.00"), new BigDecimal("24235.00")));
+                BigDecimal.ZERO, new BigDecimal("15000.00"), new BigDecimal("24235.00")));
     }
 
     private static CompanyLedgerSummaryResponse summary(String companyName, String pending, boolean paid) {

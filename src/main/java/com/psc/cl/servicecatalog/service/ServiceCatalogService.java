@@ -4,6 +4,7 @@ import com.psc.cl.ledger.model.FinancialYear;
 import com.psc.cl.servicecatalog.dto.CatalogServiceRequest;
 import com.psc.cl.servicecatalog.dto.CatalogServiceResponse;
 import com.psc.cl.servicecatalog.dto.ServiceFeeBulkUpdateRequest;
+import com.psc.cl.servicecatalog.model.ServiceCategory;
 
 import java.util.List;
 import java.util.UUID;
@@ -42,6 +43,13 @@ public interface ServiceCatalogService {
      * @return the catalog, empty when nothing has been added yet
      */
     List<CatalogServiceResponse> listServices(FinancialYear financialYear);
+
+    /**
+     * Lists every category a service can belong to, in their declared order.
+     *
+     * @return every service category
+     */
+    List<ServiceCategory> listCategories();
 
     /**
      * Replaces a service wholesale. Fields omitted from the request are cleared, and the

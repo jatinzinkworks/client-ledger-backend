@@ -13,6 +13,7 @@ import com.jayway.jsonpath.JsonPath;
 import com.psc.cl.AbstractPostgresIT;
 import com.psc.cl.servicecatalog.controller.ServiceCatalogApi;
 import com.psc.cl.servicecatalog.model.CatalogService;
+import com.psc.cl.servicecatalog.model.ServiceCategory;
 import com.psc.cl.servicecatalog.repository.CatalogServiceRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -298,6 +299,16 @@ class ServiceCatalogIT extends AbstractPostgresIT {
                 .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
         mockMvc.perform(get(SERVICES_URL + "/" + monthlyId))
                 .andExpect(jsonPath("$.standardFee").value(5500.0));
+    }
+
+    @Test
+    @DisplayName("lists every service category rather than treating the path as a service id")
+    void listsCategories() throws Exception {
+        mockMvc.perform(get(SERVICES_URL + ServiceCatalogApi.CATEGORIES_PATH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(ServiceCategory.values().length))
+                .andExpect(jsonPath("$[0]").value("COMPLIANCE"))
+                .andExpect(jsonPath("$[5]").value("CERTIFICATION"));
     }
 
     @Test

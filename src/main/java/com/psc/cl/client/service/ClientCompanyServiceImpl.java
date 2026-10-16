@@ -5,6 +5,7 @@ import com.psc.cl.client.dto.ClientResponse;
 import com.psc.cl.client.dto.CompanyRequest;
 import com.psc.cl.client.dto.CompanyResponse;
 import com.psc.cl.client.exception.ClientNotFoundException;
+import com.psc.cl.client.exception.CompanyHasLedgerEntriesException;
 import com.psc.cl.client.exception.CompanyHasServicesException;
 import com.psc.cl.client.exception.CompanyLimitExceededException;
 import com.psc.cl.client.exception.CompanyNotFoundException;
@@ -15,6 +16,7 @@ import com.psc.cl.client.repository.ClientCompanyRepository;
 import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.client.repository.CompanyServiceCount;
 import com.psc.cl.client.repository.ServiceAssignmentRepository;
+import com.psc.cl.exception.ResourceInUseException;
 import com.psc.cl.ledger.dto.CompanyBalance;
 import com.psc.cl.ledger.model.FinancialYear;
 import com.psc.cl.ledger.service.LedgerService;
@@ -140,15 +142,21 @@ public class ClientCompanyServiceImpl implements ClientCompanyService {
         if (serviceAssignmentRepository.existsByCompanyIdIn(Set.of(companyId))) {
             throw new CompanyHasServicesException(clientId, companyId);
         }
+        // Payments and opening balances need no service, so a company without services may still have them.
+        if (ledgerService.companyHasEntries(companyId)) {
+            throw new CompanyHasLedgerEntriesException(clientId, companyId);
+        }
 
         client.getCompanies().remove(company);
         client.setUpdatedAt(Instant.now());
         try {
             clientRepository.flush();
         } catch (DataIntegrityViolationException ex) {
-            // The foreign key caught a service assigned concurrently, after the check above.
-            log.warn("Delete of company {} was rejected by the database: services are assigned", companyId, ex);
-            throw new CompanyHasServicesException(clientId, companyId);
+            // A foreign key caught a service assigned, or a ledger entry recorded, after the checks above.
+            log.warn("Delete of company {} was rejected by the database: services or ledger entries were added",
+                    companyId, ex);
+            throw new ResourceInUseException("Company " + companyId + " of client " + clientId + " was given a "
+                    + "service or a ledger entry while it was being deleted, and cannot be deleted.");
         }
         log.info("Deleted company {} of client {}", companyId, clientId);
     }

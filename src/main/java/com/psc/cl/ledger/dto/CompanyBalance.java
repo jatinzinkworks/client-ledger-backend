@@ -8,11 +8,14 @@ import java.math.BigDecimal;
  *
  * @param totalBilled          sum of the service charges falling due in the year
  * @param totalPaymentReceived sum of the payments received in the year, as a positive number
- * @param pending              billed less received; negative when more was received than billed
+ * @param pending              billed plus opening balance less received; negative when in credit
+ * @param openingBalance       the opening balance the company was taken on with, when dated in the year:
+ *                             positive when owed, negative when in credit; zero otherwise
  */
-public record CompanyBalance(BigDecimal totalBilled, BigDecimal totalPaymentReceived, BigDecimal pending) {
+public record CompanyBalance(BigDecimal totalBilled, BigDecimal totalPaymentReceived, BigDecimal pending,
+                             BigDecimal openingBalance) {
 
-    /** The balance of a company with nothing billed or received in the year. */
-    public static final CompanyBalance ZERO =
-            new CompanyBalance(new BigDecimal("0.00"), new BigDecimal("0.00"), new BigDecimal("0.00"));
+    /** The balance of a company with nothing billed, received or brought over in the year. */
+    public static final CompanyBalance ZERO = new CompanyBalance(new BigDecimal("0.00"), new BigDecimal("0.00"),
+            new BigDecimal("0.00"), new BigDecimal("0.00"));
 }

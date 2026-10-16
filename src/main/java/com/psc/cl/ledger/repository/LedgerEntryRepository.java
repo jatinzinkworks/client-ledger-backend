@@ -58,6 +58,23 @@ public interface LedgerEntryRepository extends JpaRepository<LedgerEntry, UUID> 
     Optional<LedgerEntry> findByIdAndCompanyId(UUID id, UUID companyId);
 
     /**
+     * Whether any company of a client has a ledger entry of any type. Served by the
+     * (client_id, entry_date) index.
+     *
+     * @param clientId the client
+     * @return true when the client's ledger holds anything
+     */
+    boolean existsByClientId(UUID clientId);
+
+    /**
+     * Whether a company has a ledger entry of any type. Served by the (company_id, due_date) index.
+     *
+     * @param companyId the company
+     * @return true when the company's ledger holds anything
+     */
+    boolean existsByCompanyId(UUID companyId);
+
+    /**
      * Finds the latest entry of one type for one company within a range of dates, both ends
      * inclusive; the one recorded last settles a tie on date. Served by the (company_id, due_date)
      * index.
@@ -235,7 +252,8 @@ public interface LedgerEntryRepository extends JpaRepository<LedgerEntry, UUID> 
 
     /**
      * Ranks the clients still owing over a range of dates, both ends inclusive, by what they owe,
-     * most first: one row per client whose charges in the range exceed their payments in it. Clients
+     * most first: one row per client whose charges and opening balances in the range exceed their
+     * payments in it. Opening balances count in what is pending, but not as billed. Clients
      * owing the same come in identifier order, so the ranking is stable.
      *
      * @param charge   the entry type of service charges, whose amounts count as billed
@@ -430,29 +448,38 @@ public interface LedgerEntryRepository extends JpaRepository<LedgerEntry, UUID> 
                                      @Param("toDate") LocalDate toDate);
 
     /**
-     * Sums the service charges of each company by the date they fell due, for every date on or
-     * before the one given, oldest first, so payments can be applied to the oldest charges first.
+     * Sums what each company owes by the date it fell due, for every date on or before the one
+     * given, oldest first, so payments can be applied to the oldest charges first: its service
+     * charges, and an opening balance it was taken on owing, which falls due on its date.
      *
-     * @param charge the entry type of service charges
-     * @param asOf   latest due date to include
-     * @return one row per company and due date with charges, earliest due first
+     * @param charge  the entry type of service charges
+     * @param opening the entry type of opening balances; only those owed are summed
+     * @param asOf    latest due date to include
+     * @return one row per company and due date with anything owed, earliest due first
      */
     @Query("select e.companyId as companyId, e.dueDate as dueDate, sum(e.totalAmount) as totalCharged "
-            + "from LedgerEntry e where e.entryType = :charge and e.dueDate <= :asOf "
+            + "from LedgerEntry e where (e.entryType = :charge or (e.entryType = :opening and e.totalAmount > 0)) "
+            + "and e.dueDate <= :asOf "
             + "group by e.companyId, e.dueDate order by e.dueDate, e.companyId")
     List<CompanyChargeRow> chargesByCompanyAndDueDate(@Param("charge") LedgerEntryType charge,
+                                                      @Param("opening") LedgerEntryType opening,
                                                       @Param("asOf") LocalDate asOf);
 
     /**
-     * Totals what each company has paid on or before a date.
+     * Totals what each company has paid on or before a date, counting an opening balance it was
+     * taken on in credit as paid on its date. Payments and credits are stored negative, so the sum
+     * is too.
      *
      * @param payment the entry type of payments
+     * @param opening the entry type of opening balances; only those in credit are summed
      * @param asOf    latest date received to include
      * @return one row per company that has paid anything; other companies are left out
      */
     @Query("select e.companyId as companyId, sum(e.totalAmount) as totalPaid from LedgerEntry e "
-            + "where e.entryType = :payment and e.dueDate <= :asOf group by e.companyId")
+            + "where (e.entryType = :payment or (e.entryType = :opening and e.totalAmount < 0)) "
+            + "and e.dueDate <= :asOf group by e.companyId")
     List<CompanyPaidRow> totalPaidByCompany(@Param("payment") LedgerEntryType payment,
+                                            @Param("opening") LedgerEntryType opening,
                                             @Param("asOf") LocalDate asOf);
 
     /**

@@ -170,7 +170,9 @@ public interface ClientCompanyApi {
             summary = "Delete a company of a client",
             description = "Removes one company of the client. A client must keep at least one company, "
                     + "so their only company cannot be deleted; delete the client instead. A company "
-                    + "with services assigned cannot be deleted; remove those services first.")
+                    + "with services assigned cannot be deleted; remove those services first. Nor can a "
+                    + "company with ledger entries, such as payments or an opening balance: a ledger is a "
+                    + "financial record and is never deleted along with its company.")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "Company deleted"),
             @ApiResponse(responseCode = "400", description = "An identifier is not a valid UUID",
@@ -182,7 +184,7 @@ public interface ClientCompanyApi {
                             schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "409",
                     description = "It is the client's only company (BUSINESS_RULE_VIOLATION), or services "
-                            + "are still assigned to it (RESOURCE_IN_USE)",
+                            + "are still assigned to it or ledger entries recorded against it (RESOURCE_IN_USE)",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "500", description = "Unexpected server error",

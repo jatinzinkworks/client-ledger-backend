@@ -29,11 +29,15 @@ public class PeriodTotals {
             + "after discount", example = "1647000.00")
     BigDecimal totalBilled;
 
+    @Schema(description = "Sum of the opening balances dated in the period: positive when owed, negative when "
+            + "in credit. Not part of totalBilled", example = "0.00")
+    BigDecimal openingBalance;
+
     @Schema(description = "Sum of the payments received in the period", example = "1402000.00")
     BigDecimal totalPaymentReceived;
 
-    @Schema(description = "Billed less received in the period; negative when more was received",
-            example = "245000.00")
+    @Schema(description = "Billed plus opening balance less received in the period; negative when more was "
+            + "received", example = "245000.00")
     BigDecimal pending;
 
     @Schema(description = "Sum of the discounts given on the period's service charges", example = "58000.00")

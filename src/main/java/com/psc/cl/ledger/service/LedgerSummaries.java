@@ -29,7 +29,9 @@ import java.util.stream.Collectors;
  * <p>Every entry falls in exactly one company, one financial year and one type, so adding up the
  * rows gives the overall totals, and adding up the rows of one year or one company gives that
  * year's or that company's. Service charge rows give the charged figures; payment rows give what
- * was paid, their negative totals turned positive.
+ * was paid, their negative totals turned positive; opening balance rows give the balances companies
+ * were taken on with, kept apart from what was charged. Every balance is charged plus opening
+ * balance less paid.
  */
 final class LedgerSummaries {
 
@@ -78,8 +80,8 @@ final class LedgerSummaries {
      * Each company's balance, for a list of companies.
      *
      * @param rows the totals of the matching entries, one row per company, financial year and type
-     * @return each company's billed, received and pending amounts, by company; companies without rows
-     *         are left out
+     * @return each company's billed, received, opening and pending amounts, by company; companies
+     *         without rows are left out
      */
     static Map<UUID, CompanyBalance> balancesByCompany(List<LedgerTotalsRow> rows) {
         return rows.stream()
@@ -87,7 +89,7 @@ final class LedgerSummaries {
                 .entrySet().stream()
                 .collect(Collectors.toMap(Map.Entry::getKey, company -> {
                     Totals totals = Totals.of(company.getValue());
-                    return new CompanyBalance(totals.charged(), totals.paid(), totals.balance());
+                    return new CompanyBalance(totals.charged(), totals.paid(), totals.balance(), totals.opening());
                 }));
     }
 
@@ -97,7 +99,7 @@ final class LedgerSummaries {
      * companies.
      *
      * <p>Billed is shown before discount, as charged plus the discount given, so that billed less
-     * discount less received is the year's closing balance.
+     * discount plus opening balance less received is the year's closing balance.
      *
      * @param rows         the totals of the client's entries, one row per company, financial year and type
      * @param companyNames the name of every company of the client, by identifier
@@ -131,6 +133,7 @@ final class LedgerSummaries {
                             .companyCount(companies.size())
                             .billed(totals.billedBeforeDiscount())
                             .discount(totals.discountAmount())
+                            .openingBalance(totals.opening())
                             .received(totals.paid())
                             .closingBalance(totals.balance())
                             .status(LedgerYearStatus.of(totals.balance(), current))
@@ -153,6 +156,7 @@ final class LedgerSummaries {
                             .companyName(companyName(companyNames, company.getKey()))
                             .billed(totals.billedBeforeDiscount())
                             .discount(totals.discountAmount())
+                            .openingBalance(totals.opening())
                             .received(totals.paid())
                             .closingBalance(totals.balance())
                             .status(LedgerYearStatus.of(totals.balance(), current))
@@ -172,6 +176,7 @@ final class LedgerSummaries {
                 .totalTaxableAmount(totals.taxableAmount())
                 .totalGstAmount(totals.gstAmount())
                 .totalAmount(totals.charged())
+                .openingBalance(totals.opening())
                 .totalPaid(totals.paid())
                 .balance(totals.balance())
                 .byFinancialYear(byFinancialYear(rows));
@@ -192,6 +197,7 @@ final class LedgerSummaries {
                             .totalTaxableAmount(totals.taxableAmount())
                             .totalGstAmount(totals.gstAmount())
                             .totalAmount(totals.charged())
+                            .openingBalance(totals.opening())
                             .totalPaid(totals.paid())
                             .balance(totals.balance())
                             .build();
@@ -215,6 +221,7 @@ final class LedgerSummaries {
                             .totalTaxableAmount(totals.taxableAmount())
                             .totalGstAmount(totals.gstAmount())
                             .totalAmount(totals.charged())
+                            .openingBalance(totals.opening())
                             .totalPaid(totals.paid())
                             .balance(totals.balance())
                             .build();
@@ -239,21 +246,24 @@ final class LedgerSummaries {
     /**
      * Totals added up across rows, at the two decimal places the amount columns hold.
      *
-     * @param entryCount     entries of either type
+     * @param entryCount     entries of every type
      * @param serviceFee     service fees charged
      * @param discountAmount discounts taken off them
      * @param taxableAmount  taxable amounts charged
      * @param gstAmount      GST charged
      * @param charged        amounts charged for services
+     * @param opening        opening balances: positive when owed, negative when in credit
      * @param paid           amounts received, as a positive number
      */
     private record Totals(long entryCount, BigDecimal serviceFee, BigDecimal discountAmount,
-                          BigDecimal taxableAmount, BigDecimal gstAmount, BigDecimal charged, BigDecimal paid) {
+                          BigDecimal taxableAmount, BigDecimal gstAmount, BigDecimal charged, BigDecimal opening,
+                          BigDecimal paid) {
 
         private static final BigDecimal ZERO = new BigDecimal("0.00");
 
         static Totals of(List<LedgerTotalsRow> rows) {
             List<LedgerTotalsRow> charges = ofType(rows, LedgerEntryType.SERVICE_CHARGE);
+            List<LedgerTotalsRow> openings = ofType(rows, LedgerEntryType.OPENING_BALANCE);
             List<LedgerTotalsRow> payments = ofType(rows, LedgerEntryType.PAYMENT);
             return new Totals(
                     rows.stream().mapToLong(LedgerTotalsRow::getEntryCount).sum(),
@@ -262,12 +272,13 @@ final class LedgerSummaries {
                     sum(charges, LedgerTotalsRow::getTotalTaxableAmount),
                     sum(charges, LedgerTotalsRow::getTotalGstAmount),
                     sum(charges, LedgerTotalsRow::getTotalAmount),
+                    sum(openings, LedgerTotalsRow::getTotalAmount),
                     sum(payments, LedgerTotalsRow::getTotalAmount).negate());
         }
 
-        /** What is still owed; negative when more has been paid than charged. */
+        /** What is still owed: charged plus opening balance less paid; negative when in credit. */
         BigDecimal balance() {
-            return charged.subtract(paid);
+            return charged.add(opening).subtract(paid);
         }
 
         /** What was charged before the discount came off: charged plus the discount given. */

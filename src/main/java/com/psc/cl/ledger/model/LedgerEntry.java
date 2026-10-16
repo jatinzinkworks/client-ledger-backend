@@ -21,8 +21,9 @@ import java.time.LocalDate;
 import java.util.UUID;
 
 /**
- * One line of a company's ledger: either an amount owed for a service falling due on one date, or
- * a payment received from the company. {@link #entryType} tells them apart.
+ * One line of a company's ledger: an amount owed for a service falling due on one date, a payment
+ * received from the company, or the balance the company was taken on with. {@link #entryType}
+ * tells them apart.
  *
  * <p>A {@link LedgerEntryType#SERVICE_CHARGE} fills in every service figure, each a snapshot taken
  * when the entry is posted, so later changes to the catalog service or the assignment leave it as
@@ -33,8 +34,13 @@ import java.util.UUID;
  * <p>A {@link LedgerEntryType#PAYMENT} leaves every service figure null. Its {@link #totalAmount}
  * is the amount received as a negative number, so adding up a ledger's totals gives the balance
  * still owed, and its {@link #dueDate} is the date the payment was received. Every detail of a
- * payment can be updated, except when it was recorded. A database check constraint holds each
- * shape.
+ * payment can be updated, except when it was recorded.
+ *
+ * <p>An {@link LedgerEntryType#OPENING_BALANCE} leaves every service and payment field null. Its
+ * {@link #totalAmount} is the balance brought over: positive when the company owes it, negative when
+ * it starts in credit, never zero. Its {@link #dueDate} is the date the balance stood at. A company
+ * has at most one, which cannot be changed, only deleted. A database check constraint holds each
+ * shape, and a unique index the one opening balance per company.
  *
  * <p>Clients, companies and services are held by identifier rather than as entity relations, so the
  * ledger does not depend on their mappings; foreign keys keep them valid.

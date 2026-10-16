@@ -1,5 +1,6 @@
 package com.psc.cl.client.controller;
 
+import com.psc.cl.client.dto.ClientManagerBulkUpdateRequest;
 import com.psc.cl.client.dto.ClientRequest;
 import com.psc.cl.client.dto.ClientResponse;
 import com.psc.cl.client.dto.ClientSummaryResponse;
@@ -47,16 +48,25 @@ public interface ClientApi {
     /** Path of a client's WhatsApp opt-in, relative to {@link #BASE_PATH}. */
     String WHATSAPP_OPT_IN_PATH = BY_ID_PATH + "/whatsapp-opt-in";
 
+    /** Path several clients are assigned to a manager through, relative to {@link #BASE_PATH}. */
+    String MANAGER_PATH = "/manager";
+
     @Operation(
             summary = "Create a client",
             description = "Adds a client together with the companies they hold. Every field is "
                     + "mandatory, at least one company must be supplied, and the assigned manager "
-                    + "must already exist in the Manager Catalog.")
+                    + "must already exist in the Manager Catalog. A company may bring an opening balance: "
+                    + "what it owed (positive) or was owed (negative) when taken on, dated "
+                    + "openingBalanceDate or the day the client is added. It is recorded in the company's "
+                    + "ledger as an OPENING_BALANCE entry, counted in what is pending but not as billed. "
+                    + "Nothing is created when any of it cannot be.")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Client created",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ClientResponse.class))),
-            @ApiResponse(responseCode = "400", description = "Request body failed validation",
+            @ApiResponse(responseCode = "400",
+                    description = "Request body failed validation, such as an openingBalanceDate without an "
+                            + "openingBalance, or an openingBalanceDate after today",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "404", description = "The assigned manager does not exist",
@@ -160,9 +170,44 @@ public interface ClientApi {
             @Valid @RequestBody WhatsAppOptInRequest request);
 
     @Operation(
+            summary = "Assign several clients to a manager",
+            description = "Assigns every client named to one manager, in one go, and changes nothing else "
+                    + "about them. The update is all or nothing: if the manager or any client is unknown, no "
+                    + "client is reassigned. A client named more than once is assigned once. Up to "
+                    + ClientManagerBulkUpdateRequest.MAX_CLIENTS + " clients may be assigned at once.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200",
+                    description = "Clients reassigned; the updated clients, in the order the request first "
+                            + "named them",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            array = @ArraySchema(
+                                    schema = @Schema(implementation = ClientSummaryResponse.class)))),
+            @ApiResponse(responseCode = "400",
+                    description = "Request body failed validation, such as a missing manager or an empty "
+                            + "client list",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404",
+                    description = "The manager does not exist, or one or more identifiers name no client; "
+                            + "the message lists each",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "500", description = "Unexpected server error",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class)))})
+    // A literal path, so Spring routes it here rather than to updateClient's /{id}.
+    @PutMapping(value = MANAGER_PATH, consumes = MediaType.APPLICATION_JSON_VALUE)
+    ResponseEntity<List<ClientSummaryResponse>> updateManager(
+            @io.swagger.v3.oas.annotations.parameters.RequestBody(
+                    description = "The manager and the clients to assign to them", required = true)
+            @Valid @RequestBody ClientManagerBulkUpdateRequest request);
+
+    @Operation(
             summary = "Delete a client",
             description = "Removes a client together with their companies. A client with services "
-                    + "assigned to any of their companies cannot be deleted; remove those services first.")
+                    + "assigned to any of their companies cannot be deleted; remove those services first. Nor "
+                    + "can a client with ledger entries, such as payments or an opening balance, on any company: "
+                    + "a ledger is a financial record and is never deleted along with its client.")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "Client deleted"),
             @ApiResponse(responseCode = "400", description = "The identifier is not a valid UUID",
@@ -172,7 +217,8 @@ public interface ClientApi {
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "409",
-                    description = "Services are still assigned to one or more of the client's companies",
+                    description = "Services are still assigned to, or ledger entries recorded against, one or more "
+                            + "of the client's companies; the message says which",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "500", description = "Unexpected server error",

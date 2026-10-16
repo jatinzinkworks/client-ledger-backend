@@ -23,6 +23,7 @@
         <jacoco.version>0.8.13</jacoco.version>
         <tomcat.version>11.0.25</tomcat.version>
         <testcontainers.version>1.21.3</testcontainers.version>
+        <openpdf.version>2.0.3</openpdf.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <debug.port>5005</debug.port>
         <!-- Overwritten by jacoco:prepare-agent-integration during a full build; empty here so the
@@ -81,6 +82,13 @@
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
             <version>${springdoc.version}</version>
+        </dependency>
+
+        <!-- Writes the PDF ledger statement emailed to clients. -->
+        <dependency>
+            <groupId>com.github.librepdf</groupId>
+            <artifactId>openpdf</artifactId>
+            <version>${openpdf.version}</version>
         </dependency>
 
         <dependency>

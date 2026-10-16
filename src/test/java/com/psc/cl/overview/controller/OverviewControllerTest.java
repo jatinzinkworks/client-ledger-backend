@@ -155,7 +155,7 @@ class OverviewControllerTest {
         mockMvc.perform(get(url).param("limit", "0"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
-        mockMvc.perform(get(url).param("limit", "51"))
+        mockMvc.perform(get(url).param("limit", "101"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
         mockMvc.perform(get(url).param("limit", "ten"))
@@ -271,7 +271,7 @@ class OverviewControllerTest {
         mockMvc.perform(get(url).param("limit", "0"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
-        mockMvc.perform(get(url).param("limit", "51"))
+        mockMvc.perform(get(url).param("limit", "101"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
         mockMvc.perform(get(url).param("financialYear", "2026"))
@@ -369,7 +369,7 @@ class OverviewControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.financialYear").value("2026-27"))
                 .andExpect(jsonPath("$.companies").isEmpty());
-        mockMvc.perform(get(url).param("limit", "51"))
+        mockMvc.perform(get(url).param("limit", "101"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
         mockMvc.perform(get(url).param("financialYear", "2026"))
@@ -420,7 +420,7 @@ class OverviewControllerTest {
         mockMvc.perform(get(url).param("limit", "0"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
-        mockMvc.perform(get(url).param("limit", "51"))
+        mockMvc.perform(get(url).param("limit", "101"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
         mockMvc.perform(get(url).param("financialYear", "2026"))

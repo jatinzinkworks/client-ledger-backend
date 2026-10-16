@@ -1,4 +1,4 @@
-package com.psc.cl.ledger.service;
+package com.psc.cl.service;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -21,8 +21,10 @@ import java.util.zip.ZipOutputStream;
  *
  * <p>Text is written as inline strings, never as formulas, so a value such as {@code =SUM(A1)}
  * typed into a comment shows as typed and is not evaluated when the file is opened.
+ *
+ * <p>Shared by every module that writes a workbook: the ledger's exports and the bulk import templates.
  */
-final class XlsxWorkbook {
+public final class XlsxWorkbook {
 
     /** Excel counts dates as days since this one (its 1900 date system). */
     private static final LocalDate EXCEL_EPOCH = LocalDate.of(1899, 12, 30);
@@ -45,7 +47,7 @@ final class XlsxWorkbook {
      * Cell styles, in the order of the cellXfs written to styles.xml; the ordinal is the style index.
      * Amounts show two decimals with thousands separators, dates as 07-Oct-2026.
      */
-    enum Style {
+    public enum Style {
         TEXT,
         BOLD,
         AMOUNT,
@@ -85,7 +87,7 @@ final class XlsxWorkbook {
      * @param columnWidths width of each column from A, in characters
      * @return the sheet, to add rows to
      */
-    Sheet addSheet(String name, int... columnWidths) {
+    public Sheet addSheet(String name, int... columnWidths) {
         if (!isValidSheetName(name)) {
             throw new IllegalArgumentException("Not a valid sheet name: " + name);
         }
@@ -106,7 +108,7 @@ final class XlsxWorkbook {
      * @param fallback the name to use when nothing of the text is left, itself a valid sheet name
      * @return a valid name no other sheet of this workbook has yet
      */
-    String sheetName(String text, String fallback) {
+    public String sheetName(String text, String fallback) {
         String base = FORBIDDEN_IN_SHEET_NAME.matcher(text).replaceAll("-").strip();
         if (base.length() > MAX_SHEET_NAME_LENGTH) {
             base = base.substring(0, MAX_SHEET_NAME_LENGTH);
@@ -143,7 +145,7 @@ final class XlsxWorkbook {
      *
      * @return the file's content
      */
-    byte[] toBytes() {
+    public byte[] toBytes() {
         if (sheets.isEmpty()) {
             throw new IllegalStateException("A workbook needs at least one sheet");
         }
@@ -239,7 +241,7 @@ final class XlsxWorkbook {
     /**
      * The letters naming a column, counting from 0: A to Z, then AA, AB and so on.
      */
-    static String columnName(int index) {
+    public static String columnName(int index) {
         StringBuilder name = new StringBuilder();
         for (int n = index + 1; n > 0; n = (n - 1) / 26) {
             name.insert(0, (char) ('A' + (n - 1) % 26));
@@ -248,35 +250,35 @@ final class XlsxWorkbook {
     }
 
     /** A value and how to show it; a null value leaves the cell empty. */
-    record Cell(Object value, Style style) {
+    public record Cell(Object value, Style style) {
 
-        static Cell text(String value) {
+        public static Cell text(String value) {
             return new Cell(value, Style.TEXT);
         }
 
-        static Cell bold(String value) {
+        public static Cell bold(String value) {
             return new Cell(value, Style.BOLD);
         }
 
-        static Cell amount(BigDecimal value) {
+        public static Cell amount(BigDecimal value) {
             return new Cell(value, Style.AMOUNT);
         }
 
-        static Cell boldAmount(BigDecimal value) {
+        public static Cell boldAmount(BigDecimal value) {
             return new Cell(value, Style.BOLD_AMOUNT);
         }
 
-        static Cell date(LocalDate value) {
+        public static Cell date(LocalDate value) {
             return new Cell(value, Style.DATE);
         }
 
-        static Cell empty() {
+        public static Cell empty() {
             return new Cell(null, Style.TEXT);
         }
     }
 
     /** One tab of the workbook. */
-    static final class Sheet {
+    public static final class Sheet {
 
         private final String name;
 
@@ -297,19 +299,19 @@ final class XlsxWorkbook {
          * @param cells the row's cells, from column A
          * @return this sheet, to add more rows
          */
-        Sheet addRow(Cell... cells) {
+        public Sheet addRow(Cell... cells) {
             rows.add(Arrays.asList(cells));
             return this;
         }
 
         /** Adds an empty row, to space out sections. */
-        Sheet addBlankRow() {
+        public Sheet addBlankRow() {
             rows.add(List.of());
             return this;
         }
 
         /** Keeps the first row in view while scrolling down. */
-        Sheet freezeHeaderRow() {
+        public Sheet freezeHeaderRow() {
             headerFrozen = true;
             return this;
         }

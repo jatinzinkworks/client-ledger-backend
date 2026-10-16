@@ -50,9 +50,11 @@ public interface NotificationApi {
     @Operation(
             summary = "Email a client the ledger summary of one of their companies",
             description = "Emails the client a summary of the company's ledger for the current Indian financial "
-                    + "year (1 April to 31 March): what was billed, the discount given, what was received, what "
-                    + "is pending and the last payment, with the year's full ledger attached as an Excel "
-                    + "workbook. It goes to the client's email address, copying in their manager, from the "
+                    + "year (1 April to 31 March): what was billed, what was received, what "
+                    + "is pending and the last payment, with the year's ledger statement attached as a PDF: "
+                    + "the summary, then every charge as one total fee and every payment as the amount paid, "
+                    + "with no discount shown. It goes to the client's email address, copying in their manager, "
+                    + "from the "
                     + "address set in MAIL_FROM; replies go to the firm's email from Global Settings when one "
                     + "is saved. The email is sent before the response returns.")
     @ApiResponses({
@@ -87,9 +89,11 @@ public interface NotificationApi {
             summary = "Email a client the ledger summary across all of their companies",
             description = "Emails the client a summary of their ledger for the current Indian financial year "
                     + "(1 April to 31 March) across all of their companies together: what was billed, the "
-                    + "discount given, what was received, what is pending and the last payment, followed by "
-                    + "each company's billed, received and pending amounts. The year's full ledger is attached "
-                    + "as an Excel workbook with a sheet per company. It goes to the client's email address, "
+                    + "what was received, what is pending and the last payment, followed by "
+                    + "each company's billed, received and pending amounts. The year's ledger statement is "
+                    + "attached as a PDF: the summary with a line per company, then each company's charges and "
+                    + "payments on a page of its own, every charge as one total fee and every payment as the "
+                    + "amount paid, with no discount shown. It goes to the client's email address, "
                     + "copying in their manager, from the address set in MAIL_FROM; replies go to the firm's "
                     + "email from Global Settings when one is saved. The email is sent before the response "
                     + "returns.")
@@ -121,8 +125,8 @@ public interface NotificationApi {
             summary = "Email every client their ledger summary",
             description = "Takes no input. Emails every client, one after another, their ledger summary for the "
                     + "current Indian financial year across all of their companies, exactly as emailing one "
-                    + "client does: to the client, copying in their manager, with the year's Excel ledger "
-                    + "attached. Each client is emailed on its own, so one that fails is listed under failures "
+                    + "client does: to the client, copying in their manager, with the year's PDF ledger "
+                    + "statement attached. Each client is emailed on its own, so one that fails is listed under failures "
                     + "and the others are still emailed. Clients with nothing billed or received in the year "
                     + "are emailed too. The response returns once every client has been tried, so it takes "
                     + "longer the more clients there are.")
@@ -147,8 +151,8 @@ public interface NotificationApi {
                     + "(billed less received across all of their companies, to date, is more than zero) an "
                     + "individual payment reminder for that whole amount, under the subject \"Payment "
                     + "reminder\". It carries the same details as the ledger summary email for the current "
-                    + "Indian financial year: billed, discount, received, the last payment and each company's "
-                    + "figures, with the year's Excel ledger attached; when earlier years left a balance, it "
+                    + "Indian financial year: billed, received, the last payment and each company's "
+                    + "figures, with the year's PDF ledger statement attached; when earlier years left a balance, it "
                     + "is shown alongside the year's so the figures add up to the amount asked for. It goes to "
                     + "the client, copying in their manager. Clients settled or in credit overall are skipped. "
                     + "Each client is emailed on its own, so one that fails is listed under failures and the "

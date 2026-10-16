@@ -12,5 +12,6 @@ public enum ServiceCategory {
     TAX,
     AUDIT,
     ACCOUNTING,
-    ADVISORY
+    ADVISORY,
+    CERTIFICATION
 }

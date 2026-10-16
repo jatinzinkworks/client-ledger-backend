@@ -519,7 +519,8 @@ public interface LedgerApi {
                             + "no such ledger entry belongs to the company",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ErrorResponse.class))),
-            @ApiResponse(responseCode = "409", description = "The ledger entry is a service charge, not a payment",
+            @ApiResponse(responseCode = "409",
+                    description = "The ledger entry is a service charge or an opening balance, not a payment",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "500", description = "Unexpected server error",
@@ -547,7 +548,7 @@ public interface LedgerApi {
                     + "again from them, rounded the same way as when entries are posted, so the figures "
                     + "always add up. What the entry bills, its due date, financial year and entry date "
                     + "cannot change. Only service charges have rates; update a payment through its "
-                    + "payment endpoint instead.")
+                    + "payment endpoint instead. An opening balance cannot be changed; delete it if it is wrong.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Ledger entry corrected",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
@@ -561,7 +562,8 @@ public interface LedgerApi {
                             + "no such ledger entry was billed to the company",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ErrorResponse.class))),
-            @ApiResponse(responseCode = "409", description = "The ledger entry is a payment, which has no rates",
+            @ApiResponse(responseCode = "409",
+                    description = "The ledger entry is a payment or an opening balance, which have no rates",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "500", description = "Unexpected server error",

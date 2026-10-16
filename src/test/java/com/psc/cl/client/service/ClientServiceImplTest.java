@@ -10,21 +10,25 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.psc.cl.client.dto.ClientManagerBulkUpdateRequest;
 import com.psc.cl.client.dto.ClientRequest;
 import com.psc.cl.client.dto.ClientResponse;
 import com.psc.cl.client.dto.ClientSummaryResponse;
 import com.psc.cl.client.dto.ClientUpdateRequest;
-import com.psc.cl.client.dto.CompanyRequest;
+import com.psc.cl.client.dto.NewCompanyRequest;
 import com.psc.cl.client.dto.WhatsAppOptInRequest;
 import com.psc.cl.client.exception.AssignedManagerNotFoundException;
+import com.psc.cl.client.exception.ClientHasLedgerEntriesException;
 import com.psc.cl.client.exception.ClientHasServicesException;
 import com.psc.cl.client.exception.ClientNotFoundException;
+import com.psc.cl.client.exception.ClientsNotFoundException;
 import com.psc.cl.client.model.Client;
 import com.psc.cl.client.model.ClientCompany;
 import com.psc.cl.client.model.ClientOptedInToWhatsApp;
 import com.psc.cl.client.model.CompanyType;
 import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.client.repository.ServiceAssignmentRepository;
+import com.psc.cl.exception.ResourceInUseException;
 import com.psc.cl.ledger.service.LedgerService;
 import com.psc.cl.managercatalog.model.Manager;
 import com.psc.cl.managercatalog.repository.ManagerRepository;
@@ -41,6 +45,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Sort;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -187,6 +192,51 @@ class ClientServiceImplTest {
     }
 
     @Test
+    @DisplayName("records the opening balance of each company that brings one, against that company")
+    void recordsOpeningBalances() {
+        when(managerRepository.findById(MANAGER_ID)).thenReturn(Optional.of(manager()));
+        stubSave();
+        LocalDate dated = LocalDate.of(2026, 3, 31);
+
+        clientService.createClient(request()
+                .companies(List.of(
+                        company("Rohan Mehta HUF", null).toBuilder()
+                                .openingBalance(new BigDecimal("25000.00"))
+                                .openingBalanceDate(dated)
+                                .build(),
+                        company("Mehta Textiles Pvt Ltd", null),
+                        company("Mehta Exports LLP", null).toBuilder()
+                                .openingBalance(new BigDecimal("-5000.50"))
+                                .build(),
+                        company("Mehta Trust", null).toBuilder()
+                                .openingBalance(BigDecimal.ZERO)
+                                .build()))
+                .build());
+
+        verify(clientRepository).save(clientCaptor.capture());
+        List<ClientCompany> saved = clientCaptor.getValue().getCompanies();
+        UUID clientId = clientCaptor.getValue().getId();
+        verify(ledgerService).recordOpeningBalance(clientId, saved.get(0).getId(), new BigDecimal("25000.00"),
+                dated);
+        // Undated, so dated by the ledger on the day it is recorded; a credit stays negative.
+        verify(ledgerService).recordOpeningBalance(clientId, saved.get(2).getId(), new BigDecimal("-5000.50"),
+                null);
+        // Neither the company without one nor the one with zero records anything.
+        verify(ledgerService, times(2)).recordOpeningBalance(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("records no opening balance when no company brings one")
+    void recordsNoOpeningBalance() {
+        when(managerRepository.findById(MANAGER_ID)).thenReturn(Optional.of(manager()));
+        stubSave();
+
+        clientService.createClient(request().build());
+
+        verify(ledgerService, never()).recordOpeningBalance(any(), any(), any(), any());
+    }
+
+    @Test
     @DisplayName("returns companies ordered by name, whatever order they were supplied in")
     void ordersCompaniesByName() {
         when(managerRepository.findById(MANAGER_ID)).thenReturn(Optional.of(manager()));
@@ -210,7 +260,7 @@ class ClientServiceImplTest {
                 .lastName("  Mehta  ")
                 .phone("  +91 98200 12345  ")
                 .email("  rohan.mehta@example.com  ")
-                .companies(List.of(CompanyRequest.builder()
+                .companies(List.of(NewCompanyRequest.builder()
                         .companyName("  Mehta Textiles Pvt Ltd  ")
                         .companyType(CompanyType.PRIVATE_LIMITED)
                         .address("  12 MG Road, Bengaluru  ")
@@ -389,6 +439,91 @@ class ClientServiceImplTest {
     }
 
     @Test
+    @DisplayName("assigns several clients to a manager, changing nothing else, in the order first named")
+    void updatesManagerInBulk() {
+        Client rohan = stored("Rohan", "Mehta", "Rohan Mehta HUF");
+        Client asha = stored("Asha", "Kapoor", "Kapoor & Sons");
+        asha.setDiscountPercent(new BigDecimal("10.00"));
+        UUID newManagerId = UUID.randomUUID();
+        when(managerRepository.findById(newManagerId)).thenReturn(Optional.of(manager(newManagerId)));
+        when(clientRepository.findByIdIn(any())).thenReturn(List.of(rohan, asha));
+        when(ledgerService.pendingByClient(List.of(asha.getId(), rohan.getId())))
+                .thenReturn(Map.of(rohan.getId(), new BigDecimal("19630.00")));
+
+        List<ClientSummaryResponse> updated = clientService.updateManager(ClientManagerBulkUpdateRequest.builder()
+                .managerId(newManagerId)
+                // Asha is named twice, and is assigned once.
+                .clientIds(List.of(asha.getId(), rohan.getId(), asha.getId()))
+                .build());
+
+        verify(clientRepository).flush();
+        assertThat(rohan.getManagerId()).isEqualTo(newManagerId);
+        assertThat(asha.getManagerId()).isEqualTo(newManagerId);
+        assertThat(asha.getDiscountPercent()).isEqualTo(new BigDecimal("10.00"));
+        assertThat(updated).extracting(ClientSummaryResponse::getId).containsExactly(asha.getId(), rohan.getId());
+        assertThat(updated).allSatisfy(client -> {
+            assertThat(client.getManagerId()).isEqualTo(newManagerId);
+            assertThat(client.getManagerName()).isEqualTo("Pranay Singhal");
+        });
+        assertThat(updated).extracting(ClientSummaryResponse::getTotalPending)
+                .containsExactly(new BigDecimal("0.00"), new BigDecimal("19630.00"));
+    }
+
+    @Test
+    @DisplayName("reassigns no client when any is unknown, naming every unknown one")
+    void updateManagerRejectsUnknownClients() {
+        Client rohan = stored("Rohan", "Mehta", "Rohan Mehta HUF");
+        UUID unknown = UUID.randomUUID();
+        UUID newManagerId = UUID.randomUUID();
+        when(managerRepository.findById(newManagerId)).thenReturn(Optional.of(manager(newManagerId)));
+        when(clientRepository.findByIdIn(any())).thenReturn(List.of(rohan));
+
+        assertThatThrownBy(() -> clientService.updateManager(ClientManagerBulkUpdateRequest.builder()
+                .managerId(newManagerId)
+                .clientIds(List.of(rohan.getId(), unknown))
+                .build()))
+                .isInstanceOf(ClientsNotFoundException.class)
+                .hasMessageContaining(unknown.toString())
+                .hasMessageNotContaining(rohan.getId().toString());
+
+        assertThat(rohan.getManagerId()).isEqualTo(MANAGER_ID);
+        verify(clientRepository, never()).flush();
+    }
+
+    @Test
+    @DisplayName("reassigns no client onto a manager that does not exist")
+    void updateManagerRejectsUnknownManager() {
+        UUID unknown = UUID.randomUUID();
+        when(managerRepository.findById(unknown)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> clientService.updateManager(ClientManagerBulkUpdateRequest.builder()
+                .managerId(unknown)
+                .clientIds(List.of(UUID.randomUUID()))
+                .build()))
+                .isInstanceOf(AssignedManagerNotFoundException.class)
+                .hasMessageContaining(unknown.toString());
+
+        verify(clientRepository, never()).findByIdIn(any());
+        verify(clientRepository, never()).flush();
+    }
+
+    @Test
+    @DisplayName("maps a foreign key violation from the manager deleted concurrently onto manager not found")
+    void updateManagerMapsIntegrityViolation() {
+        Client rohan = stored("Rohan", "Mehta", "Rohan Mehta HUF");
+        UUID newManagerId = UUID.randomUUID();
+        when(managerRepository.findById(newManagerId)).thenReturn(Optional.of(manager(newManagerId)));
+        when(clientRepository.findByIdIn(any())).thenReturn(List.of(rohan));
+        doThrow(new DataIntegrityViolationException("fk_clients_manager")).when(clientRepository).flush();
+
+        assertThatThrownBy(() -> clientService.updateManager(ClientManagerBulkUpdateRequest.builder()
+                .managerId(newManagerId)
+                .clientIds(List.of(rohan.getId()))
+                .build()))
+                .isInstanceOf(AssignedManagerNotFoundException.class);
+    }
+
+    @Test
     @DisplayName("deletes a client without services")
     void deletesClient() {
         Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF", "Mehta Textiles Pvt Ltd");
@@ -417,16 +552,33 @@ class ClientServiceImplTest {
     }
 
     @Test
-    @DisplayName("maps a foreign key violation from a concurrent assignment onto client has services")
+    @DisplayName("refuses to delete a client without services but with ledger entries, naming the entries")
+    void deleteRejectsClientWithLedgerEntries() {
+        Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF");
+        when(clientRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
+        when(serviceAssignmentRepository.existsByCompanyIdIn(any())).thenReturn(false);
+        when(ledgerService.clientHasEntries(stored.getId())).thenReturn(true);
+
+        assertThatThrownBy(() -> clientService.deleteClient(stored.getId()))
+                .isInstanceOf(ClientHasLedgerEntriesException.class)
+                .hasMessageContaining("ledger entries")
+                .hasMessageNotContaining("services");
+
+        verify(clientRepository, never()).delete(any());
+    }
+
+    @Test
+    @DisplayName("maps a foreign key violation from a concurrent service or ledger entry onto resource in use")
     void deleteClientMapsIntegrityViolation() {
         Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF");
         when(clientRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
         when(serviceAssignmentRepository.existsByCompanyIdIn(any())).thenReturn(false);
-        doThrow(new DataIntegrityViolationException("fk_company_services_company"))
+        doThrow(new DataIntegrityViolationException("fk_ledger_entries_company"))
                 .when(clientRepository).flush();
 
         assertThatThrownBy(() -> clientService.deleteClient(stored.getId()))
-                .isInstanceOf(ClientHasServicesException.class);
+                .isInstanceOf(ResourceInUseException.class)
+                .hasMessageContaining("a service or a ledger entry");
     }
 
     @Test
@@ -570,12 +722,12 @@ class ClientServiceImplTest {
                 .email("rohan.mehta@example.com")
                 .managerId(MANAGER_ID)
                 .companies(List.of(
-                        CompanyRequest.builder()
+                        NewCompanyRequest.builder()
                                 .companyName("Rohan Mehta HUF")
                                 .companyType(CompanyType.HUF)
                                 .address("4 Park Street, Kolkata, West Bengal 700016")
                                 .build(),
-                        CompanyRequest.builder()
+                        NewCompanyRequest.builder()
                                 .companyName("Mehta Textiles Pvt Ltd")
                                 .companyType(CompanyType.PRIVATE_LIMITED)
                                 .address("12 MG Road, Bengaluru, Karnataka 560001")
@@ -591,8 +743,8 @@ class ClientServiceImplTest {
                 .managerId(MANAGER_ID);
     }
 
-    private CompanyRequest company(String name, BigDecimal discountPercent) {
-        return CompanyRequest.builder()
+    private NewCompanyRequest company(String name, BigDecimal discountPercent) {
+        return NewCompanyRequest.builder()
                 .companyName(name)
                 .companyType(CompanyType.PRIVATE_LIMITED)
                 .address("12 MG Road, Bengaluru, Karnataka 560001")
@@ -601,8 +753,12 @@ class ClientServiceImplTest {
     }
 
     private Manager manager() {
+        return manager(MANAGER_ID);
+    }
+
+    private Manager manager(UUID id) {
         Manager manager = new Manager();
-        manager.setId(MANAGER_ID);
+        manager.setId(id);
         manager.setFirstName("Pranay");
         manager.setLastName("Singhal");
         return manager;

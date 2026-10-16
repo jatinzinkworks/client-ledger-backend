@@ -19,6 +19,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.psc.cl.client.dto.ClientManagerBulkUpdateRequest;
 import com.psc.cl.client.dto.ClientRequest;
 import com.psc.cl.client.dto.ClientResponse;
 import com.psc.cl.client.dto.ClientSummaryResponse;
@@ -28,6 +29,7 @@ import com.psc.cl.client.dto.WhatsAppOptInRequest;
 import com.psc.cl.client.exception.AssignedManagerNotFoundException;
 import com.psc.cl.client.exception.ClientHasServicesException;
 import com.psc.cl.client.exception.ClientNotFoundException;
+import com.psc.cl.client.exception.ClientsNotFoundException;
 import com.psc.cl.client.model.CompanyType;
 import com.psc.cl.client.service.ClientService;
 import org.junit.jupiter.api.DisplayName;
@@ -463,6 +465,61 @@ class ClientControllerTest {
         mockMvc.perform(put(CLIENTS_URL + "/" + id)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(UPDATE_JSON))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+    }
+
+    @Test
+    @DisplayName("returns 200 on bulk manager update and passes the body through, not routing to /{id}")
+    void updatesManagerInBulk() throws Exception {
+        UUID first = UUID.randomUUID();
+        UUID second = UUID.randomUUID();
+        when(clientService.updateManager(any())).thenReturn(List.of(ClientSummaryResponse.builder()
+                .id(first)
+                .managerId(UUID.fromString(MANAGER_ID))
+                .managerName("Pranay Singhal")
+                .build()));
+
+        mockMvc.perform(put(CLIENTS_URL + ClientApi.MANAGER_PATH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "managerId": "%s", "clientIds": [ "%s", "%s" ] }"""
+                                .formatted(MANAGER_ID, first, second)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(first.toString()))
+                .andExpect(jsonPath("$[0].managerName").value("Pranay Singhal"));
+
+        ArgumentCaptor<ClientManagerBulkUpdateRequest> captor =
+                ArgumentCaptor.forClass(ClientManagerBulkUpdateRequest.class);
+        verify(clientService).updateManager(captor.capture());
+        assertThat(captor.getValue().managerId()).isEqualTo(UUID.fromString(MANAGER_ID));
+        assertThat(captor.getValue().clientIds()).containsExactly(first, second);
+        verify(clientService, never()).updateClient(any(), any());
+    }
+
+    @Test
+    @DisplayName("returns 400 on bulk manager update without a manager or with no clients")
+    void updateManagerRejectsInvalidBody() throws Exception {
+        mockMvc.perform(put(CLIENTS_URL + ClientApi.MANAGER_PATH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{ \"clientIds\": [] }"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[*].field", hasItem("managerId")))
+                .andExpect(jsonPath("$.errors[*].field", hasItem("clientIds")));
+
+        verify(clientService, never()).updateManager(any());
+    }
+
+    @Test
+    @DisplayName("returns 404 on bulk manager update when any client is unknown")
+    void updateManagerReturnsNotFound() throws Exception {
+        UUID unknown = UUID.randomUUID();
+        when(clientService.updateManager(any())).thenThrow(new ClientsNotFoundException(List.of(unknown)));
+
+        mockMvc.perform(put(CLIENTS_URL + ClientApi.MANAGER_PATH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "managerId": "%s", "clientIds": [ "%s" ] }""".formatted(MANAGER_ID, unknown)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
     }

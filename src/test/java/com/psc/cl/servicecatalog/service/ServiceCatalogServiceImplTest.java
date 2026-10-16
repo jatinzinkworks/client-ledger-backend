@@ -272,6 +272,13 @@ class ServiceCatalogServiceImplTest {
     }
 
     @Test
+    @DisplayName("lists every service category in declared order")
+    void listsCategories() {
+        assertThat(serviceCatalogService.listCategories())
+                .containsExactly(ServiceCategory.values());
+    }
+
+    @Test
     @DisplayName("without a financial year, adds what each service was billed across every year to date")
     void listsCatalogWithBilledToDate() {
         CatalogService monthly = stored();

@@ -9,6 +9,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.lowagie.text.pdf.PdfReader;
+import com.lowagie.text.pdf.parser.PdfTextExtractor;
 import com.psc.cl.client.exception.ClientNotFoundException;
 import com.psc.cl.client.exception.CompanyNotFoundException;
 import com.psc.cl.client.model.Client;
@@ -38,9 +40,11 @@ import com.psc.cl.ledger.dto.MonthlyTotals;
 import com.psc.cl.ledger.dto.PaymentListResponse;
 import com.psc.cl.ledger.dto.PaymentRequest;
 import com.psc.cl.ledger.dto.UnpaidCharge;
+import com.psc.cl.ledger.exception.FutureOpeningBalanceDateException;
 import com.psc.cl.ledger.exception.FuturePaymentDateException;
 import com.psc.cl.ledger.exception.LedgerEntryNotFoundException;
 import com.psc.cl.ledger.exception.NotAPaymentException;
+import com.psc.cl.ledger.exception.OpeningBalanceNotCorrectableException;
 import com.psc.cl.ledger.exception.PaymentNotCorrectableException;
 import com.psc.cl.ledger.model.FinancialYear;
 import com.psc.cl.ledger.model.LedgerEntry;
@@ -58,6 +62,7 @@ import com.psc.cl.ledger.repository.ManagerBalanceRow;
 import com.psc.cl.ledger.repository.ManagerPendingRow;
 import com.psc.cl.ledger.repository.PostedPeriod;
 import com.psc.cl.ledger.repository.ServiceBilledRow;
+import com.psc.cl.service.XlsxWorkbookTest;
 import com.psc.cl.servicecatalog.model.BillingFrequency;
 import com.psc.cl.servicecatalog.model.CatalogService;
 import com.psc.cl.servicecatalog.repository.CatalogServiceRepository;
@@ -72,6 +77,7 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -480,6 +486,51 @@ class LedgerServiceImplTest {
                 .isInstanceOf(LedgerEntryNotFoundException.class);
 
         verify(ledgerEntryRepository, never()).flush();
+    }
+
+    @Test
+    @DisplayName("refuses to correct the rates of an opening balance, which has none")
+    void refusesToCorrectOpeningBalance() {
+        stubCompany();
+        LedgerEntry opening = new LedgerEntry();
+        opening.setId(UUID.randomUUID());
+        opening.setEntryType(LedgerEntryType.OPENING_BALANCE);
+        opening.setTotalAmount(new BigDecimal("25000.00"));
+        when(ledgerEntryRepository.findByIdAndCompanyId(opening.getId(), COMPANY_ID)).thenReturn(Optional.of(opening));
+
+        assertThatThrownBy(() -> ledgerService.updateEntry(CLIENT_ID, COMPANY_ID, opening.getId(),
+                LedgerEntryUpdateRequest.builder()
+                        .serviceFee(new BigDecimal("6000"))
+                        .discountPercent(new BigDecimal("10"))
+                        .gstRatePercent(new BigDecimal("18"))
+                        .build()))
+                .isInstanceOf(OpeningBalanceNotCorrectableException.class);
+
+        assertThat(opening.getTotalAmount()).isEqualTo(new BigDecimal("25000.00"));
+        verify(ledgerEntryRepository, never()).flush();
+    }
+
+    @Test
+    @DisplayName("counts a company's opening balance in what is pending, apart from what was billed")
+    void summarisesCompanyYearWithOpeningBalance() {
+        stubCompany();
+        LocalDate from = LocalDate.of(2026, 4, 1);
+        LocalDate to = LocalDate.of(2027, 3, 31);
+        when(ledgerEntryRepository.totalCompanyEntries(COMPANY_ID, from, to)).thenReturn(List.of(
+                LedgerSummariesTest.row(COMPANY_ID, "2026-27", 2, "35000.00", "1750.00", "33250.00", "5985.00",
+                        "39235.00"),
+                LedgerSummariesTest.opening(COMPANY_ID, "2026-27", "25000.00"),
+                LedgerSummariesTest.payment(COMPANY_ID, "2026-27", 2, "-15000.00")));
+        when(ledgerEntryRepository.findFirstByCompanyIdAndEntryTypeAndDueDateBetweenOrderByDueDateDescCreatedAtDesc(
+                COMPANY_ID, LedgerEntryType.PAYMENT, from, to)).thenReturn(Optional.empty());
+
+        CompanyLedgerSummaryResponse summary = ledgerService.summarizeCompany(CLIENT_ID, COMPANY_ID,
+                FinancialYears.parse("2026-27"));
+
+        assertThat(summary.getTotalBilled()).isEqualTo(new BigDecimal("39235.00"));
+        assertThat(summary.getOpeningBalance()).isEqualTo(new BigDecimal("25000.00"));
+        assertThat(summary.getTotalPaymentReceived()).isEqualTo(new BigDecimal("15000.00"));
+        assertThat(summary.getPending()).isEqualTo(new BigDecimal("49235.00"));
     }
 
     @Test
@@ -1050,9 +1101,11 @@ class LedgerServiceImplTest {
     void appliesPaymentsOldestChargeFirst() {
         UUID otherCompany = UUID.randomUUID();
         UUID settledCompany = UUID.randomUUID();
-        when(ledgerEntryRepository.totalPaidByCompany(LedgerEntryType.PAYMENT, TODAY)).thenReturn(List.of(
+        when(ledgerEntryRepository.totalPaidByCompany(LedgerEntryType.PAYMENT, LedgerEntryType.OPENING_BALANCE,
+                TODAY)).thenReturn(List.of(
                 companyPaid(COMPANY_ID, "-15000.00"), companyPaid(settledCompany, "-9000.00")));
-        when(ledgerEntryRepository.chargesByCompanyAndDueDate(LedgerEntryType.SERVICE_CHARGE, TODAY))
+        when(ledgerEntryRepository.chargesByCompanyAndDueDate(LedgerEntryType.SERVICE_CHARGE,
+                LedgerEntryType.OPENING_BALANCE, TODAY))
                 .thenReturn(List.of(
                         companyCharge(COMPANY_ID, LocalDate.of(2026, 6, 1), "10000.00"),
                         companyCharge(settledCompany, LocalDate.of(2026, 6, 15), "8000.00"),
@@ -1300,6 +1353,93 @@ class LedgerServiceImplTest {
         verify(ledgerEntryRepository, never()).findAllByCompanyIdAndDueDateBetween(any(), any(), any(), any());
     }
 
+    @Test
+    @DisplayName("writes a client's year as a PDF statement named after them, with the summary and a page per company")
+    void writesClientStatement() throws IOException {
+        client.setFirstName("Rohan");
+        client.setLastName("Mehta");
+        when(clientRepository.findById(CLIENT_ID)).thenReturn(Optional.of(client));
+        LocalDate from = LocalDate.of(2026, 4, 1);
+        LocalDate to = LocalDate.of(2027, 3, 31);
+        when(ledgerEntryRepository.totalClientEntries(CLIENT_ID, from, to)).thenReturn(List.of(
+                LedgerSummariesTest.row(COMPANY_ID, "2026-27", 1, "5000.00", "250.00", "4750.00", "855.00",
+                        "5605.00")));
+        when(ledgerEntryRepository.findFirstByClientIdAndEntryTypeAndDueDateBetweenOrderByDueDateDescCreatedAtDesc(
+                CLIENT_ID, LedgerEntryType.PAYMENT, from, to)).thenReturn(Optional.empty());
+        when(ledgerEntryRepository.findAllByClientIdAndDueDateBetween(CLIENT_ID, from, to, EARLIEST_DUE_FIRST))
+                .thenReturn(List.of(storedEntry()));
+
+        LedgerExport statement = ledgerService.statementForClient(CLIENT_ID, FinancialYears.parse("2026-27"));
+
+        assertThat(statement.fileName()).isEqualTo("Rohan_Mehta_Ledger_FY2026-27.pdf");
+        PdfReader reader = new PdfReader(statement.content());
+        // The summary, then the client's only company on a page of its own.
+        assertThat(reader.getNumberOfPages()).isEqualTo(2);
+        PdfTextExtractor extractor = new PdfTextExtractor(reader);
+        assertThat(extractor.getTextFromPage(1))
+                .contains("Rohan Mehta")
+                .contains("5,605.00")
+                // Generated on the firm's today.
+                .contains("14 Oct 2026");
+        assertThat(extractor.getTextFromPage(2))
+                .contains("Mehta Textiles Pvt Ltd")
+                .contains("GST Monthly Return Filing")
+                .doesNotContain("Discount");
+    }
+
+    @Test
+    @DisplayName("raises not found when writing the statement of an unknown client")
+    void writesStatementOfUnknownClient() {
+        when(clientRepository.findById(CLIENT_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> ledgerService.statementForClient(CLIENT_ID, FinancialYears.parse("2026-27")))
+                .isInstanceOf(ClientNotFoundException.class);
+
+        verify(ledgerEntryRepository, never()).findAllByClientIdAndDueDateBetween(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("writes a company's year as a PDF statement named after it, with its summary and entries")
+    void writesCompanyStatement() throws IOException {
+        client.setFirstName("Rohan");
+        client.setLastName("Mehta");
+        stubCompany();
+        LocalDate from = LocalDate.of(2026, 4, 1);
+        LocalDate to = LocalDate.of(2027, 3, 31);
+        when(ledgerEntryRepository.totalCompanyEntries(COMPANY_ID, from, to)).thenReturn(List.of(
+                LedgerSummariesTest.row(COMPANY_ID, "2026-27", 1, "5000.00", "250.00", "4750.00", "855.00",
+                        "5605.00")));
+        when(ledgerEntryRepository.findFirstByCompanyIdAndEntryTypeAndDueDateBetweenOrderByDueDateDescCreatedAtDesc(
+                COMPANY_ID, LedgerEntryType.PAYMENT, from, to)).thenReturn(Optional.empty());
+        when(ledgerEntryRepository.findAllByCompanyIdAndDueDateBetween(COMPANY_ID, from, to, EARLIEST_DUE_FIRST))
+                .thenReturn(List.of(storedEntry()));
+
+        LedgerExport statement = ledgerService.statementForCompany(CLIENT_ID, COMPANY_ID,
+                FinancialYears.parse("2026-27"));
+
+        assertThat(statement.fileName()).isEqualTo("Mehta_Textiles_Pvt_Ltd_Ledger_FY2026-27.pdf");
+        PdfReader reader = new PdfReader(statement.content());
+        assertThat(reader.getNumberOfPages()).isEqualTo(1);
+        assertThat(new PdfTextExtractor(reader).getTextFromPage(1))
+                .contains("Rohan Mehta")
+                .contains("Mehta Textiles Pvt Ltd")
+                .contains("GST Monthly Return Filing")
+                .contains("5,605.00");
+    }
+
+    @Test
+    @DisplayName("raises not found when writing the statement of a company the client does not hold")
+    void writesStatementOfUnknownCompany() {
+        when(clientRepository.existsById(CLIENT_ID)).thenReturn(true);
+        when(clientCompanyRepository.findByIdAndClientId(COMPANY_ID, CLIENT_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> ledgerService.statementForCompany(CLIENT_ID, COMPANY_ID,
+                FinancialYears.parse("2026-27")))
+                .isInstanceOf(CompanyNotFoundException.class);
+
+        verify(ledgerEntryRepository, never()).findAllByCompanyIdAndDueDateBetween(any(), any(), any(), any());
+    }
+
     private ClientCompany company(UUID id, String name) {
         ClientCompany other = new ClientCompany();
         other.setId(id);
@@ -1409,6 +1549,60 @@ class LedgerServiceImplTest {
                 .build()))
                 .isInstanceOf(FuturePaymentDateException.class)
                 .hasMessageContaining("2026-10-15");
+
+        verify(ledgerEntryRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("records an opening balance on its date, with no service or payment figures")
+    void recordsOpeningBalance() {
+        when(ledgerEntryRepository.save(any(LedgerEntry.class))).thenAnswer(invocation -> {
+            LedgerEntry saved = invocation.getArgument(0);
+            saved.setId(UUID.randomUUID());
+            return saved;
+        });
+
+        LedgerEntryResponse opening = ledgerService.recordOpeningBalance(CLIENT_ID, COMPANY_ID,
+                new BigDecimal("25000.5"), LocalDate.of(2026, 3, 31));
+
+        ArgumentCaptor<LedgerEntry> captor = ArgumentCaptor.forClass(LedgerEntry.class);
+        verify(ledgerEntryRepository).save(captor.capture());
+        LedgerEntry stored = captor.getValue();
+        assertThat(stored.getEntryType()).isEqualTo(LedgerEntryType.OPENING_BALANCE);
+        assertThat(stored.getClientId()).isEqualTo(CLIENT_ID);
+        assertThat(stored.getCompanyId()).isEqualTo(COMPANY_ID);
+        assertThat(stored.getTotalAmount()).isEqualTo(new BigDecimal("25000.50"));
+        assertThat(stored.getDueDate()).isEqualTo(LocalDate.of(2026, 3, 31));
+        // Dated before 1 April, so it falls in the earlier financial year.
+        assertThat(stored.getFinancialYear()).isEqualTo("2025-26");
+        assertThat(stored.getEntryDate()).isEqualTo(TODAY);
+        assertThat(stored.getServiceFee()).isNull();
+        assertThat(stored.getPaymentMethod()).isNull();
+        assertThat(opening.getEntryType()).isEqualTo(LedgerEntryType.OPENING_BALANCE);
+    }
+
+    @Test
+    @DisplayName("dates an undated opening balance today, and keeps a credit negative")
+    void recordsUndatedCreditOpeningBalance() {
+        when(ledgerEntryRepository.save(any(LedgerEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        LedgerEntryResponse opening = ledgerService.recordOpeningBalance(CLIENT_ID, COMPANY_ID,
+                new BigDecimal("-5000"), null);
+
+        assertThat(opening.getTotalAmount()).isEqualTo(new BigDecimal("-5000.00"));
+        assertThat(opening.getDueDate()).isEqualTo(TODAY);
+        assertThat(opening.getFinancialYear()).isEqualTo("2026-27");
+    }
+
+    @Test
+    @DisplayName("refuses an opening balance dated after today, or of zero")
+    void refusesFutureOrZeroOpeningBalance() {
+        assertThatThrownBy(() -> ledgerService.recordOpeningBalance(CLIENT_ID, COMPANY_ID, new BigDecimal("100"),
+                LocalDate.of(2026, 10, 15)))
+                .isInstanceOf(FutureOpeningBalanceDateException.class)
+                .hasMessageContaining("2026-10-15");
+        assertThatThrownBy(() -> ledgerService.recordOpeningBalance(CLIENT_ID, COMPANY_ID, BigDecimal.ZERO, null))
+                .isInstanceOf(IllegalArgumentException.class);
 
         verify(ledgerEntryRepository, never()).save(any());
     }

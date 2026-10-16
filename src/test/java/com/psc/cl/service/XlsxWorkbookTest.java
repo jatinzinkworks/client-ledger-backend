@@ -1,9 +1,9 @@
-package com.psc.cl.ledger.service;
+package com.psc.cl.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.psc.cl.ledger.service.XlsxWorkbook.Cell;
+import com.psc.cl.service.XlsxWorkbook.Cell;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -18,7 +18,7 @@ import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
-class XlsxWorkbookTest {
+public class XlsxWorkbookTest {
 
     @Test
     @DisplayName("packages the parts Excel needs, with one worksheet per sheet, named in order")
@@ -129,9 +129,10 @@ class XlsxWorkbookTest {
     }
 
     /**
-     * Unzips a workbook into its parts, by name, each read as UTF-8 text.
+     * Unzips a workbook into its parts, by name, each read as UTF-8 text. Public for the tests of the
+     * workbooks other modules write.
      */
-    static Map<String, String> parts(byte[] xlsx) {
+    public static Map<String, String> parts(byte[] xlsx) {
         Map<String, String> parts = new LinkedHashMap<>();
         try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(xlsx), StandardCharsets.UTF_8)) {
             for (ZipEntry entry = zip.getNextEntry(); entry != null; entry = zip.getNextEntry()) {

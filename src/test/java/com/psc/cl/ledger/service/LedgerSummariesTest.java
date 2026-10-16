@@ -2,6 +2,7 @@ package com.psc.cl.ledger.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 import com.psc.cl.ledger.dto.CompanyBalance;
 import com.psc.cl.ledger.dto.CompanyTotals;
@@ -137,6 +138,46 @@ class LedgerSummariesTest {
     }
 
     @Test
+    @DisplayName("keeps opening balances apart from what was billed, counting them in the balance owed")
+    void totalsOpeningBalancesApart() {
+        LedgerSummary summary = LedgerSummaries.of(List.of(TEXTILES_2026_27,
+                opening(TEXTILES, "2026-27", "25000.00"), opening(HUF, "2026-27", "-2000.00"),
+                payment(TEXTILES, "2026-27", 1, "-5605.00")), NAMES);
+
+        assertThat(summary.getEntryCount()).isEqualTo(5);
+        assertThat(summary.getTotalAmount()).isEqualTo(new BigDecimal("11210.00"));
+        assertThat(summary.getTotalServiceFee()).isEqualTo(new BigDecimal("10000.00"));
+        assertThat(summary.getOpeningBalance()).isEqualTo(new BigDecimal("23000.00"));
+        assertThat(summary.getTotalPaid()).isEqualTo(new BigDecimal("5605.00"));
+        // 11210.00 billed + 23000.00 brought over - 5605.00 paid.
+        assertThat(summary.getBalance()).isEqualTo(new BigDecimal("28605.00"));
+        assertThat(summary.getByFinancialYear().getFirst().getOpeningBalance()).isEqualTo(new BigDecimal("23000.00"));
+        assertThat(summary.getByCompany()).extracting(CompanyTotals::getOpeningBalance, CompanyTotals::getBalance)
+                .containsExactly(
+                        tuple(new BigDecimal("25000.00"), new BigDecimal("30605.00")),
+                        tuple(new BigDecimal("-2000.00"), new BigDecimal("-2000.00")));
+
+        Map<UUID, CompanyBalance> balances = LedgerSummaries.balancesByCompany(List.of(TEXTILES_2026_27,
+                opening(TEXTILES, "2026-27", "25000.00")));
+        assertThat(balances.get(TEXTILES)).isEqualTo(new CompanyBalance(new BigDecimal("11210.00"),
+                new BigDecimal("0.00"), new BigDecimal("36210.00"), new BigDecimal("25000.00")));
+    }
+
+    @Test
+    @DisplayName("shows an opening balance in its year's status, in the closing balance but not as billed")
+    void statusesCountOpeningBalances() {
+        FinancialYear year = FinancialYears.parse("2026-27");
+
+        FinancialYearStatus status = LedgerSummaries.statusesByYear(List.of(TEXTILES_2026_27,
+                opening(TEXTILES, "2026-27", "25000.00")), NAMES, List.of(year), year, false).getFirst();
+
+        assertThat(status.getBilled()).isEqualTo(new BigDecimal("11710.00"));
+        assertThat(status.getOpeningBalance()).isEqualTo(new BigDecimal("25000.00"));
+        assertThat(status.getClosingBalance()).isEqualTo(new BigDecimal("36210.00"));
+        assertThat(status.getCompanies().getFirst().getOpeningBalance()).isEqualTo(new BigDecimal("25000.00"));
+    }
+
+    @Test
     @DisplayName("totals only the payments for a payment list, leaving service charges out")
     void totalsPaymentsAlone() {
         PaymentSummary summary = LedgerSummaries.payments(List.of(TEXTILES_2026_27,
@@ -155,10 +196,10 @@ class LedgerSummariesTest {
 
         assertThat(balances).containsOnlyKeys(TEXTILES, HUF);
         assertThat(balances.get(TEXTILES)).isEqualTo(new CompanyBalance(new BigDecimal("11210.00"),
-                new BigDecimal("5605.00"), new BigDecimal("5605.00")));
+                new BigDecimal("5605.00"), new BigDecimal("5605.00"), new BigDecimal("0.00")));
         // Paid without being billed: nothing charged, so a negative pending amount.
         assertThat(balances.get(HUF)).isEqualTo(new CompanyBalance(new BigDecimal("0.00"),
-                new BigDecimal("2000.00"), new BigDecimal("-2000.00")));
+                new BigDecimal("2000.00"), new BigDecimal("-2000.00"), new BigDecimal("0.00")));
         assertThat(LedgerSummaries.balancesByCompany(List.of())).isEmpty();
     }
 
@@ -322,6 +363,11 @@ class LedgerSummariesTest {
     /** A row of payments, which carry no service figures; the total received is given as stored, negative. */
     static LedgerTotalsRow payment(UUID companyId, String financialYear, long entryCount, String total) {
         return row(companyId, financialYear, LedgerEntryType.PAYMENT, entryCount, null, null, null, null, total);
+    }
+
+    /** A company's opening balance, which carries no service figures: positive when owed, negative in credit. */
+    static LedgerTotalsRow opening(UUID companyId, String financialYear, String total) {
+        return row(companyId, financialYear, LedgerEntryType.OPENING_BALANCE, 1, null, null, null, null, total);
     }
 
     private static LedgerTotalsRow row(UUID companyId, String financialYear, LedgerEntryType entryType,

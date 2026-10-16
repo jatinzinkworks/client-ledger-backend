@@ -96,6 +96,15 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 .body(body(HttpStatus.BAD_REQUEST, "INVALID_REQUEST", ex.getMessage(), request, null));
     }
 
+    @ExceptionHandler(SpreadsheetValidationException.class)
+    public ResponseEntity<ErrorResponse> handleSpreadsheetValidation(SpreadsheetValidationException ex,
+                                                                     WebRequest request) {
+        log.warn("Spreadsheet rejected on {}: {} ({} cell error(s))", path(request), ex.getMessage(),
+                ex.getErrors().size());
+        return ResponseEntity.badRequest()
+                .body(body(HttpStatus.BAD_REQUEST, "SPREADSHEET_INVALID", ex.getMessage(), request, ex.getErrors()));
+    }
+
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleNotFound(ResourceNotFoundException ex, WebRequest request) {
         log.warn("Not found on {}: {}", path(request), ex.getMessage());

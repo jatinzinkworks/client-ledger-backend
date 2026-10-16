@@ -24,7 +24,8 @@ import java.util.UUID;
  *
  * <p>Every field except the discount is mandatory, and at least one company must be supplied.
  * Values are trimmed before storage, and the assigned manager must exist in the Manager Catalog.
- * The discount defaults to zero, and applies to every company that does not set its own.
+ * The discount defaults to zero, and applies to every company that does not set its own. Each
+ * company may bring an opening balance, recorded in its ledger.
  */
 @Builder
 @Schema(name = "ClientRequest", description = "Client to add, with the companies they hold")
@@ -81,11 +82,11 @@ public record ClientRequest(
         @NotEmpty(message = "must contain at least one company")
         @Size(max = ClientRequest.MAX_COMPANIES, message = "must not contain more than 50 companies")
         @ArraySchema(
-                arraySchema = @Schema(description = "Companies the client owns or acts for",
-                        requiredMode = Schema.RequiredMode.REQUIRED),
+                arraySchema = @Schema(description = "Companies the client owns or acts for, each with any "
+                        + "balance it is taken on with", requiredMode = Schema.RequiredMode.REQUIRED),
                 minItems = 1, maxItems = ClientRequest.MAX_COMPANIES,
-                schema = @Schema(implementation = CompanyRequest.class))
-        List<@NotNull(message = "must not be null") @Valid CompanyRequest> companies) implements ClientDetails {
+                schema = @Schema(implementation = NewCompanyRequest.class))
+        List<@NotNull(message = "must not be null") @Valid NewCompanyRequest> companies) implements ClientDetails {
 
     /** Most companies accepted for one client in a single request. */
     public static final int MAX_COMPANIES = 50;

@@ -33,8 +33,8 @@ public class LedgerEntryResponse {
     @Schema(description = "Identifier of the company billed", example = "4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28")
     UUID companyId;
 
-    @Schema(description = "SERVICE_CHARGE for an amount owed for a service, PAYMENT for an amount received",
-            example = "SERVICE_CHARGE")
+    @Schema(description = "SERVICE_CHARGE for an amount owed for a service, PAYMENT for an amount received, "
+            + "OPENING_BALANCE for the balance the company was taken on with", example = "SERVICE_CHARGE")
     LedgerEntryType entryType;
 
     @Schema(description = "Identifier of the service as assigned to the company",
@@ -52,7 +52,8 @@ public class LedgerEntryResponse {
     BillingFrequency serviceType;
 
     @Schema(description = "For a service charge, the date the service fell due, which it bills; for a "
-            + "payment, the date it was received", example = "2026-10-07")
+            + "payment, the date it was received; for an opening balance, the date it stood at",
+            example = "2026-10-07")
     LocalDate dueDate;
 
     @Schema(description = "Indian financial year (1 April to 31 March) the due date falls in",
@@ -81,7 +82,8 @@ public class LedgerEntryResponse {
     BigDecimal gstAmount;
 
     @Schema(description = "For a service charge, the amount owed: the taxable amount plus GST. For a "
-            + "payment, the amount received as a negative number", example = "5605.00")
+            + "payment, the amount received as a negative number. For an opening balance, the balance "
+            + "brought over: positive when owed, negative when in credit", example = "5605.00")
     BigDecimal totalAmount;
 
     @Schema(description = "How a payment was received", example = "BANK_TRANSFER")

@@ -249,7 +249,7 @@ class OverviewServiceImplTest {
         assertThat(response.getFinancialYear()).isEqualTo("2026-27");
         assertThat(response.getCategories()).extracting(CategoryBilling::getCategory).containsExactly(
                 ServiceCategory.COMPLIANCE, ServiceCategory.TAX, ServiceCategory.AUDIT,
-                ServiceCategory.ACCOUNTING, ServiceCategory.ADVISORY);
+                ServiceCategory.ACCOUNTING, ServiceCategory.ADVISORY, ServiceCategory.CERTIFICATION);
         CategoryBilling compliance = response.getCategories().getFirst();
         assertThat(compliance.getBilled()).isEqualTo(new BigDecimal("11000.00"));
         assertThat(compliance.getServiceCount()).isEqualTo(2L);

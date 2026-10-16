@@ -5,6 +5,7 @@ import com.psc.cl.dto.ErrorResponse;
 import com.psc.cl.servicecatalog.dto.CatalogServiceRequest;
 import com.psc.cl.servicecatalog.dto.CatalogServiceResponse;
 import com.psc.cl.servicecatalog.dto.ServiceFeeBulkUpdateRequest;
+import com.psc.cl.servicecatalog.model.ServiceCategory;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
@@ -44,6 +45,9 @@ public interface ServiceCatalogApi {
 
     /** Path the standard fees of several services are changed through, relative to {@link #BASE_PATH}. */
     String FEES_PATH = "/fees";
+
+    /** Path the service categories are listed at, relative to {@link #BASE_PATH}. */
+    String CATEGORIES_PATH = "/categories";
 
     @Operation(
             summary = "Create a service",
@@ -116,6 +120,22 @@ public interface ServiceCatalogApi {
                     + "total each service's billed amount for. Omit to total every year to date",
                     example = "2026-27")
             @RequestParam(required = false) String financialYear);
+
+    @Operation(
+            summary = "List service categories",
+            description = "Returns every category a service can belong to, in their declared order. "
+                    + "These are the values accepted for a service's category.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Every service category",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            array = @ArraySchema(
+                                    schema = @Schema(implementation = ServiceCategory.class)))),
+            @ApiResponse(responseCode = "500", description = "Unexpected server error",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class)))})
+    // A literal path, so Spring routes it here rather than to getService's /{id}.
+    @GetMapping(CATEGORIES_PATH)
+    ResponseEntity<List<ServiceCategory>> listCategories();
 
     @Operation(
             summary = "Update a service",

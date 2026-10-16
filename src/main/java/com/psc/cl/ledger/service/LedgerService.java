@@ -80,6 +80,42 @@ public interface LedgerService {
     LedgerEntryResponse recordPayment(UUID clientId, UUID companyId, PaymentRequest request);
 
     /**
+     * Records the balance a company was taken on with, brought over from before the firm kept its
+     * ledger here, as an entry in its ledger. It is meant for a company being added, in the same
+     * transaction, so the company is not looked up again; foreign keys hold it to its client. A
+     * company has at most one opening balance.
+     *
+     * @param clientId    the client
+     * @param companyId   the company of the client
+     * @param amount      the balance, at most two decimals: positive when the company owes it, negative
+     *                    when it starts in credit; never zero
+     * @param balanceDate the date the balance stood at, which places it in a financial year; null for
+     *                    today
+     * @return the ledger entry recorded for the opening balance
+     * @throws com.psc.cl.ledger.exception.FutureOpeningBalanceDateException when the date is after today
+     * @throws IllegalArgumentException when the amount is zero
+     */
+    LedgerEntryResponse recordOpeningBalance(UUID clientId, UUID companyId, BigDecimal amount,
+                                             LocalDate balanceDate);
+
+    /**
+     * Whether any company of a client has an entry in its ledger, of any type: a service charge, a
+     * payment or an opening balance.
+     *
+     * @param clientId the client
+     * @return true when the client's ledger holds anything
+     */
+    boolean clientHasEntries(UUID clientId);
+
+    /**
+     * Whether a company has an entry in its ledger, of any type.
+     *
+     * @param companyId the company
+     * @return true when the company's ledger holds anything
+     */
+    boolean companyHasEntries(UUID companyId);
+
+    /**
      * Lists one page of the payments recorded for one company of a client.
      *
      * @param clientId  the client
@@ -179,6 +215,34 @@ public interface LedgerService {
      *         exports, with zero totals and an empty ledger
      */
     LedgerExport exportCompany(UUID clientId, UUID companyId, FinancialYear financialYear);
+
+    /**
+     * Writes a client's ledger statement for one financial year as a PDF, to send to the client: the
+     * figures of {@link #summarizeClient} with a line per company, then each company's entries of the
+     * year, earliest first, with a running balance and totals, on a page per company. Each charge is
+     * shown only as its total fee, with discount and GST folded in; no discount is shown.
+     *
+     * @param clientId      the client
+     * @param financialYear the financial year of the statement
+     * @return the .pdf file, named after the client and the year, such as
+     *         {@code Rohan_Mehta_Ledger_FY2026-27.pdf}
+     * @throws com.psc.cl.client.exception.ClientNotFoundException
+     *         when no client carries this identifier
+     */
+    LedgerExport statementForClient(UUID clientId, FinancialYear financialYear);
+
+    /**
+     * Writes the ledger statement of one company of a client for one financial year as a PDF, to send
+     * to the client: the figures of {@link #summarizeCompany}, then the company's entries of the year,
+     * laid out as in {@link #statementForClient}.
+     *
+     * @param clientId      the client
+     * @param companyId     the company of the client
+     * @param financialYear the financial year of the statement
+     * @return the .pdf file, named after the company and the year, such as
+     *         {@code Mehta_Textiles_Pvt_Ltd_Ledger_FY2026-27.pdf}
+     */
+    LedgerExport statementForCompany(UUID clientId, UUID companyId, FinancialYear financialYear);
 
     /**
      * What each of the given clients still owes: billed less received across all of their companies

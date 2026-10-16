@@ -85,7 +85,7 @@ public class NotificationServiceImpl implements NotificationService {
         Client client = requireClient(clientId);
         List<String> cc = managerEmail(client);
         FirmDetails firm = firm();
-        LedgerExport ledger = ledgerService.exportCompany(clientId, companyId, year);
+        LedgerExport ledger = ledgerService.statementForCompany(clientId, companyId, year);
 
         LedgerSummaryEmail email = LedgerSummaryEmail.forCompany(summary, client.getFirstName(), firm, today,
                 ledger.fileName());
@@ -171,7 +171,7 @@ public class NotificationServiceImpl implements NotificationService {
         List<String> cc = managerEmail(client);
         FirmDetails firm = firm();
         List<LedgerSummaryEmail.CompanyLine> companies = companyLines(clientId, year);
-        LedgerExport ledger = ledgerService.exportClient(clientId, year);
+        LedgerExport ledger = ledgerService.statementForClient(clientId, year);
 
         LedgerSummaryEmail email = paymentReminder
                 ? LedgerSummaryEmail.paymentReminderForClient(summary, reminderPending, companies,
@@ -229,7 +229,7 @@ public class NotificationServiceImpl implements NotificationService {
                 .map(company -> {
                     CompanyBalance balance = balances.getOrDefault(company.getId(), CompanyBalance.ZERO);
                     return new LedgerSummaryEmail.CompanyLine(company.getCompanyName(), balance.totalBilled(),
-                            balance.totalPaymentReceived(), balance.pending());
+                            balance.openingBalance(), balance.totalPaymentReceived(), balance.pending());
                 })
                 .toList();
     }
@@ -294,7 +294,7 @@ public class NotificationServiceImpl implements NotificationService {
             helper.setSubject(email.subject());
             helper.setText(email.text(), email.html());
             helper.addAttachment(ledger.fileName(), new ByteArrayResource(ledger.content()),
-                    LedgerExport.XLSX_MEDIA_TYPE);
+                    LedgerExport.PDF_MEDIA_TYPE);
             mailSender.send(message);
         } catch (MessagingException | UnsupportedEncodingException e) {
             throw new EmailDeliveryException("The ledger summary email could not be prepared", e);

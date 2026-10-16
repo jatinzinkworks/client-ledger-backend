@@ -9,5 +9,12 @@ public enum LedgerEntryType {
     SERVICE_CHARGE,
 
     /** An amount received from the company; a negative total, with the payment details filled in. */
-    PAYMENT
+    PAYMENT,
+
+    /**
+     * What a company owed, or was owed, when it was taken on: the balance brought over from before
+     * the firm kept its ledger here. Positive when the company owes it, negative when it starts in
+     * credit; never zero. No service or payment field is filled in. At most one per company.
+     */
+    OPENING_BALANCE
 }

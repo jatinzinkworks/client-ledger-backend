@@ -28,9 +28,11 @@ import com.psc.cl.ledger.dto.PageMetadata;
 import com.psc.cl.ledger.dto.PaymentListResponse;
 import com.psc.cl.ledger.dto.PaymentRequest;
 import com.psc.cl.ledger.dto.UnpaidCharge;
+import com.psc.cl.ledger.exception.FutureOpeningBalanceDateException;
 import com.psc.cl.ledger.exception.FuturePaymentDateException;
 import com.psc.cl.ledger.exception.LedgerEntryNotFoundException;
 import com.psc.cl.ledger.exception.NotAPaymentException;
+import com.psc.cl.ledger.exception.OpeningBalanceNotCorrectableException;
 import com.psc.cl.ledger.exception.PaymentNotCorrectableException;
 import com.psc.cl.ledger.model.FinancialYear;
 import com.psc.cl.ledger.model.LedgerEntry;
@@ -185,6 +187,9 @@ public class LedgerServiceImpl implements LedgerService {
         if (entry.getEntryType() == LedgerEntryType.PAYMENT) {
             throw new PaymentNotCorrectableException(entryId);
         }
+        if (entry.getEntryType() == LedgerEntryType.OPENING_BALANCE) {
+            throw new OpeningBalanceNotCorrectableException(entryId);
+        }
 
         // Same rounding as posting, so the corrected figures still add up.
         LedgerAmounts amounts = LedgerAmounts.calculate(twoPlaces(request.serviceFee()),
@@ -217,6 +222,47 @@ public class LedgerServiceImpl implements LedgerService {
                 saved.getPaymentMethod(), companyId, clientId, saved.getDueDate());
 
         return LedgerEntryResponse.from(saved);
+    }
+
+    @Override
+    @Transactional
+    public LedgerEntryResponse recordOpeningBalance(UUID clientId, UUID companyId, BigDecimal amount,
+                                                    LocalDate balanceDate) {
+        if (amount.signum() == 0) {
+            throw new IllegalArgumentException("An opening balance of zero is not recorded");
+        }
+        // "Today" is the firm's calendar day, read from the business clock.
+        LocalDate today = LocalDate.now(clock);
+        LocalDate date = balanceDate == null ? today : balanceDate;
+        if (date.isAfter(today)) {
+            throw new FutureOpeningBalanceDateException(date, today);
+        }
+
+        LedgerEntry opening = new LedgerEntry();
+        opening.setClientId(clientId);
+        opening.setCompanyId(companyId);
+        opening.setEntryType(LedgerEntryType.OPENING_BALANCE);
+        opening.setDueDate(date);
+        opening.setFinancialYear(FinancialYears.of(date));
+        opening.setEntryDate(today);
+        opening.setTotalAmount(twoPlaces(amount));
+
+        LedgerEntry saved = ledgerEntryRepository.save(opening);
+        log.info("Recorded the opening balance {} of company {} of client {}, as of {}", saved.getId(), companyId,
+                clientId, date);
+        return LedgerEntryResponse.from(saved);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public boolean clientHasEntries(UUID clientId) {
+        return ledgerEntryRepository.existsByClientId(clientId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public boolean companyHasEntries(UUID companyId) {
+        return ledgerEntryRepository.existsByCompanyId(companyId);
     }
 
     @Override
@@ -310,8 +356,7 @@ public class LedgerServiceImpl implements LedgerService {
                         LedgerEntryType.PAYMENT, from, to)
                 .orElse(null);
 
-        return companySummary(clientId, company, financialYear, totals.getTotalAmount(), totals.getTotalPaid(),
-                totals.getTotalDiscountAmount(), lastPayment);
+        return companySummary(clientId, company, financialYear, totals, lastPayment);
     }
 
     @Override
@@ -339,6 +384,7 @@ public class LedgerServiceImpl implements LedgerService {
                 .fromDate(from)
                 .toDate(to)
                 .totalBilled(totals.getTotalAmount())
+                .openingBalance(totals.getOpeningBalance())
                 .totalPaymentReceived(totals.getTotalPaid())
                 .pending(totals.getBalance())
                 .totalDiscount(totals.getTotalDiscountAmount())
@@ -440,6 +486,42 @@ public class LedgerServiceImpl implements LedgerService {
         return new LedgerExport(exportFileName(company.getCompanyName(), "Company", financialYear), content);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public LedgerExport statementForClient(UUID clientId, FinancialYear financialYear) {
+        Client client = clientRepository.findById(clientId).orElseThrow(() -> new ClientNotFoundException(clientId));
+        Map<UUID, String> companyNames = client.getCompanies().stream()
+                .collect(Collectors.toMap(ClientCompany::getId, ClientCompany::getCompanyName));
+
+        // The summary shows exactly what the summary endpoint returns for the year.
+        ClientLedgerSummaryResponse summary = summarizeClient(clientId, financialYear);
+        List<LedgerEntry> entries = ledgerEntryRepository.findAllByClientIdAndDueDateBetween(clientId,
+                financialYear.firstDay(), financialYear.lastDay(), EXPORT_ORDER);
+        byte[] content = LedgerStatementPdf.forClient(summary, entries, companyNames, LocalDate.now(clock));
+
+        log.info("Wrote a statement of {} ledger entries of client {} for FY {}", entries.size(), clientId,
+                financialYear.label());
+        return new LedgerExport(exportFileName(fullName(client), "Client", financialYear, ".pdf"), content);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public LedgerExport statementForCompany(UUID clientId, UUID companyId, FinancialYear financialYear) {
+        ClientCompany company = requireCompany(clientId, companyId);
+
+        // The summary shows exactly what the company summary endpoint returns for the year.
+        CompanyLedgerSummaryResponse summary = summarize(clientId, company, financialYear);
+        List<LedgerEntry> entries = ledgerEntryRepository.findAllByCompanyIdAndDueDateBetween(companyId,
+                financialYear.firstDay(), financialYear.lastDay(), EXPORT_ORDER);
+        byte[] content = LedgerStatementPdf.forCompany(fullName(company.getClient()), summary, entries,
+                LocalDate.now(clock));
+
+        log.info("Wrote a statement of {} ledger entries of company {} of client {} for FY {}", entries.size(),
+                companyId, clientId, financialYear.label());
+        return new LedgerExport(exportFileName(company.getCompanyName(), "Company", financialYear, ".pdf"),
+                content);
+    }
+
     private static String fullName(Client client) {
         return client.getFirstName() + " " + client.getLastName();
     }
@@ -455,8 +537,16 @@ public class LedgerServiceImpl implements LedgerService {
      * @param financialYear the year exported
      */
     static String exportFileName(String name, String fallback, FinancialYear financialYear) {
+        return exportFileName(name, fallback, financialYear, ".xlsx");
+    }
+
+    /**
+     * Names an export as {@link #exportFileName(String, String, FinancialYear)} does, with the given
+     * file extension, such as {@code .pdf}.
+     */
+    static String exportFileName(String name, String fallback, FinancialYear financialYear, String extension) {
         String safe = UNSAFE_FILE_NAME.matcher(name).replaceAll("_").replaceAll("^_|_$", "");
-        return (safe.isEmpty() ? fallback : safe) + "_Ledger_FY" + financialYear.label() + ".xlsx";
+        return (safe.isEmpty() ? fallback : safe) + "_Ledger_FY" + financialYear.label() + extension;
     }
 
     @Override
@@ -641,15 +731,17 @@ public class LedgerServiceImpl implements LedgerService {
     @Override
     @Transactional(readOnly = true)
     public List<UnpaidCharge> unpaidCharges(LocalDate asOf) {
-        // What each company has paid, as a positive amount, still to be applied to its charges.
-        Map<UUID, BigDecimal> unapplied = ledgerEntryRepository.totalPaidByCompany(LedgerEntryType.PAYMENT, asOf)
+        // What each company has paid, as a positive amount, still to be applied to its charges. An
+        // opening balance in credit counts as paid, and one owed as a charge falling due on its date.
+        Map<UUID, BigDecimal> unapplied = ledgerEntryRepository.totalPaidByCompany(LedgerEntryType.PAYMENT,
+                        LedgerEntryType.OPENING_BALANCE, asOf)
                 .stream()
                 .collect(Collectors.toMap(CompanyPaidRow::getCompanyId, row -> row.getTotalPaid().negate()));
 
         // The rows come oldest first, so each payment settles the oldest charges it can.
         List<UnpaidCharge> unpaid = new ArrayList<>();
         for (CompanyChargeRow row : ledgerEntryRepository.chargesByCompanyAndDueDate(
-                LedgerEntryType.SERVICE_CHARGE, asOf)) {
+                LedgerEntryType.SERVICE_CHARGE, LedgerEntryType.OPENING_BALANCE, asOf)) {
             BigDecimal available = unapplied.getOrDefault(row.getCompanyId(), NO_AMOUNT);
             BigDecimal applied = available.min(row.getTotalCharged()).max(NO_AMOUNT);
             unapplied.put(row.getCompanyId(), available.subtract(applied));
@@ -684,14 +776,13 @@ public class LedgerServiceImpl implements LedgerService {
     }
 
     /**
-     * One company's summary for a financial year. Pending is worked out here as billed less
-     * received, the same way the ledger lists work out their balance.
+     * One company's summary for a financial year, from the same totals the ledger lists use, so its
+     * pending is their balance: billed plus opening balance less received.
      *
      * @param lastPayment the company's latest payment in the year, or null when it made none
      */
     private static CompanyLedgerSummaryResponse companySummary(UUID clientId, ClientCompany company,
-                                                               FinancialYear financialYear, BigDecimal billed,
-                                                               BigDecimal received, BigDecimal discount,
+                                                               FinancialYear financialYear, LedgerSummary totals,
                                                                LedgerEntry lastPayment) {
         return CompanyLedgerSummaryResponse.builder()
                 .clientId(clientId)
@@ -700,10 +791,11 @@ public class LedgerServiceImpl implements LedgerService {
                 .financialYear(financialYear.label())
                 .fromDate(financialYear.firstDay())
                 .toDate(financialYear.lastDay())
-                .totalBilled(billed)
-                .totalPaymentReceived(received)
-                .pending(billed.subtract(received))
-                .totalDiscount(discount)
+                .totalBilled(totals.getTotalAmount())
+                .openingBalance(totals.getOpeningBalance())
+                .totalPaymentReceived(totals.getTotalPaid())
+                .pending(totals.getBalance())
+                .totalDiscount(totals.getTotalDiscountAmount())
                 .lastPayment(lastPayment == null ? null : lastPaymentBuilder(lastPayment).build())
                 .build();
     }

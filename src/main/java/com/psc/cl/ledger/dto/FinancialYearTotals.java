@@ -33,14 +33,18 @@ public class FinancialYearTotals {
     @Schema(description = "Sum of the GST charged", example = "5985.00")
     BigDecimal totalGstAmount;
 
-    @Schema(description = "Sum of the amounts charged for services: taxable amounts plus GST. Payments are "
-            + "not included; see totalPaid", example = "39235.00")
+    @Schema(description = "Sum of the amounts charged for services: taxable amounts plus GST. Payments and "
+            + "opening balances are not included; see totalPaid and openingBalance", example = "39235.00")
     BigDecimal totalAmount;
+
+    @Schema(description = "Sum of the opening balances dated in this financial year: positive when owed, "
+            + "negative when in credit", example = "0.00")
+    BigDecimal openingBalance;
 
     @Schema(description = "Sum of the payments received, as a positive number", example = "28025.00")
     BigDecimal totalPaid;
 
-    @Schema(description = "Amount still owed: totalAmount less totalPaid; negative when more has been paid "
-            + "than charged", example = "11210.00")
+    @Schema(description = "Amount still owed: totalAmount plus openingBalance less totalPaid; negative when "
+            + "in credit", example = "11210.00")
     BigDecimal balance;
 }

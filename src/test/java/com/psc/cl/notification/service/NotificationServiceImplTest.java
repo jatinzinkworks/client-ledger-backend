@@ -71,7 +71,7 @@ class NotificationServiceImplTest {
 
     private static final UUID MANAGER_ID = UUID.fromString("e9b2c4d1-7f35-4a68-91c0-3d8a5e2f6b47");
 
-    private static final String FILE_NAME = "Mehta_Textiles_Pvt_Ltd_Ledger_FY2026-27.xlsx";
+    private static final String FILE_NAME = "Mehta_Textiles_Pvt_Ltd_Ledger_FY2026-27.pdf";
 
     @Mock
     private LedgerService ledgerService;
@@ -205,11 +205,11 @@ class NotificationServiceImplTest {
         when(firmDetailsRepository.findFirstByOrderByCreatedAtAsc()).thenReturn(Optional.empty());
         when(ledgerService.companyBalances(CLIENT_ID, YEAR)).thenReturn(Map.of(COMPANY_ID,
                 new CompanyBalance(new BigDecimal("39235.00"), new BigDecimal("15000.00"),
-                        new BigDecimal("24235.00"))));
+                        new BigDecimal("24235.00"), new BigDecimal("0.00"))));
         when(clientCompanyRepository.findByClientIdOrderByCompanyNameAsc(CLIENT_ID)).thenReturn(List.of(
                 company(COMPANY_ID, "Mehta Textiles Pvt Ltd"), company(otherCompanyId, "Rohan Mehta HUF")));
-        when(ledgerService.exportClient(CLIENT_ID, YEAR))
-                .thenReturn(new LedgerExport("Rohan_Mehta_Ledger_FY2026-27.xlsx", new byte[] {1, 2, 3}));
+        when(ledgerService.statementForClient(CLIENT_ID, YEAR))
+                .thenReturn(new LedgerExport("Rohan_Mehta_Ledger_FY2026-27.pdf", new byte[] {1, 2, 3}));
         when(mailSender.createMimeMessage()).thenReturn(new MimeMessage((Session) null));
 
         LedgerSummaryEmailResponse response = service("ledger@sharma.example", null)
@@ -224,7 +224,7 @@ class NotificationServiceImplTest {
         assertThat(message.getSubject()).isEqualTo("Your ledger summary for all of your companies, FY 2026-27");
 
         assertThat(response.getCompanyId()).isNull();
-        assertThat(response.getAttachmentName()).isEqualTo("Rohan_Mehta_Ledger_FY2026-27.xlsx");
+        assertThat(response.getAttachmentName()).isEqualTo("Rohan_Mehta_Ledger_FY2026-27.pdf");
         assertThat(response.getCc()).containsExactly("pranay@sharma.example");
     }
 
@@ -264,8 +264,8 @@ class NotificationServiceImplTest {
         when(firmDetailsRepository.findFirstByOrderByCreatedAtAsc()).thenReturn(Optional.empty());
         when(ledgerService.companyBalances(CLIENT_ID, YEAR)).thenReturn(Map.of());
         when(clientCompanyRepository.findByClientIdOrderByCompanyNameAsc(CLIENT_ID)).thenReturn(List.of());
-        when(ledgerService.exportClient(CLIENT_ID, YEAR))
-                .thenReturn(new LedgerExport("Rohan_Mehta_Ledger_FY2026-27.xlsx", new byte[] {1}));
+        when(ledgerService.statementForClient(CLIENT_ID, YEAR))
+                .thenReturn(new LedgerExport("Rohan_Mehta_Ledger_FY2026-27.pdf", new byte[] {1}));
         when(mailSender.createMimeMessage()).thenReturn(new MimeMessage((Session) null));
 
         BulkLedgerSummaryEmailResponse response = service("ledger@sharma.example", null)
@@ -311,8 +311,8 @@ class NotificationServiceImplTest {
         when(firmDetailsRepository.findFirstByOrderByCreatedAtAsc()).thenReturn(Optional.empty());
         when(ledgerService.companyBalances(CLIENT_ID, YEAR)).thenReturn(Map.of());
         when(clientCompanyRepository.findByClientIdOrderByCompanyNameAsc(CLIENT_ID)).thenReturn(List.of());
-        when(ledgerService.exportClient(CLIENT_ID, YEAR))
-                .thenReturn(new LedgerExport("Rohan_Mehta_Ledger_FY2026-27.xlsx", new byte[] {1}));
+        when(ledgerService.statementForClient(CLIENT_ID, YEAR))
+                .thenReturn(new LedgerExport("Rohan_Mehta_Ledger_FY2026-27.pdf", new byte[] {1}));
         when(mailSender.createMimeMessage()).thenReturn(new MimeMessage((Session) null));
 
         PaymentReminderResponse response = service("ledger@sharma.example", null).sendPaymentReminders();
@@ -325,7 +325,7 @@ class NotificationServiceImplTest {
                 .containsExactly("pranay@sharma.example");
         assertThat(sent.getValue().getSubject()).isEqualTo("Payment reminder: \u20B930,000.00 pending");
         verify(ledgerService, never()).summarizeClient(settled.getId(), YEAR);
-        verify(ledgerService, never()).exportClient(settled.getId(), YEAR);
+        verify(ledgerService, never()).statementForClient(settled.getId(), YEAR);
 
         assertThat(response.getFinancialYear()).isEqualTo("2026-27");
         assertThat(response.getClientCount()).isEqualTo(2);
@@ -407,7 +407,7 @@ class NotificationServiceImplTest {
                         .pending(new BigDecimal("24235.00"))
                         .totalDiscount(new BigDecimal("1750.00"))
                         .build());
-        when(ledgerService.exportCompany(CLIENT_ID, COMPANY_ID, YEAR))
+        when(ledgerService.statementForCompany(CLIENT_ID, COMPANY_ID, YEAR))
                 .thenReturn(new LedgerExport(FILE_NAME, new byte[] {1, 2, 3}));
     }
 

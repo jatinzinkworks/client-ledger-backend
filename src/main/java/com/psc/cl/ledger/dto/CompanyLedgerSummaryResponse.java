@@ -42,11 +42,15 @@ public class CompanyLedgerSummaryResponse {
             example = "39235.00")
     BigDecimal totalBilled;
 
+    @Schema(description = "The opening balance the company was taken on with, when dated in the year: positive "
+            + "when owed, negative when in credit; zero otherwise. Not part of totalBilled", example = "0.00")
+    BigDecimal openingBalance;
+
     @Schema(description = "Sum of the payments received in the year, as a positive number", example = "15000.00")
     BigDecimal totalPaymentReceived;
 
-    @Schema(description = "Billed less received in the year; negative when the year's payments exceed its "
-            + "billing, for example when they settle an earlier year's charges", example = "24235.00")
+    @Schema(description = "Billed plus opening balance less received in the year; negative when the year's "
+            + "payments exceed them, for example when they settle an earlier year's charges", example = "24235.00")
     BigDecimal pending;
 
     @Schema(description = "Sum of the discounts taken off the service fees billed in the year", example = "1750.00")

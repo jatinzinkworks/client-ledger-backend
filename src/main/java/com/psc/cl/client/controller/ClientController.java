@@ -1,5 +1,6 @@
 package com.psc.cl.client.controller;
 
+import com.psc.cl.client.dto.ClientManagerBulkUpdateRequest;
 import com.psc.cl.client.dto.ClientRequest;
 import com.psc.cl.client.dto.ClientResponse;
 import com.psc.cl.client.dto.ClientSummaryResponse;
@@ -45,6 +46,13 @@ public class ClientController implements ClientApi {
     public ResponseEntity<ClientResponse> updateWhatsAppOptIn(UUID id, WhatsAppOptInRequest request) {
         log.debug("Received request to set the WhatsApp opt-in of client {}", id);
         return ResponseEntity.ok(clientService.updateWhatsAppOptIn(id, request));
+    }
+
+    @Override
+    public ResponseEntity<List<ClientSummaryResponse>> updateManager(ClientManagerBulkUpdateRequest request) {
+        log.debug("Received request to assign {} client(s) to manager {}", request.clientIds().size(),
+                request.managerId());
+        return ResponseEntity.ok(clientService.updateManager(request));
     }
 
     @Override

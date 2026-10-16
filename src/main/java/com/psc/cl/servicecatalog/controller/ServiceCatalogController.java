@@ -5,6 +5,7 @@ import com.psc.cl.ledger.service.FinancialYears;
 import com.psc.cl.servicecatalog.dto.CatalogServiceRequest;
 import com.psc.cl.servicecatalog.dto.CatalogServiceResponse;
 import com.psc.cl.servicecatalog.dto.ServiceFeeBulkUpdateRequest;
+import com.psc.cl.servicecatalog.model.ServiceCategory;
 import com.psc.cl.servicecatalog.service.ServiceCatalogService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -46,6 +47,12 @@ public class ServiceCatalogController implements ServiceCatalogApi {
         log.debug("Received request to list catalog services for FY {}", financialYear);
         FinancialYear year = financialYear == null ? null : FinancialYears.parse(financialYear);
         return ResponseEntity.ok(serviceCatalogService.listServices(year));
+    }
+
+    @Override
+    public ResponseEntity<List<ServiceCategory>> listCategories() {
+        log.debug("Received request to list service categories");
+        return ResponseEntity.ok(serviceCatalogService.listCategories());
     }
 
     @Override

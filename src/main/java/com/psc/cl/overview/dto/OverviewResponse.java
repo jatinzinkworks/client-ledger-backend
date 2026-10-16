@@ -29,11 +29,15 @@ public class OverviewResponse {
             + "amounts plus GST, after discount", example = "1845000.00")
     BigDecimal totalBilled;
 
+    @Schema(description = "Sum of the opening balances dated in the year, which companies were taken on with: "
+            + "positive when owed, negative when in credit. Not part of totalBilled", example = "0.00")
+    BigDecimal openingBalance;
+
     @Schema(description = "Sum of the payments received in the year across every client", example = "1571500.00")
     BigDecimal totalPaymentReceived;
 
-    @Schema(description = "Billed less received in the year; negative when more was received. Earlier years' "
-            + "balances are not brought forward", example = "273500.00")
+    @Schema(description = "Billed plus opening balance less received in the year; negative when more was "
+            + "received. Earlier years' balances are not brought forward", example = "273500.00")
     BigDecimal pending;
 
     @Schema(description = "Sum of the discounts given on the year's service charges", example = "63500.00")

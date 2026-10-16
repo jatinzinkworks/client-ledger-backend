@@ -13,6 +13,7 @@ import com.psc.cl.client.dto.ClientRequest;
 import com.psc.cl.client.dto.CompanyRequest;
 import com.psc.cl.client.dto.CompanyResponse;
 import com.psc.cl.client.exception.ClientNotFoundException;
+import com.psc.cl.client.exception.CompanyHasLedgerEntriesException;
 import com.psc.cl.client.exception.CompanyHasServicesException;
 import com.psc.cl.client.exception.CompanyLimitExceededException;
 import com.psc.cl.client.exception.CompanyNotFoundException;
@@ -104,7 +105,7 @@ class ClientCompanyServiceImplTest {
         // The HUF had nothing billed or received, so the ledger returns no balance for it.
         when(ledgerService.companyBalances(stored.getId(), year)).thenReturn(Map.of(textilesId,
                 new CompanyBalance(new BigDecimal("39235.00"), new BigDecimal("15605.00"),
-                        new BigDecimal("23630.00"))));
+                        new BigDecimal("23630.00"), new BigDecimal("0.00"))));
 
         List<CompanyResponse> companies = clientCompanyService.listCompanies(stored.getId(), year);
 
@@ -371,6 +372,24 @@ class ClientCompanyServiceImplTest {
         assertThatThrownBy(() -> clientCompanyService.deleteCompany(stored.getId(), busy.getId()))
                 .isInstanceOf(CompanyHasServicesException.class)
                 .hasMessageContaining(busy.getId().toString());
+
+        assertThat(stored.getCompanies()).hasSize(2);
+        verify(clientRepository, never()).flush();
+    }
+
+    @Test
+    @DisplayName("refuses to delete a company without services but with ledger entries, naming the entries")
+    void deleteCompanyRejectsCompanyWithLedgerEntries() {
+        Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF", "Mehta Textiles Pvt Ltd");
+        ClientCompany paid = stored.getCompanies().get(0);
+        when(clientRepository.findByIdForUpdate(stored.getId())).thenReturn(Optional.of(stored));
+        when(serviceAssignmentRepository.existsByCompanyIdIn(Set.of(paid.getId()))).thenReturn(false);
+        when(ledgerService.companyHasEntries(paid.getId())).thenReturn(true);
+
+        assertThatThrownBy(() -> clientCompanyService.deleteCompany(stored.getId(), paid.getId()))
+                .isInstanceOf(CompanyHasLedgerEntriesException.class)
+                .hasMessageContaining("ledger entries")
+                .hasMessageNotContaining("services");
 
         assertThat(stored.getCompanies()).hasSize(2);
         verify(clientRepository, never()).flush();

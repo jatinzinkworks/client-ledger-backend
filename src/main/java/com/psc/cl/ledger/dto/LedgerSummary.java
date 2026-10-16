@@ -17,8 +17,8 @@ import java.util.List;
         description = "Totals of every ledger entry matching the filters, across all pages, not just the page returned")
 public class LedgerSummary {
 
-    @Schema(description = "Number of entries matching the filters, service charges and payments alike",
-            example = "12")
+    @Schema(description = "Number of entries matching the filters, service charges, payments and opening "
+            + "balances alike", example = "12")
     long entryCount;
 
     @Schema(description = "Sum of the service fees, before discount and excluding GST; service charges only",
@@ -34,15 +34,19 @@ public class LedgerSummary {
     @Schema(description = "Sum of the GST charged", example = "10260.00")
     BigDecimal totalGstAmount;
 
-    @Schema(description = "Sum of the amounts charged for services: taxable amounts plus GST. Payments are "
-            + "not included; see totalPaid", example = "67260.00")
+    @Schema(description = "Sum of the amounts charged for services: taxable amounts plus GST. Payments and "
+            + "opening balances are not included; see totalPaid and openingBalance", example = "67260.00")
     BigDecimal totalAmount;
+
+    @Schema(description = "Sum of the opening balances companies were taken on with: positive when owed, "
+            + "negative when in credit; zero when there are none", example = "0.00")
+    BigDecimal openingBalance;
 
     @Schema(description = "Sum of the payments received, as a positive number", example = "28025.00")
     BigDecimal totalPaid;
 
-    @Schema(description = "Amount still owed: totalAmount less totalPaid; negative when more has been paid "
-            + "than charged", example = "39235.00")
+    @Schema(description = "Amount still owed: totalAmount plus openingBalance less totalPaid; negative when "
+            + "in credit", example = "39235.00")
     BigDecimal balance;
 
     @ArraySchema(arraySchema = @Schema(description = "The same totals for each financial year the entries "

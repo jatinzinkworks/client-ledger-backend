@@ -12,6 +12,7 @@ import com.psc.cl.servicecatalog.exception.DuplicateServiceFeeUpdateException;
 import com.psc.cl.servicecatalog.exception.ServiceInUseException;
 import com.psc.cl.servicecatalog.exception.ServiceNameAlreadyExistsException;
 import com.psc.cl.servicecatalog.model.CatalogService;
+import com.psc.cl.servicecatalog.model.ServiceCategory;
 import com.psc.cl.servicecatalog.repository.CatalogServiceRepository;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -89,6 +90,11 @@ public class ServiceCatalogServiceImpl implements ServiceCatalogService {
                 .map(service -> CatalogServiceResponse.from(service, label,
                         billed.getOrDefault(service.getId(), NOTHING_BILLED)))
                 .toList();
+    }
+
+    @Override
+    public List<ServiceCategory> listCategories() {
+        return List.of(ServiceCategory.values());
     }
 
     @Override

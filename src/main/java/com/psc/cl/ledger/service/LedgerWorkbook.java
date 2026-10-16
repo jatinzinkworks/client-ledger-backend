@@ -6,8 +6,9 @@ import com.psc.cl.ledger.dto.LastPayment;
 import com.psc.cl.ledger.model.LedgerEntry;
 import com.psc.cl.ledger.model.LedgerEntryType;
 import com.psc.cl.ledger.model.PaymentMethod;
-import com.psc.cl.ledger.service.XlsxWorkbook.Cell;
-import com.psc.cl.ledger.service.XlsxWorkbook.Sheet;
+import com.psc.cl.service.XlsxWorkbook;
+import com.psc.cl.service.XlsxWorkbook.Cell;
+import com.psc.cl.service.XlsxWorkbook.Sheet;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -68,8 +69,8 @@ final class LedgerWorkbook {
                             Map<UUID, String> companyNames, LocalDate generatedOn) {
         List<Cell[]> parties = List.<Cell[]>of(row(Cell.text("Client"), Cell.text(summary.getClientName())));
         Figures figures = new Figures(summary.getFinancialYear(), summary.getFromDate(), summary.getToDate(),
-                summary.getTotalBilled(), summary.getTotalDiscount(), summary.getTotalPaymentReceived(),
-                summary.getPending(), summary.getLastPayment());
+                summary.getTotalBilled(), summary.getTotalDiscount(), summary.getOpeningBalance(),
+                summary.getTotalPaymentReceived(), summary.getPending(), summary.getLastPayment());
         XlsxWorkbook workbook = new XlsxWorkbook();
         addSummary(workbook.addSheet(SUMMARY_SHEET, SUMMARY_WIDTHS), "Client Ledger", parties, figures,
                 generatedOn, true);
@@ -107,8 +108,8 @@ final class LedgerWorkbook {
         List<Cell[]> parties = List.of(row(Cell.text("Client"), Cell.text(clientName)),
                 row(Cell.text("Company"), Cell.text(summary.getCompanyName())));
         Figures figures = new Figures(summary.getFinancialYear(), summary.getFromDate(), summary.getToDate(),
-                summary.getTotalBilled(), summary.getTotalDiscount(), summary.getTotalPaymentReceived(),
-                summary.getPending(), summary.getLastPayment());
+                summary.getTotalBilled(), summary.getTotalDiscount(), summary.getOpeningBalance(),
+                summary.getTotalPaymentReceived(), summary.getPending(), summary.getLastPayment());
         XlsxWorkbook workbook = new XlsxWorkbook();
         addSummary(workbook.addSheet(SUMMARY_SHEET, SUMMARY_WIDTHS), "Company Ledger", parties, figures,
                 generatedOn, false);
@@ -133,6 +134,7 @@ final class LedgerWorkbook {
                 .addBlankRow()
                 .addRow(Cell.text("Total Billed"), Cell.amount(figures.totalBilled()))
                 .addRow(Cell.text("Total Discount"), Cell.amount(figures.totalDiscount()))
+                .addRow(Cell.text("Opening Balance"), Cell.amount(figures.openingBalance()))
                 .addRow(Cell.text("Total Payment Received"), Cell.amount(figures.totalPaymentReceived()))
                 .addRow(Cell.bold("Pending"), Cell.boldAmount(figures.pending()));
 
@@ -165,12 +167,14 @@ final class LedgerWorkbook {
         BigDecimal credit = ZERO;
         for (LedgerEntry entry : entries) {
             balance = balance.add(entry.getTotalAmount());
-            if (entry.getEntryType() == LedgerEntryType.PAYMENT) {
-                credit = credit.add(entry.getTotalAmount().negate());
-            } else {
+            if (entry.getEntryType() == LedgerEntryType.SERVICE_CHARGE) {
                 discount = discount.add(entry.getDiscountAmount());
                 taxable = taxable.add(entry.getTaxableAmount());
                 gst = gst.add(entry.getGstAmount());
+            }
+            if (isCredit(entry)) {
+                credit = credit.add(entry.getTotalAmount().negate());
+            } else {
                 debit = debit.add(entry.getTotalAmount());
             }
             String companyName = withCompany ? companyNames.get(entry.getCompanyId()) : null;
@@ -184,8 +188,16 @@ final class LedgerWorkbook {
         sheet.addRow(columns(totals, withCompany));
     }
 
+    /**
+     * Whether an entry goes in the Credit column rather than Debit: a payment, or an opening balance
+     * in credit. Both are stored negative, so this is the sign of the total.
+     */
+    static boolean isCredit(LedgerEntry entry) {
+        return entry.getTotalAmount().signum() < 0;
+    }
+
     private static List<Cell> entryRow(LedgerEntry entry, String companyName, BigDecimal balance) {
-        boolean payment = entry.getEntryType() == LedgerEntryType.PAYMENT;
+        boolean payment = isCredit(entry);
         return new ArrayList<>(Arrays.asList(
                 Cell.date(entry.getDueDate()),
                 Cell.text(companyName),
@@ -250,7 +262,7 @@ final class LedgerWorkbook {
 
     /** The figures a Summary sheet shows, whichever summary they come from. */
     private record Figures(String financialYear, LocalDate fromDate, LocalDate toDate, BigDecimal totalBilled,
-                           BigDecimal totalDiscount, BigDecimal totalPaymentReceived, BigDecimal pending,
-                           LastPayment lastPayment) {
+                           BigDecimal totalDiscount, BigDecimal openingBalance, BigDecimal totalPaymentReceived,
+                           BigDecimal pending, LastPayment lastPayment) {
     }
 }

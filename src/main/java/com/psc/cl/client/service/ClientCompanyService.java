@@ -80,6 +80,8 @@ public interface ClientCompanyService {
      *         when it is the client's only company
      * @throws com.psc.cl.client.exception.CompanyHasServicesException
      *         when services are still assigned to the company
+     * @throws com.psc.cl.client.exception.CompanyHasLedgerEntriesException
+     *         when the company has ledger entries, such as payments or an opening balance
      */
     void deleteCompany(UUID clientId, UUID companyId);
 }

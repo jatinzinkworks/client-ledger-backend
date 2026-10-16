@@ -45,12 +45,16 @@ public class FinancialYearStatus {
     @Schema(description = "Discount given on those charges", example = "6350.00")
     BigDecimal discount;
 
+    @Schema(description = "Opening balances dated in the year, which companies were taken on with: positive "
+            + "when owed, negative when in credit; zero when none was", example = "0.00")
+    BigDecimal openingBalance;
+
     @Schema(description = "Payments received in the year", example = "157150.00")
     BigDecimal received;
 
-    @Schema(description = "Billed less discount less received: what the year's activity left owing; negative "
-            + "when more was received. Each year stands alone; an earlier year's balance is not brought "
-            + "forward into it", example = "21000.00")
+    @Schema(description = "Billed less discount plus opening balance less received: what the year's activity "
+            + "left owing; negative when more was received. Each year stands alone; an earlier year's balance "
+            + "is not brought forward into it", example = "21000.00")
     BigDecimal closingBalance;
 
     @Schema(description = "Where the year stands", example = "CARRIED")

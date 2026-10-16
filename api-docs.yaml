@@ -402,10 +402,11 @@ paths:
       tags:
       - Clients
       summary: Update a client
-      description: Replaces a client's own fields wholesale. The client's companies
-        are left as they are; add or delete them through the company endpoints. An
-        omitted client discount resets to zero. Companies without a discount of their
-        own take the new client discount.
+      description: "Replaces a client's own fields wholesale. The client's companies\
+        \ are left as they are; add or delete them through the company endpoints.\
+        \ An omitted client discount resets to zero. Companies without a discount\
+        \ of their own take the new client discount. The client's WhatsApp opt-in\
+        \ is left as it is; record it with PATCH /clients/{id}/whatsapp-opt-in."
       operationId: updateClient
       parameters:
       - name: id
@@ -1193,6 +1194,82 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/notifications/whatsapp-payment-reminders:
+    post:
+      tags:
+      - Notifications
+      summary: Send a WhatsApp payment reminder to every client with an amount pending
+      description: "Takes no input. Sends every client who has opted in to WhatsApp\
+        \ messages (whatsappOptIn) and owes something across every financial year\
+        \ (billed less received across all of their companies, to date, is more than\
+        \ zero) a WhatsApp payment reminder on the phone number in their record, through\
+        \ Meta's WhatsApp Cloud API. Each is the approved template set in WHATSAPP_PAYMENT_REMINDER_TEMPLATE,\
+        \ filled with the client's first name, the firm's name, the amount pending\
+        \ and today's date. Numbers without a country code get WHATSAPP_DEFAULT_COUNTRY_CODE.\
+        \ Clients not opted in are counted in notOptedInCount; those settled or in\
+        \ credit overall in skippedCount. Each client is sent to on its own, so one\
+        \ that fails, such as a phone number WhatsApp cannot use, is listed under\
+        \ failures and the others are still reminded. The response returns once every\
+        \ client has been tried."
+      operationId: sendWhatsAppPaymentReminders
+      responses:
+        "200":
+          description: "The run's outcome, including any clients that could not be\
+            \ reminded"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WhatsAppReminderResponse"
+        "502":
+          description: WhatsApp is not configured; no client was sent a message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/notifications/payment-reminders:
+    post:
+      tags:
+      - Notifications
+      summary: Email a payment reminder to every client with an amount pending
+      description: "Takes no input. Emails every client who owes something across\
+        \ every financial year (billed less received across all of their companies,\
+        \ to date, is more than zero) an individual payment reminder for that whole\
+        \ amount, under the subject \"Payment reminder\". It carries the same details\
+        \ as the ledger summary email for the current Indian financial year: billed,\
+        \ discount, received, the last payment and each company's figures, with the\
+        \ year's Excel ledger attached; when earlier years left a balance, it is shown\
+        \ alongside the year's so the figures add up to the amount asked for. It goes\
+        \ to the client, copying in their manager. Clients settled or in credit overall\
+        \ are skipped. Each client is emailed on its own, so one that fails is listed\
+        \ under failures and the others are still reminded. The response returns once\
+        \ every client has been tried."
+      operationId: sendPaymentReminders
+      responses:
+        "200":
+          description: "The run's outcome, including any clients that could not be\
+            \ reminded"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentReminderResponse"
+        "502":
+          description: Email is not configured; no client was emailed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /psc/cl/v1/notifications/ledger-summary-emails:
     post:
       tags:
@@ -1655,6 +1732,67 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: The client already holds the most companies allowed (BUSINESS_RULE_VIOLATION)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/clients/{clientId}/whatsapp-payment-reminder:
+    post:
+      tags:
+      - Notifications
+      summary: Send one client a WhatsApp payment reminder
+      description: "Sends the client a WhatsApp payment reminder for what they owe\
+        \ across every financial year and all of their companies, on the phone number\
+        \ in their record, through Meta's WhatsApp Cloud API: the approved template\
+        \ set in WHATSAPP_PAYMENT_REMINDER_TEMPLATE, filled with their first name,\
+        \ the firm's name, the amount pending and today's date. The client must have\
+        \ opted in to WhatsApp messages (whatsappOptIn) and owe something. The message\
+        \ is sent before the response returns."
+      operationId: sendWhatsAppPaymentReminder
+      parameters:
+      - name: clientId
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      responses:
+        "200":
+          description: The reminder was accepted by WhatsApp
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClientWhatsAppResult"
+        "400":
+          description: The identifier is not a valid UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No client carries this identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "The client has not opted in to WhatsApp messages, owes nothing,\
+            \ or has a phone number WhatsApp cannot use; nothing was sent"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: "WhatsApp is not configured, or refused the message or could\
+            \ not be reached; nothing was sent"
           content:
             application/json:
               schema:
@@ -2299,6 +2437,63 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/clients/{id}/whatsapp-opt-in:
+    patch:
+      tags:
+      - Clients
+      summary: Record a client's WhatsApp opt-in
+      description: "Sets whether the client agrees to receive WhatsApp messages from\
+        \ the firm, such as payment reminders, and changes nothing else. WhatsApp\
+        \ messages are only sent to clients who have opted in. This, and creating\
+        \ a client, are the only ways to change it: updating a client leaves it as\
+        \ it is. When a client changes from opted out to opted in, and the WHATSAPP_OPT_IN_CONFIRMATION_TEMPLATE\
+        \ setting names a template, they are sent a WhatsApp message confirming it\
+        \ in the background once the change is saved. The response does not wait for\
+        \ it and does not depend on it: if it cannot be sent, the opt-in still stands\
+        \ and the failure is logged."
+      operationId: updateWhatsAppOptIn
+      parameters:
+      - name: id
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      requestBody:
+        description: Whether the client agrees to receive WhatsApp messages
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WhatsAppOptInRequest"
+        required: true
+      responses:
+        "200":
+          description: Opt-in recorded; the client as now stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClientResponse"
+        "400":
+          description: "whatsappOptIn is missing, or the identifier is not a valid\
+            \ UUID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No client carries this identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /psc/cl/v1/overview:
     get:
       tags:
@@ -2419,7 +2614,7 @@ paths:
         example: 2026-27
       - name: limit
         in: query
-        description: "Most companies to return, from 1 to 50"
+        description: "Most companies to return, from 1 to 100"
         required: false
         schema:
           type: integer
@@ -2435,7 +2630,7 @@ paths:
                 $ref: "#/components/schemas/TopPendingCompaniesResponse"
         "400":
           description: "financialYear is not a year such as 2026-27, or limit is not\
-            \ a whole number from 1 to 50"
+            \ a whole number from 1 to 100"
           content:
             application/json:
               schema:
@@ -2470,7 +2665,7 @@ paths:
         example: 2026-27
       - name: limit
         in: query
-        description: "Most clients to return, from 1 to 50"
+        description: "Most clients to return, from 1 to 100"
         required: false
         schema:
           type: integer
@@ -2486,7 +2681,7 @@ paths:
                 $ref: "#/components/schemas/TopPendingClientsResponse"
         "400":
           description: "financialYear is not a year such as 2026-27, or limit is not\
-            \ a whole number from 1 to 50"
+            \ a whole number from 1 to 100"
           content:
             application/json:
               schema:
@@ -2572,7 +2767,7 @@ paths:
         example: 2026-27
       - name: limit
         in: query
-        description: "Most companies to return, from 1 to 50"
+        description: "Most companies to return, from 1 to 100"
         required: false
         schema:
           type: integer
@@ -2588,7 +2783,7 @@ paths:
                 $ref: "#/components/schemas/TopBilledCompaniesResponse"
         "400":
           description: "financialYear is not a year such as 2026-27, or limit is not\
-            \ a whole number from 1 to 50"
+            \ a whole number from 1 to 100"
           content:
             application/json:
               schema:
@@ -2622,7 +2817,7 @@ paths:
         example: 2026-27
       - name: limit
         in: query
-        description: "Most clients to return, from 1 to 50"
+        description: "Most clients to return, from 1 to 100"
         required: false
         schema:
           type: integer
@@ -2638,7 +2833,7 @@ paths:
                 $ref: "#/components/schemas/TopBilledClientsResponse"
         "400":
           description: "financialYear is not a year such as 2026-27, or limit is not\
-            \ a whole number from 1 to 50"
+            \ a whole number from 1 to 100"
           content:
             application/json:
               schema:
@@ -3596,6 +3791,11 @@ components:
           type: number
           description: "Discount granted to the client, as a percentage"
           example: 10.0
+        whatsappOptIn:
+          type: boolean
+          description: Whether the client has agreed to receive WhatsApp messages
+            from the firm
+          example: true
         companyNames:
           type: array
           description: "Names of the companies the client holds, ordered by name"
@@ -3759,6 +3959,11 @@ components:
           type: number
           description: "Discount granted to the client, as a percentage"
           example: 10.0
+        whatsappOptIn:
+          type: boolean
+          description: Whether the client has agreed to receive WhatsApp messages
+            from the firm
+          example: true
         companies:
           type: array
           description: "Companies the client holds, ordered by name"
@@ -4193,6 +4398,157 @@ components:
       - discountPercent
       - gstRatePercent
       - serviceFee
+    ClientWhatsAppResult:
+      type: object
+      description: A client sent a WhatsApp payment reminder in a run
+      properties:
+        clientId:
+          type: string
+          format: uuid
+          description: Identifier of the client
+          example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+        clientName:
+          type: string
+          description: Name of the client
+          example: Rohan Mehta
+        pending:
+          type: number
+          description: "What the client owes across every financial year and all of\
+            \ their companies: the amount the reminder states"
+          example: 24235.0
+        messageId:
+          type: string
+          description: "Identifier WhatsApp gave the message, for tracing its delivery"
+          example: wamid.HBgMOTE5ODIwMDEyMzQ1FQIAERgSMzQ1RjA5QkE3RTY4QzlEMEFDAA==
+    WhatsAppReminderResponse:
+      type: object
+      description: The outcome of sending WhatsApp payment reminders to every client
+        with an amount pending
+      properties:
+        clientCount:
+          type: integer
+          format: int32
+          description: How many clients there are
+          example: 42
+        sentCount:
+          type: integer
+          format: int32
+          description: How many clients were sent a reminder
+          example: 17
+        notOptedInCount:
+          type: integer
+          format: int32
+          description: How many clients were not messaged because they have not opted
+            in to WhatsApp
+          example: 8
+        skippedCount:
+          type: integer
+          format: int32
+          description: "How many opted-in clients were not reminded because nothing\
+            \ is pending across every year: settled, in credit, or never billed"
+          example: 17
+        sent:
+          type: array
+          description: "The clients reminded, by name, with what each owes"
+          items:
+            $ref: "#/components/schemas/ClientWhatsAppResult"
+        failures:
+          type: array
+          description: The clients owing who could not be reminded; empty when every
+            reminder was sent. The other clients are reminded regardless
+          items:
+            $ref: "#/components/schemas/ClientWhatsAppFailure"
+    ClientWhatsAppFailure:
+      type: object
+      description: A client owing who could not be sent a WhatsApp reminder
+      properties:
+        clientId:
+          type: string
+          format: uuid
+          description: Identifier of the client
+          example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+        clientName:
+          type: string
+          description: Name of the client
+          example: Rohan Mehta
+        error:
+          type: string
+          description: "Why the reminder was not sent, such as a phone number WhatsApp\
+            \ cannot use, or WhatsApp refusing the message"
+          example: The client's phone number cannot be used for WhatsApp
+    ClientReminderResult:
+      type: object
+      description: A client sent a payment reminder in a run
+      properties:
+        clientId:
+          type: string
+          format: uuid
+          description: Identifier of the client
+          example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+        clientName:
+          type: string
+          description: Name of the client
+          example: Rohan Mehta
+        pending:
+          type: number
+          description: "What the client owes across every financial year and all of\
+            \ their companies: the amount the reminder asks for"
+          example: 24235.0
+    PaymentReminderResponse:
+      type: object
+      description: The outcome of sending payment reminders to every client with an
+        amount pending
+      properties:
+        financialYear:
+          type: string
+          description: "Indian financial year whose figures the reminders detail:\
+            \ the current one. The amounts asked for span every year"
+          example: 2026-27
+        clientCount:
+          type: integer
+          format: int32
+          description: How many clients there are
+          example: 42
+        sentCount:
+          type: integer
+          format: int32
+          description: How many clients were sent a reminder
+          example: 17
+        skippedCount:
+          type: integer
+          format: int32
+          description: "How many clients were not reminded because nothing is pending\
+            \ across every year: settled, in credit, or never billed"
+          example: 25
+        sent:
+          type: array
+          description: "The clients reminded, by name, with what each owes"
+          items:
+            $ref: "#/components/schemas/ClientReminderResult"
+        failures:
+          type: array
+          description: The clients owing who could not be reminded; empty when every
+            reminder was sent. The other clients are reminded regardless
+          items:
+            $ref: "#/components/schemas/ClientEmailFailure"
+    ClientEmailFailure:
+      type: object
+      description: A client whose ledger summary could not be emailed in a run
+      properties:
+        clientId:
+          type: string
+          format: uuid
+          description: Identifier of the client
+          example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+        clientName:
+          type: string
+          description: Name of the client
+          example: Rohan Mehta
+        error:
+          type: string
+          description: Why the email was not sent; nothing was sent to the client
+          example: "The ledger summary email could not be sent: the mail server refused\
+            \ it or could not be reached"
     BulkLedgerSummaryEmailResponse:
       type: object
       description: The outcome of emailing every client their ledger summary
@@ -4235,24 +4591,6 @@ components:
           type: string
           description: Name of the client
           example: Rohan Mehta
-    ClientEmailFailure:
-      type: object
-      description: A client whose ledger summary could not be emailed in a run
-      properties:
-        clientId:
-          type: string
-          format: uuid
-          description: Identifier of the client
-          example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
-        clientName:
-          type: string
-          description: Name of the client
-          example: Rohan Mehta
-        error:
-          type: string
-          description: Why the email was not sent; nothing was sent to the client
-          example: "The ledger summary email could not be sent: the mail server refused\
-            \ it or could not be reached"
     BulkPostingResponse:
       type: object
       description: The outcome of posting the due services of every company of every
@@ -4537,6 +4875,14 @@ components:
           example: 10.0
           maximum: 100.00
           minimum: 0.00
+        whatsappOptIn:
+          type: boolean
+          default: false
+          description: "Whether the client has agreed to receive WhatsApp messages\
+            \ from the firm, such as payment reminders. WhatsApp requires this consent\
+            \ before any message is sent. Omit for false. Change it later with PATCH\
+            \ /clients/{id}/whatsapp-opt-in"
+          example: true
         companies:
           type: array
           description: Companies the client owns or acts for
@@ -4623,6 +4969,18 @@ components:
       required:
       - deliveryDate
       - serviceId
+    WhatsAppOptInRequest:
+      type: object
+      description: Whether a client agrees to receive WhatsApp messages
+      properties:
+        whatsappOptIn:
+          type: boolean
+          description: "True when the client has agreed to receive WhatsApp messages\
+            \ from the firm, such as payment reminders; false when they have withdrawn\
+            \ or not given that consent"
+          example: true
+      required:
+      - whatsappOptIn
     OverviewResponse:
       type: object
       description: The firm's position for one financial year across every client

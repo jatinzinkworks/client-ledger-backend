@@ -53,12 +53,17 @@ public class CompanyResponse {
             + "plus GST. Only returned when listing for a financial year", example = "39235.00")
     BigDecimal totalBilled;
 
+    @Schema(description = "The opening balance the company was taken on with, when dated in the financial "
+            + "year: positive when owed, negative when in credit; zero otherwise. Only returned when listing "
+            + "for a financial year", example = "0.00")
+    BigDecimal openingBalance;
+
     @Schema(description = "Sum of the payments received in the financial year, as a positive number. Only "
             + "returned when listing for a financial year", example = "15605.00")
     BigDecimal totalPaymentReceived;
 
-    @Schema(description = "Billed less received in the financial year; negative when more was received. "
-            + "Only returned when listing for a financial year", example = "23630.00")
+    @Schema(description = "Billed plus opening balance less received in the financial year; negative when "
+            + "more was received. Only returned when listing for a financial year", example = "23630.00")
     BigDecimal pending;
 
     /**
@@ -98,6 +103,7 @@ public class CompanyResponse {
                 .serviceCount(serviceCount)
                 .financialYear(financialYear)
                 .totalBilled(balance.totalBilled())
+                .openingBalance(balance.openingBalance())
                 .totalPaymentReceived(balance.totalPaymentReceived())
                 .pending(balance.pending())
                 .build();

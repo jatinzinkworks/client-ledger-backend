@@ -19,13 +19,13 @@ import com.psc.cl.overview.dto.TopPendingManagersResponse;
 public interface OverviewService {
 
     /** The most clients a ranking returns at once. */
-    int MAX_TOP_CLIENTS = 50;
+    int MAX_TOP_CLIENTS = 100;
 
     /** The most managers a ranking returns at once. */
     int MAX_TOP_MANAGERS = 50;
 
     /** The most companies a ranking returns at once. */
-    int MAX_TOP_COMPANIES = 50;
+    int MAX_TOP_COMPANIES = 100;
 
     /** The most payments the latest payments list returns at once. */
     int MAX_RECENT_PAYMENTS = 100;

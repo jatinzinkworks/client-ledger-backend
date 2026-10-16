@@ -38,7 +38,8 @@ public class LedgerSummaryEmailResponse {
             example = "Your ledger summary for Mehta Textiles Pvt Ltd, FY 2026-27")
     String subject;
 
-    @Schema(description = "Name of the Excel ledger attached", example = "Mehta_Textiles_Pvt_Ltd_Ledger_FY2026-27.xlsx")
+    @Schema(description = "Name of the PDF ledger statement attached",
+            example = "Mehta_Textiles_Pvt_Ltd_Ledger_FY2026-27.pdf")
     String attachmentName;
 
     @Schema(description = "When the email was handed to the SMTP server", example = "2026-10-14T05:30:00Z")
