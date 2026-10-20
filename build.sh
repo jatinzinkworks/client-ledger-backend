@@ -12,7 +12,7 @@ source variables.sh
 # ---------- Step 0: Validate input ------------------------------------------
 echo ""
 echo "=========================="
-echo "[0/10] Validating input"
+echo "[0/9] Validating input"
 echo "=========================="
 BUMP_TYPE="${1:-}"
 if [ "${BUMP_TYPE}" != "major" ] && [ "${BUMP_TYPE}" != "minor" ]; then
@@ -26,7 +26,7 @@ echo "Bump type: ${BUMP_TYPE}"
 # ---------- Step 1: Preflight git checks ------------------------------------
 echo ""
 echo "=========================="
-echo "[1/10] Preflight git checks"
+echo "[1/9] Preflight git checks"
 echo "=========================="
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 if [ "${CURRENT_BRANCH}" != "main" ]; then
@@ -44,7 +44,7 @@ echo "Working tree: clean"
 # ---------- Step 2: Read current version from pom.xml -----------------------
 echo ""
 echo "=========================================="
-echo "[2/10] Reading current version from pom.xml"
+echo "[2/9] Reading current version from pom.xml"
 echo "=========================================="
 CURRENT_VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
 if [ -z "${CURRENT_VERSION}" ]; then
@@ -56,7 +56,7 @@ echo "Current version: ${CURRENT_VERSION}"
 # ---------- Step 3: Compute new version -------------------------------------
 echo ""
 echo "=========================================="
-echo "[3/10] Computing new version"
+echo "[3/9] Computing new version"
 echo "=========================================="
 if [ ! -x "./get_new_version.sh" ]; then
   echo "ERROR: ./get_new_version.sh not found or not executable" >&2
@@ -78,7 +78,7 @@ echo "Image:       ${IMAGE}"
 # ---------- Step 4: Update pom.xml with new version -------------------------
 echo ""
 echo "=========================================="
-echo "[4/10] Updating pom.xml with new version"
+echo "[4/9] Updating pom.xml with new version"
 echo "=========================================="
 # If any step from here through deploy fails, revert pom.xml so the working
 # tree returns to a clean state matching origin/main.
@@ -90,7 +90,7 @@ echo "pom.xml updated: ${CURRENT_VERSION} -> ${NEW_VERSION}"
 # ---------- Step 5: Run unit tests and report coverage ----------------------
 echo ""
 echo "=========================================="
-echo "[5/10] Running unit tests with coverage"
+echo "[5/9] Running unit tests with coverage"
 echo "=========================================="
 mvn -B clean test jacoco:report
 REPORT="target/site/jacoco/jacoco.csv"
@@ -124,7 +124,7 @@ echo "HTML report: target/site/jacoco/index.html"
 # ---------- Step 6: Build ---------------------------------------------------
 echo ""
 echo "=========================================="
-echo "[6/10] Building Docker image"
+echo "[6/9] Building Docker image"
 echo "=========================================="
 # APK_PATCH_BUST changes daily so the Dockerfile's apk security-patch layer is rebuilt against a
 # fresh package index instead of being served from cache, which would keep already-fixed OS CVEs
@@ -135,7 +135,7 @@ echo "Build OK: ${IMAGE}"
 # ---------- Step 7: Trivy security scan -------------------------------------
 echo ""
 echo "=========================================="
-echo "[7/10] Scanning image with Trivy"
+echo "[7/9] Scanning image with Trivy"
 echo "=========================================="
 echo "Failing on any vulnerabilities..."
 docker run --rm \
@@ -148,21 +148,10 @@ echo "Trivy scan OK: No Vulnerabilities"
 # ---------- Step 8: Push ----------------------------------------------------
 echo ""
 echo "=========================================="
-echo "[8/10] Pushing image to Artifact Registry"
+echo "[8/9] Pushing image to Artifact Registry"
 echo "=========================================="
 docker push "${IMAGE}"
 echo "Push OK: ${IMAGE}"
-
-# ---------- Step 9: Deploy --------------------------------------------------
-echo ""
-echo "=========================================="
-echo "[9/10] Deploying to Cloud Run"
-echo "=========================================="
-gcloud run services update "${SERVICE}" \
-  --region="${REGION}" \
-  --project="${PROJECT}" \
-  --image="${IMAGE}"
-echo "Deploy OK: ${SERVICE}"
 
 # Build + deploy succeeded — disable the auto-revert trap before committing.
 trap - ERR
@@ -170,7 +159,7 @@ trap - ERR
 # ---------- Step 10: Commit pom.xml, push, and tag release ------------------
 echo ""
 echo "=========================================="
-echo "[10/10] Committing pom.xml and tagging release"
+echo "[9/9] Committing pom.xml and tagging release"
 echo "=========================================="
 git add pom.xml
 git commit -m "Release ${NEW_VERSION}"
