@@ -12,7 +12,7 @@
 
     <groupId>com.psc</groupId>
     <artifactId>client-ledger-backend</artifactId>
-    <version>0.1</version>
+    <version>1.0</version>
     <name>client-ledger-backend</name>
     <description>Client Ledger Backend Service</description>
 
