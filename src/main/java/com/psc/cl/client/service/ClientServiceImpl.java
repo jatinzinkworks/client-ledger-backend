@@ -7,7 +7,6 @@ import com.psc.cl.client.dto.ClientResponse;
 import com.psc.cl.client.dto.ClientSummaryResponse;
 import com.psc.cl.client.dto.ClientUpdateRequest;
 import com.psc.cl.client.dto.NewCompanyRequest;
-import com.psc.cl.client.dto.WhatsAppOptInRequest;
 import com.psc.cl.client.exception.AssignedManagerNotFoundException;
 import com.psc.cl.client.exception.ClientHasLedgerEntriesException;
 import com.psc.cl.client.exception.ClientHasServicesException;
@@ -15,17 +14,16 @@ import com.psc.cl.client.exception.ClientNotFoundException;
 import com.psc.cl.client.exception.ClientsNotFoundException;
 import com.psc.cl.client.model.Client;
 import com.psc.cl.client.model.ClientCompany;
-import com.psc.cl.client.model.ClientOptedInToWhatsApp;
 import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.client.repository.ServiceAssignmentRepository;
 import com.psc.cl.exception.ResourceInUseException;
+import com.psc.cl.ledger.dto.OpeningBalance;
 import com.psc.cl.ledger.service.LedgerService;
 import com.psc.cl.managercatalog.model.Manager;
 import com.psc.cl.managercatalog.repository.ManagerRepository;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -62,8 +60,6 @@ public class ClientServiceImpl implements ClientService {
 
     private final LedgerService ledgerService;
 
-    private final ApplicationEventPublisher eventPublisher;
-
     @Override
     @Transactional
     public ClientResponse createClient(ClientRequest request) {
@@ -71,19 +67,14 @@ public class ClientServiceImpl implements ClientService {
 
         Client client = new Client();
         applyClient(request, client);
-        // Consent is recorded here or through updateWhatsAppOptIn only, never by a client update.
-        client.setWhatsappOptIn(Boolean.TRUE.equals(request.whatsappOptIn()));
         request.companies().forEach(company -> client.addCompany(Companies.newCompany(company)));
 
         Client saved = clientRepository.save(client);
         int openingBalances = recordOpeningBalances(saved, request.companies());
         log.info("Created client {} assigned to manager {} with {} company(ies), {} with an opening balance",
                 saved.getId(), saved.getManagerId(), saved.getCompanies().size(), openingBalances);
-        if (saved.isWhatsappOptIn()) {
-            eventPublisher.publishEvent(new ClientOptedInToWhatsApp(saved.getId()));
-        }
 
-        return ClientResponse.from(saved, manager);
+        return ClientResponse.from(saved, manager, openingBalancesOf(saved));
     }
 
     @Override
@@ -96,24 +87,7 @@ public class ClientServiceImpl implements ClientService {
         clientRepository.flush();
         log.info("Updated client {} assigned to manager {}", id, client.getManagerId());
 
-        return ClientResponse.from(client, manager);
-    }
-
-    @Override
-    @Transactional
-    public ClientResponse updateWhatsAppOptIn(UUID id, WhatsAppOptInRequest request) {
-        Client client = clientRepository.findById(id).orElseThrow(() -> new ClientNotFoundException(id));
-        boolean wasOptedIn = client.isWhatsappOptIn();
-        client.setWhatsappOptIn(request.whatsappOptIn());
-        // Flushing here stamps updatedAt before it is returned.
-        clientRepository.flush();
-        log.info("Client {} {} WhatsApp messages", id, client.isWhatsappOptIn() ? "opted in to" : "opted out of");
-        // Only a change to opted in is news; saving an opted-in client again is not.
-        if (!wasOptedIn && client.isWhatsappOptIn()) {
-            eventPublisher.publishEvent(new ClientOptedInToWhatsApp(id));
-        }
-
-        return ClientResponse.from(client, requireManager(client.getManagerId()));
+        return ClientResponse.from(client, manager, openingBalancesOf(client));
     }
 
     @Override
@@ -168,10 +142,12 @@ public class ClientServiceImpl implements ClientService {
         if (!companyIds.isEmpty() && serviceAssignmentRepository.existsByCompanyIdIn(companyIds)) {
             throw new ClientHasServicesException(id);
         }
-        // Payments and opening balances need no service, so a client without services may still have them.
-        if (ledgerService.clientHasEntries(id)) {
+        // Payments need no service, so a client without services may still have them. Opening balances
+        // alone are no history of dealings with the firm, so they go with the client.
+        if (ledgerService.clientHasEntriesBesidesOpeningBalances(id)) {
             throw new ClientHasLedgerEntriesException(id);
         }
+        ledgerService.removeClientOpeningBalances(id);
 
         try {
             clientRepository.delete(client);
@@ -191,7 +167,8 @@ public class ClientServiceImpl implements ClientService {
     public ClientResponse getClient(UUID id) {
         Client client = clientRepository.findById(id).orElseThrow(() -> new ClientNotFoundException(id));
         BigDecimal pending = ledgerService.pendingByClient(List.of(id)).getOrDefault(id, NOTHING_PENDING);
-        return ClientResponse.from(client, requireManager(client.getManagerId()), pending);
+        return ClientResponse.from(client, requireManager(client.getManagerId()), openingBalancesOf(client),
+                pending);
     }
 
     @Override
@@ -223,6 +200,11 @@ public class ClientServiceImpl implements ClientService {
      * @param companies the companies as requested
      * @return how many opening balances were recorded
      */
+    /** The opening balances of a client's companies, by company, for the client's response. */
+    private Map<UUID, OpeningBalance> openingBalancesOf(Client client) {
+        return ledgerService.openingBalances(client.getCompanies().stream().map(ClientCompany::getId).toList());
+    }
+
     private int recordOpeningBalances(Client client, List<NewCompanyRequest> companies) {
         int recorded = 0;
         for (int i = 0; i < companies.size(); i++) {
@@ -238,8 +220,6 @@ public class ClientServiceImpl implements ClientService {
 
     /**
      * An omitted discount resets to the default, so nothing is left behind from a previous version.
-     * The WhatsApp opt-in is not among these fields: it records the client's consent, so it changes
-     * only when that is recorded, never as a side effect of editing the client.
      */
     private void applyClient(ClientDetails request, Client client) {
         client.setFirstName(request.firstName().trim());

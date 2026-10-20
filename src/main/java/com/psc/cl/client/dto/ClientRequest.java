@@ -73,12 +73,6 @@ public record ClientRequest(
                 defaultValue = "0.00", minimum = "0", maximum = "100")
         BigDecimal discountPercent,
 
-        @Schema(description = "Whether the client has agreed to receive WhatsApp messages from the firm, such as "
-                + "payment reminders. WhatsApp requires this consent before any message is sent. Omit for false. "
-                + "Change it later with PATCH /clients/{id}/whatsapp-opt-in",
-                example = "true", defaultValue = "false")
-        Boolean whatsappOptIn,
-
         @NotEmpty(message = "must contain at least one company")
         @Size(max = ClientRequest.MAX_COMPANIES, message = "must not contain more than 50 companies")
         @ArraySchema(

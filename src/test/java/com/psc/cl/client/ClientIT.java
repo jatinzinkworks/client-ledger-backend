@@ -15,6 +15,7 @@ import com.psc.cl.client.controller.ClientApi;
 import com.psc.cl.client.repository.ClientCompanyRepository;
 import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.client.repository.ServiceAssignmentRepository;
+import com.psc.cl.ledger.repository.LedgerEntryRepository;
 import com.psc.cl.managercatalog.controller.ManagerCatalogApi;
 import com.psc.cl.managercatalog.model.Manager;
 import com.psc.cl.managercatalog.model.ManagerRole;
@@ -48,6 +49,9 @@ class ClientIT extends AbstractPostgresIT {
     @Autowired
     private TransactionTemplate transactionTemplate;
 
+    @Autowired
+    private LedgerEntryRepository ledgerEntryRepository;
+
     private UUID managerId;
 
     @BeforeEach
@@ -63,12 +67,13 @@ class ClientIT extends AbstractPostgresIT {
     }
 
     /**
-     * Assigned services reference companies, and clients reference managers, so they are removed in
-     * that order. Doing it after each test as well keeps the Manager Catalog tests, which clear
-     * managers on their own, free of leftover clients.
+     * Ledger entries and assigned services reference companies, and clients reference managers, so
+     * they are removed in that order. Doing it after each test as well keeps the Manager Catalog tests,
+     * which clear managers on their own, free of leftover clients.
      */
     @AfterEach
     void clearClientsAndManagers() {
+        ledgerEntryRepository.deleteAll();
         serviceAssignmentRepository.deleteAll();
         clientRepository.deleteAll();
         managerRepository.deleteAll();
@@ -368,6 +373,54 @@ class ClientIT extends AbstractPostgresIT {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(clientJson(firstName, lastName, email, managerId)))
                 .andExpect(status().isCreated());
+    }
+
+    @Test
+    @DisplayName("a company or client whose only ledger entries are opening balances is deleted with them")
+    void deletesWithOpeningBalances() throws Exception {
+        String created = mockMvc.perform(post(CLIENTS_URL)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "firstName": "Rohan",
+                                  "lastName": "Mehta",
+                                  "phone": "+91 98200 12345",
+                                  "email": "rohan.mehta@example.com",
+                                  "managerId": "%s",
+                                  "companies": [
+                                    {
+                                      "companyName": "Rohan Mehta HUF",
+                                      "companyType": "HUF",
+                                      "address": "4 Park Street, Kolkata, West Bengal 700016",
+                                      "openingBalance": 25000
+                                    },
+                                    {
+                                      "companyName": "Mehta Textiles Pvt Ltd",
+                                      "companyType": "PRIVATE_LIMITED",
+                                      "address": "12 MG Road, Bengaluru, Karnataka 560001",
+                                      "openingBalance": -5000.50
+                                    }
+                                  ]
+                                }""".formatted(managerId)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String id = JsonPath.read(created, "$.id");
+        // Companies come back by name, so Mehta Textiles is first.
+        String textilesId = JsonPath.read(created, "$.companies[0].id");
+        assertThat(ledgerEntryRepository.count()).isEqualTo(2);
+
+        // The company goes, and its opening balance with it; the other company's stays.
+        mockMvc.perform(delete(CLIENTS_URL + "/" + id + "/companies/" + textilesId))
+                .andExpect(status().isNoContent());
+        assertThat(clientCompanyRepository.count()).isEqualTo(1);
+        assertThat(ledgerEntryRepository.count()).isEqualTo(1);
+
+        // Then the client, with the last opening balance.
+        mockMvc.perform(delete(CLIENTS_URL + "/" + id))
+                .andExpect(status().isNoContent());
+        assertThat(clientRepository.count()).isZero();
+        assertThat(clientCompanyRepository.count()).isZero();
+        assertThat(ledgerEntryRepository.count()).isZero();
     }
 
     private String clientJson(UUID manager) {

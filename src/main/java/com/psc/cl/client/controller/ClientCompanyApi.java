@@ -76,15 +76,20 @@ public interface ClientCompanyApi {
 
     @Operation(
             summary = "Add a company to a client",
-            description = "Adds one company to an existing client. Every field except the discount is "
-                    + "mandatory, and a company without a discount of its own takes the client's. A "
-                    + "client holds at most " + ClientRequest.MAX_COMPANIES + " companies.")
+            description = "Adds one company to an existing client. Every field except the discount and the "
+                    + "opening balance is mandatory, and a company without a discount of its own takes the "
+                    + "client's. A company may bring an opening balance: what it owes as it is taken on, "
+                    + "brought over from before, dated openingBalanceDate or the day it is added. It is "
+                    + "recorded in the company's ledger. A client holds at most " + ClientRequest.MAX_COMPANIES
+                    + " companies.")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Company added",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = CompanyResponse.class))),
             @ApiResponse(responseCode = "400",
-                    description = "Request body failed validation, or the identifier is not a valid UUID",
+                    description = "Request body failed validation, such as an openingBalanceDate without an "
+                            + "openingBalance, or an openingBalanceDate after today; or the identifier is not a "
+                            + "valid UUID",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "404", description = "No client carries this identifier",
@@ -136,15 +141,19 @@ public interface ClientCompanyApi {
     @Operation(
             summary = "Update a company of a client",
             description = "Replaces one company of the client wholesale; it keeps its identifier. Every "
-                    + "field except the discount is mandatory, and an omitted discount gives the company "
-                    + "the client's. A company that exists but belongs to a different client is reported "
-                    + "as not found.")
+                    + "field except the discount and the opening balance is mandatory, and an omitted discount "
+                    + "gives the company the client's. The opening balance, a ledger entry, is kept when "
+                    + "omitted: send 0 to remove it, or another amount to record it, or replace the one the "
+                    + "company has, keeping its date unless openingBalanceDate is given. A company that "
+                    + "exists but belongs to a different client is reported as not found.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Company updated",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = CompanyResponse.class))),
             @ApiResponse(responseCode = "400",
-                    description = "Request body failed validation, or an identifier is not a valid UUID",
+                    description = "Request body failed validation, such as an openingBalanceDate without an "
+                            + "openingBalance other than 0, or an openingBalanceDate after today; or an "
+                            + "identifier is not a valid UUID",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "404",
@@ -171,8 +180,9 @@ public interface ClientCompanyApi {
             description = "Removes one company of the client. A client must keep at least one company, "
                     + "so their only company cannot be deleted; delete the client instead. A company "
                     + "with services assigned cannot be deleted; remove those services first. Nor can a "
-                    + "company with ledger entries, such as payments or an opening balance: a ledger is a "
-                    + "financial record and is never deleted along with its company.")
+                    + "company with payments or service charges in its ledger: a ledger is a financial record "
+                    + "and is never deleted along with its company. An opening balance alone does not stop it; "
+                    + "it is deleted with the company.")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "Company deleted"),
             @ApiResponse(responseCode = "400", description = "An identifier is not a valid UUID",
@@ -184,7 +194,8 @@ public interface ClientCompanyApi {
                             schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "409",
                     description = "It is the client's only company (BUSINESS_RULE_VIOLATION), or services "
-                            + "are still assigned to it or ledger entries recorded against it (RESOURCE_IN_USE)",
+                            + "are still assigned to it or payments or service charges recorded against it "
+                            + "(RESOURCE_IN_USE)",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "500", description = "Unexpected server error",

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -37,6 +38,7 @@ import com.psc.cl.ledger.dto.LedgerSummary;
 import com.psc.cl.ledger.dto.LedgerYearStatus;
 import com.psc.cl.ledger.dto.ManagerBalance;
 import com.psc.cl.ledger.dto.MonthlyTotals;
+import com.psc.cl.ledger.dto.OpeningBalance;
 import com.psc.cl.ledger.dto.PaymentListResponse;
 import com.psc.cl.ledger.dto.PaymentRequest;
 import com.psc.cl.ledger.dto.UnpaidCharge;
@@ -87,6 +89,7 @@ import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @ExtendWith(MockitoExtension.class)
@@ -1269,6 +1272,9 @@ class LedgerServiceImplTest {
                 CLIENT_ID, LedgerEntryType.PAYMENT, from, to)).thenReturn(Optional.empty());
         when(ledgerEntryRepository.findAllByClientIdAndDueDateBetween(CLIENT_ID, from, to, EARLIEST_DUE_FIRST))
                 .thenReturn(List.of(storedEntry()));
+        // Dated in the year before, so it is shown on the company's sheet but is not among the year's entries.
+        when(ledgerEntryRepository.findByCompanyIdInAndEntryType(any(), eq(LedgerEntryType.OPENING_BALANCE)))
+                .thenReturn(List.of(openingBalance(new BigDecimal("25000.00"), LocalDate.of(2026, 3, 31))));
 
         LedgerExport export = ledgerService.exportClient(CLIENT_ID, FinancialYears.parse("2026-27"));
 
@@ -1284,7 +1290,10 @@ class LedgerServiceImplTest {
                 .contains(">GST Monthly Return Filing<");
         // The client's only company gets its own sheet too.
         assertThat(parts.get("xl/workbook.xml")).contains("<sheet name=\"Mehta Textiles Pvt Ltd\" sheetId=\"3\"");
-        assertThat(parts.get("xl/worksheets/sheet3.xml")).contains(">GST Monthly Return Filing<");
+        assertThat(parts.get("xl/worksheets/sheet3.xml"))
+                .contains(">Opening Balance<")
+                .contains("<c r=\"B1\" s=\"2\"><v>25000.00</v></c>")
+                .contains(">GST Monthly Return Filing<");
     }
 
     @Test
@@ -1325,6 +1334,8 @@ class LedgerServiceImplTest {
                 COMPANY_ID, LedgerEntryType.PAYMENT, from, to)).thenReturn(Optional.empty());
         when(ledgerEntryRepository.findAllByCompanyIdAndDueDateBetween(COMPANY_ID, from, to, EARLIEST_DUE_FIRST))
                 .thenReturn(List.of(storedEntry()));
+        when(ledgerEntryRepository.findByCompanyIdInAndEntryType(Set.of(COMPANY_ID), LedgerEntryType.OPENING_BALANCE))
+                .thenReturn(List.of(openingBalance(new BigDecimal("-5000.50"), LocalDate.of(2026, 3, 31))));
 
         LedgerExport export = ledgerService.exportCompany(CLIENT_ID, COMPANY_ID, FinancialYears.parse("2026-27"));
 
@@ -1337,6 +1348,8 @@ class LedgerServiceImplTest {
                 .contains("<v>5605.00</v>")
                 .contains("<v>46309</v>");
         assertThat(parts.get("xl/worksheets/sheet2.xml"))
+                .contains(">Opening Balance<")
+                .contains("<c r=\"B1\" s=\"2\"><v>-5000.50</v></c>")
                 .contains(">GST Monthly Return Filing<")
                 .doesNotContain(">Mehta Textiles Pvt Ltd<");
     }
@@ -1368,6 +1381,9 @@ class LedgerServiceImplTest {
                 CLIENT_ID, LedgerEntryType.PAYMENT, from, to)).thenReturn(Optional.empty());
         when(ledgerEntryRepository.findAllByClientIdAndDueDateBetween(CLIENT_ID, from, to, EARLIEST_DUE_FIRST))
                 .thenReturn(List.of(storedEntry()));
+        // Dated in the year before, so it is shown on the company's page but is not among the year's entries.
+        when(ledgerEntryRepository.findByCompanyIdInAndEntryType(any(), eq(LedgerEntryType.OPENING_BALANCE)))
+                .thenReturn(List.of(openingBalance(new BigDecimal("25000.00"), LocalDate.of(2026, 3, 31))));
 
         LedgerExport statement = ledgerService.statementForClient(CLIENT_ID, FinancialYears.parse("2026-27"));
 
@@ -1383,6 +1399,7 @@ class LedgerServiceImplTest {
                 .contains("14 Oct 2026");
         assertThat(extractor.getTextFromPage(2))
                 .contains("Mehta Textiles Pvt Ltd")
+                .contains("Opening balance date").contains("31 Mar 2026").contains("25,000.00")
                 .contains("GST Monthly Return Filing")
                 .doesNotContain("Discount");
     }
@@ -1605,6 +1622,126 @@ class LedgerServiceImplTest {
                 .isInstanceOf(IllegalArgumentException.class);
 
         verify(ledgerEntryRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("sets an opening balance on a company without one by recording it")
+    void setsNewOpeningBalance() {
+        when(ledgerEntryRepository.findByCompanyIdAndEntryType(COMPANY_ID, LedgerEntryType.OPENING_BALANCE))
+                .thenReturn(Optional.empty());
+        when(ledgerEntryRepository.save(any(LedgerEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ledgerService.setOpeningBalance(CLIENT_ID, COMPANY_ID, new BigDecimal("1200"), null);
+
+        ArgumentCaptor<LedgerEntry> captor = ArgumentCaptor.forClass(LedgerEntry.class);
+        verify(ledgerEntryRepository).save(captor.capture());
+        assertThat(captor.getValue().getEntryType()).isEqualTo(LedgerEntryType.OPENING_BALANCE);
+        assertThat(captor.getValue().getTotalAmount()).isEqualTo(new BigDecimal("1200.00"));
+        assertThat(captor.getValue().getDueDate()).isEqualTo(TODAY);
+    }
+
+    @Test
+    @DisplayName("replaces a company's opening balance in place, keeping its date unless given another")
+    void replacesOpeningBalance() {
+        LedgerEntry opening = openingBalance(new BigDecimal("25000.00"), LocalDate.of(2026, 3, 31));
+        when(ledgerEntryRepository.findByCompanyIdAndEntryType(COMPANY_ID, LedgerEntryType.OPENING_BALANCE))
+                .thenReturn(Optional.of(opening));
+
+        ledgerService.setOpeningBalance(CLIENT_ID, COMPANY_ID, new BigDecimal("-750.5"), null);
+
+        assertThat(opening.getTotalAmount()).isEqualTo(new BigDecimal("-750.50"));
+        assertThat(opening.getDueDate()).isEqualTo(LocalDate.of(2026, 3, 31));
+        assertThat(opening.getFinancialYear()).isEqualTo("2025-26");
+
+        ledgerService.setOpeningBalance(CLIENT_ID, COMPANY_ID, new BigDecimal("800"), LocalDate.of(2026, 4, 1));
+
+        assertThat(opening.getTotalAmount()).isEqualTo(new BigDecimal("800.00"));
+        assertThat(opening.getDueDate()).isEqualTo(LocalDate.of(2026, 4, 1));
+        // Moved past 31 March, so into the next financial year.
+        assertThat(opening.getFinancialYear()).isEqualTo("2026-27");
+        verify(ledgerEntryRepository, never()).save(any());
+        verify(ledgerEntryRepository, never()).delete(any());
+    }
+
+    @Test
+    @DisplayName("removes a company's opening balance set to 0, and does nothing when it has none")
+    void removesOpeningBalance() {
+        LedgerEntry opening = openingBalance(new BigDecimal("25000.00"), LocalDate.of(2026, 3, 31));
+        when(ledgerEntryRepository.findByCompanyIdAndEntryType(COMPANY_ID, LedgerEntryType.OPENING_BALANCE))
+                .thenReturn(Optional.of(opening), Optional.empty());
+
+        ledgerService.setOpeningBalance(CLIENT_ID, COMPANY_ID, BigDecimal.ZERO, null);
+        ledgerService.setOpeningBalance(CLIENT_ID, COMPANY_ID, new BigDecimal("0.00"), null);
+
+        verify(ledgerEntryRepository).delete(opening);
+        verify(ledgerEntryRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("refuses to move a company's opening balance after today, leaving it as it was")
+    void refusesFutureReplacedOpeningBalance() {
+        LedgerEntry opening = openingBalance(new BigDecimal("25000.00"), LocalDate.of(2026, 3, 31));
+        when(ledgerEntryRepository.findByCompanyIdAndEntryType(COMPANY_ID, LedgerEntryType.OPENING_BALANCE))
+                .thenReturn(Optional.of(opening));
+
+        assertThatThrownBy(() -> ledgerService.setOpeningBalance(CLIENT_ID, COMPANY_ID, new BigDecimal("100"),
+                LocalDate.of(2026, 10, 15)))
+                .isInstanceOf(FutureOpeningBalanceDateException.class);
+
+        assertThat(opening.getTotalAmount()).isEqualTo(new BigDecimal("25000.00"));
+        assertThat(opening.getDueDate()).isEqualTo(LocalDate.of(2026, 3, 31));
+    }
+
+    @Test
+    @DisplayName("reads the opening balances of several companies in one query, without one for no companies")
+    void readsOpeningBalances() {
+        UUID otherCompany = UUID.randomUUID();
+        LedgerEntry opening = openingBalance(new BigDecimal("25000.00"), LocalDate.of(2026, 3, 31));
+        when(ledgerEntryRepository.findByCompanyIdInAndEntryType(List.of(COMPANY_ID, otherCompany),
+                LedgerEntryType.OPENING_BALANCE)).thenReturn(List.of(opening));
+
+        Map<UUID, OpeningBalance> openings = ledgerService.openingBalances(List.of(COMPANY_ID, otherCompany));
+
+        assertThat(openings).containsOnly(Map.entry(COMPANY_ID,
+                new OpeningBalance(new BigDecimal("25000.00"), LocalDate.of(2026, 3, 31))));
+        assertThat(ledgerService.openingBalances(List.of())).isEmpty();
+        verify(ledgerEntryRepository).findByCompanyIdInAndEntryType(any(), any());
+    }
+
+    @Test
+    @DisplayName("counts only charges and payments as history that stops a delete, not opening balances")
+    void checksEntriesBesidesOpeningBalances() {
+        when(ledgerEntryRepository.existsByClientIdAndEntryTypeNot(CLIENT_ID, LedgerEntryType.OPENING_BALANCE))
+                .thenReturn(false);
+        when(ledgerEntryRepository.existsByCompanyIdAndEntryTypeNot(COMPANY_ID, LedgerEntryType.OPENING_BALANCE))
+                .thenReturn(true);
+
+        assertThat(ledgerService.clientHasEntriesBesidesOpeningBalances(CLIENT_ID)).isFalse();
+        assertThat(ledgerService.companyHasEntriesBesidesOpeningBalance(COMPANY_ID)).isTrue();
+    }
+
+    @Test
+    @DisplayName("removes only the opening balances of a client or company being deleted")
+    void removesOpeningBalances() {
+        when(ledgerEntryRepository.deleteByClientIdAndEntryType(CLIENT_ID, LedgerEntryType.OPENING_BALANCE))
+                .thenReturn(2);
+        when(ledgerEntryRepository.deleteByCompanyIdAndEntryType(COMPANY_ID, LedgerEntryType.OPENING_BALANCE))
+                .thenReturn(1);
+
+        assertThat(ledgerService.removeClientOpeningBalances(CLIENT_ID)).isEqualTo(2);
+        assertThat(ledgerService.removeCompanyOpeningBalance(COMPANY_ID)).isEqualTo(1);
+    }
+
+    private static LedgerEntry openingBalance(BigDecimal amount, LocalDate date) {
+        LedgerEntry opening = new LedgerEntry();
+        opening.setId(UUID.randomUUID());
+        opening.setClientId(CLIENT_ID);
+        opening.setCompanyId(COMPANY_ID);
+        opening.setEntryType(LedgerEntryType.OPENING_BALANCE);
+        opening.setTotalAmount(amount);
+        opening.setDueDate(date);
+        opening.setFinancialYear(FinancialYears.of(date));
+        return opening;
     }
 
     @Test

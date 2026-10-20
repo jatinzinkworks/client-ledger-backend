@@ -3,6 +3,7 @@ package com.psc.cl.ledger.service;
 import com.psc.cl.ledger.dto.ClientLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.CompanyLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.LastPayment;
+import com.psc.cl.ledger.dto.OpeningBalance;
 import com.psc.cl.ledger.model.LedgerEntry;
 import com.psc.cl.ledger.model.LedgerEntryType;
 import com.psc.cl.ledger.model.PaymentMethod;
@@ -26,7 +27,8 @@ import java.util.stream.IntStream;
  * their companies: a Summary sheet with the same figures as the matching ledger summary, and a
  * Ledger sheet with every entry of the year in date order, a running balance, and a totals row.
  * A client's Ledger sheet names each entry's company, and is followed by one sheet per company,
- * laid out like a company's own Ledger sheet, which leaves that column out.
+ * laid out like a company's own Ledger sheet: without that column, below the company's opening
+ * balance and its date.
  */
 final class LedgerWorkbook {
 
@@ -47,6 +49,12 @@ final class LedgerWorkbook {
 
     private static final int[] SUMMARY_WIDTHS = {26, 36};
 
+    /** Width of column A on a company's ledger sheet, wide enough for the opening balance labels above the Date. */
+    private static final int COMPANY_SHEET_LABEL_WIDTH = 21;
+
+    /** Rows of a company's ledger sheet kept in view: the opening balance, its date, a blank row and the headings. */
+    private static final int COMPANY_SHEET_FROZEN_ROWS = 4;
+
     private static final BigDecimal ZERO = new BigDecimal("0.00");
 
     private LedgerWorkbook() {
@@ -57,16 +65,19 @@ final class LedgerWorkbook {
      * Writes the workbook of a client's ledger across all of their companies, with a sheet for each
      * company after the combined Ledger sheet, in order of company name. Each company sheet is named
      * after its company and keeps its own running balance and totals; a company with no entries in
-     * the year still gets one, with only headings and zero totals.
+     * the year still gets one, with only headings and zero totals. Above its ledger, each company
+     * sheet shows the company's opening balance and its date, whatever the year it falls in, or None.
      *
      * @param summary      the client's summary for the year, which fills the Summary sheet
      * @param entries      every entry of the year, in the order the Ledger sheets list them
      * @param companyNames the name of each of the client's companies, by identifier
+     * @param openings     the opening balance of each company that has one, by identifier
      * @param generatedOn  the firm's calendar day the export was made
      * @return the content of the .xlsx file
      */
     static byte[] forClient(ClientLedgerSummaryResponse summary, List<LedgerEntry> entries,
-                            Map<UUID, String> companyNames, LocalDate generatedOn) {
+                            Map<UUID, String> companyNames, Map<UUID, OpeningBalance> openings,
+                            LocalDate generatedOn) {
         List<Cell[]> parties = List.<Cell[]>of(row(Cell.text("Client"), Cell.text(summary.getClientName())));
         Figures figures = new Figures(summary.getFinancialYear(), summary.getFromDate(), summary.getToDate(),
                 summary.getTotalBilled(), summary.getTotalDiscount(), summary.getOpeningBalance(),
@@ -75,36 +86,61 @@ final class LedgerWorkbook {
         addSummary(workbook.addSheet(SUMMARY_SHEET, SUMMARY_WIDTHS), "Client Ledger", parties, figures,
                 generatedOn, true);
         addLedger(workbook.addSheet(LEDGER_SHEET, LEDGER_WIDTHS).freezeHeaderRow(), entries, companyNames);
-        addCompanySheets(workbook, entries, companyNames);
+        addCompanySheets(workbook, entries, companyNames, openings);
         return workbook.toBytes();
     }
 
-    /** One sheet per company, in order of name, each with only that company's entries. */
+    /**
+     * One sheet per company, in order of name, each with the company's opening balance above only
+     * that company's entries.
+     */
     private static void addCompanySheets(XlsxWorkbook workbook, List<LedgerEntry> entries,
-                                         Map<UUID, String> companyNames) {
+                                         Map<UUID, String> companyNames, Map<UUID, OpeningBalance> openings) {
         Map<UUID, List<LedgerEntry>> entriesByCompany = entries.stream()
                 .collect(Collectors.groupingBy(LedgerEntry::getCompanyId));
         companyNames.entrySet().stream()
                 .sorted(Map.Entry.<UUID, String>comparingByValue(String.CASE_INSENSITIVE_ORDER)
                         .thenComparing(Map.Entry.comparingByKey()))
-                .forEach(company -> {
-                    Sheet sheet = workbook.addSheet(workbook.sheetName(company.getValue(), "Company"),
-                            withoutCompany(LEDGER_WIDTHS)).freezeHeaderRow();
-                    addLedger(sheet, entriesByCompany.getOrDefault(company.getKey(), List.of()), null);
-                });
+                .forEach(company -> addCompanyLedger(workbook, workbook.sheetName(company.getValue(), "Company"),
+                        openings.get(company.getKey()), entriesByCompany.getOrDefault(company.getKey(), List.of())));
     }
 
     /**
-     * Writes the workbook of the ledger of one company of a client.
+     * Adds a sheet with one company's ledger, without the Company column, below the company's
+     * opening balance and its date.
+     */
+    private static void addCompanyLedger(XlsxWorkbook workbook, String sheetName, OpeningBalance opening,
+                                         List<LedgerEntry> entries) {
+        int[] widths = withoutCompany(LEDGER_WIDTHS);
+        widths[0] = Math.max(widths[0], COMPANY_SHEET_LABEL_WIDTH);
+        Sheet sheet = workbook.addSheet(sheetName, widths).freezeRows(COMPANY_SHEET_FROZEN_ROWS);
+        addOpeningBalance(sheet, opening);
+        addLedger(sheet, entries, null);
+    }
+
+    /**
+     * The company's opening balance and its date, then a blank row; None when it has none. The rows
+     * are written either way, so the ledger's headings are always on the same row.
+     */
+    private static void addOpeningBalance(Sheet sheet, OpeningBalance opening) {
+        sheet.addRow(Cell.text("Opening Balance"), opening == null ? Cell.text("None") : Cell.amount(opening.amount()))
+                .addRow(Cell.text("Opening Balance Date"), opening == null ? Cell.empty() : Cell.date(opening.date()))
+                .addBlankRow();
+    }
+
+    /**
+     * Writes the workbook of the ledger of one company of a client. Above its ledger, the Ledger
+     * sheet shows the company's opening balance and its date, whatever the year it falls in, or None.
      *
      * @param clientName  the name of the client the company belongs to
      * @param summary     the company's summary for the year, which fills the Summary sheet
      * @param entries     every entry of the year, in the order the Ledger sheet lists them
+     * @param opening     the company's opening balance, or null when it has none
      * @param generatedOn the firm's calendar day the export was made
      * @return the content of the .xlsx file
      */
     static byte[] forCompany(String clientName, CompanyLedgerSummaryResponse summary, List<LedgerEntry> entries,
-                             LocalDate generatedOn) {
+                             OpeningBalance opening, LocalDate generatedOn) {
         List<Cell[]> parties = List.of(row(Cell.text("Client"), Cell.text(clientName)),
                 row(Cell.text("Company"), Cell.text(summary.getCompanyName())));
         Figures figures = new Figures(summary.getFinancialYear(), summary.getFromDate(), summary.getToDate(),
@@ -113,8 +149,7 @@ final class LedgerWorkbook {
         XlsxWorkbook workbook = new XlsxWorkbook();
         addSummary(workbook.addSheet(SUMMARY_SHEET, SUMMARY_WIDTHS), "Company Ledger", parties, figures,
                 generatedOn, false);
-        addLedger(workbook.addSheet(LEDGER_SHEET, withoutCompany(LEDGER_WIDTHS)).freezeHeaderRow(), entries,
-                null);
+        addCompanyLedger(workbook, LEDGER_SHEET, opening, entries);
         return workbook.toBytes();
     }
 

@@ -2,8 +2,10 @@ package com.psc.cl.client.service;
 
 import com.psc.cl.client.dto.ClientImportResponse;
 import com.psc.cl.client.dto.ClientImportResponse.ImportedClient;
+import com.psc.cl.client.dto.ClientImportResponse.ImportedCompany;
 import com.psc.cl.client.dto.ClientRequest;
 import com.psc.cl.client.dto.ClientResponse;
+import com.psc.cl.client.dto.CompanyResponse;
 import com.psc.cl.client.dto.NewCompanyRequest;
 import com.psc.cl.client.model.CompanyType;
 import com.psc.cl.exception.SpreadsheetValidationException;
@@ -11,12 +13,14 @@ import com.psc.cl.managercatalog.model.Manager;
 import com.psc.cl.managercatalog.repository.ManagerRepository;
 import com.psc.cl.service.SpreadsheetImport;
 import com.psc.cl.service.SpreadsheetImport.CellErrors;
+import com.psc.cl.service.SpreadsheetImport.Choices;
 import com.psc.cl.service.SpreadsheetImport.Column;
 import com.psc.cl.service.SpreadsheetImport.Row;
 import com.psc.cl.service.SpreadsheetImport.SheetLayout;
 import com.psc.cl.service.XlsxReader;
 import com.psc.cl.service.XlsxWorkbook;
 import com.psc.cl.service.XlsxWorkbook.Cell;
+import com.psc.cl.service.XlsxWorkbook.Range;
 import com.psc.cl.service.XlsxWorkbook.Sheet;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
@@ -26,16 +30,21 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Default {@link ClientImportService}.
@@ -57,6 +66,9 @@ public class ClientImportServiceImpl implements ClientImportService {
 
     static final String INSTRUCTIONS_SHEET = "Instructions";
 
+    /** The template's list of managers, which the Manager Email drop-down offers; it is not imported. */
+    static final String MANAGERS_SHEET = "Managers";
+
     /** Most clients one workbook may import. */
     static final int MAX_CLIENTS = 500;
 
@@ -65,6 +77,9 @@ public class ClientImportServiceImpl implements ClientImportService {
 
     /** Column of the client reference, first on both sheets. */
     private static final int REF = 0;
+
+    /** Column of the manager's email on the Clients sheet. */
+    private static final int MANAGER_EMAIL = 5;
 
     /** The path of a broken rule on one of a client's companies, such as companies[2].address. */
     private static final Pattern COMPANY_PATH = Pattern.compile("^companies\\[(\\d+)]\\.(\\w+)$");
@@ -85,23 +100,24 @@ public class ClientImportServiceImpl implements ClientImportService {
                     + "leading +. Start it with + or format the column as text to keep a leading 0",
                     "+91 98200 12345"),
             new Column("Email", "email", 30, true, "Contact email address", "rohan.mehta@example.com"),
+            // Its drop-down lists the managers of the moment, so it is added as the template is written.
             new Column("Manager Email", "managerId", 30, true, "Email of the manager in the Manager Catalog who "
-                    + "looks after the client", "pranay.singhal@example.com"),
+                    + "looks after the client, picked from the drop-down, which offers those on the "
+                    + MANAGERS_SHEET + " sheet", "pranay.singhal@example.com"),
             new Column("Discount %", "discountPercent", 12, false, "Discount for the client, 0 to 100 with at most 2 "
                     + "decimals. Type 10 or 10% for 10 percent. Blank for none. Applies to each of the client's "
-                    + "companies without a discount of its own", "10"),
-            new Column("WhatsApp Opt-In", "whatsappOptIn", 16, false, "Yes if the client has agreed to receive "
-                    + "WhatsApp messages from the firm, otherwise No. Blank for No", "Yes")), 0);
+                    + "companies without a discount of its own", "10")), 0);
 
     /** The Companies sheet, column A onwards; each field is the {@link NewCompanyRequest} component it fills. */
     static final SheetLayout COMPANIES = new SheetLayout(COMPANIES_SHEET, List.of(
             new Column("Client Ref", null, 12, true, "The Client Ref of the client on the Clients sheet who holds "
-                    + "the company", "C1"),
+                    + "the company, picked from the drop-down, which offers those typed there", "C1",
+                    Choices.from(new Range(CLIENTS_SHEET, REF, 2, MAX_CLIENTS + 1))),
             new Column("Company Name", "companyName", 32, true, "Registered name, up to 200 characters",
                     "Mehta Textiles Pvt Ltd"),
             new Column("Company Type", "companyType", 18, true, "One of "
-                    + SpreadsheetImport.choices(CompanyType.class) + ". Spaces may stand for underscores and case "
-                    + "does not matter, so Private Limited is accepted", "PRIVATE_LIMITED"),
+                    + SpreadsheetImport.choices(CompanyType.class) + ", picked from the drop-down", "PRIVATE_LIMITED",
+                    Choices.of(CompanyType.class)),
             new Column("Address", "address", 45, true, "Registered address, up to 500 characters",
                     "12 MG Road, Bengaluru, Karnataka 560001"),
             new Column("Discount %", "discountPercent", 12, false, "Discount for this company, 0 to 100 with at most "
@@ -124,21 +140,31 @@ public class ClientImportServiceImpl implements ClientImportService {
 
     @Override
     public byte[] template() {
+        List<Manager> managers = managerRepository.findAll().stream()
+                .filter(manager -> manager.getEmail() != null)
+                .sorted(Comparator.comparing(Manager::getEmail, String.CASE_INSENSITIVE_ORDER))
+                .toList();
         XlsxWorkbook workbook = new XlsxWorkbook();
-        SpreadsheetImport.addSheet(workbook, CLIENTS);
+        Sheet clients = SpreadsheetImport.addSheet(workbook, CLIENTS);
+        if (!managers.isEmpty()) {
+            clients.addDropDown(MANAGER_EMAIL, 2, new Range(MANAGERS_SHEET, 0, 2, managers.size() + 1), true);
+        }
         SpreadsheetImport.addSheet(workbook, COMPANIES);
 
         Sheet instructions = workbook.addSheet(INSTRUCTIONS_SHEET, 14, 18, 10, 100, 40);
         instructions.addRow(Cell.bold("Importing clients and their companies"))
                 .addBlankRow()
                 .addRow(Cell.text("1. On the " + CLIENTS_SHEET + " sheet, add one row per client, each with its own "
-                        + "Client Ref, such as C1, C2."))
-                .addRow(Cell.text("2. On the " + COMPANIES_SHEET + " sheet, add one row per company, with the "
-                        + "Client Ref of the client who holds it. Every client needs 1 to "
+                        + "Client Ref, such as C1, C2. Pick the Manager Email from the drop-down, which offers the "
+                        + "managers on the " + MANAGERS_SHEET + " sheet as they were when this template was "
+                        + "downloaded."))
+                .addRow(Cell.text("2. On the " + COMPANIES_SHEET + " sheet, add one row per company, picking the "
+                        + "Client Ref of the client who holds it from the drop-down. Every client needs 1 to "
                         + ClientRequest.MAX_COMPANIES + " companies. Give a company's opening balance there "
                         + "too, if it brings one."))
                 .addRow(Cell.text("3. Keep the headings in row 1 as they are. Blank rows are skipped. Up to "
-                        + MAX_CLIENTS + " clients per file."))
+                        + MAX_CLIENTS + " clients per file. Columns with a set list of values offer it in a "
+                        + "drop-down. The " + MANAGERS_SHEET + " sheet is for reference and is not imported."))
                 .addRow(Cell.text("4. The file is imported whole or not at all: if any cell is wrong, nothing is "
                         + "imported, and every cell at fault is listed so it can be corrected."))
                 .addRow(Cell.text("Importing the same file twice creates the clients twice."))
@@ -147,7 +173,22 @@ public class ClientImportServiceImpl implements ClientImportService {
                         Cell.bold("Example"));
         SpreadsheetImport.describe(instructions, CLIENTS);
         SpreadsheetImport.describe(instructions, COMPANIES);
+        addManagers(workbook, managers);
         return workbook.toBytes();
+    }
+
+    /** The managers the Manager Email drop-down offers, by email in column A, for reference. */
+    private static void addManagers(XlsxWorkbook workbook, List<Manager> managers) {
+        Sheet sheet = workbook.addSheet(MANAGERS_SHEET, 34, 30)
+                .freezeHeaderRow()
+                .addRow(Cell.bold("Email"), Cell.bold("Name"));
+        managers.forEach(manager -> sheet.addRow(Cell.text(manager.getEmail()), Cell.text(name(manager))));
+    }
+
+    private static String name(Manager manager) {
+        return Stream.of(manager.getFirstName(), manager.getLastName())
+                .filter(Objects::nonNull)
+                .collect(Collectors.joining(" "));
     }
 
     @Override
@@ -177,19 +218,31 @@ public class ClientImportServiceImpl implements ClientImportService {
         List<ImportedClient> imported = new ArrayList<>();
         for (PendingClient client : clients.values()) {
             ClientResponse created = clientService.createClient(client.request());
+            // The opening balances as the ledger recorded them, which the created companies carry.
+            List<BigDecimal> openings = created.getCompanies().stream()
+                    .map(CompanyResponse::getOpeningBalanceAmount)
+                    .filter(Objects::nonNull)
+                    .toList();
             imported.add(ImportedClient.builder()
                     .clientRef(client.ref)
                     .clientId(created.getId())
                     .clientName(created.getFirstName() + " " + created.getLastName())
                     .companyCount(created.getCompanies().size())
+                    .openingBalanceCount(openings.size())
+                    .openingBalanceTotal(sum(openings.stream()))
+                    .companies(created.getCompanies().stream().map(ClientImportServiceImpl::imported).toList())
                     .build());
         }
         int companyCount = imported.stream().mapToInt(ImportedClient::getCompanyCount).sum();
-        log.info("Imported {} client(s) with {} company(ies) from a workbook", imported.size(), companyCount);
+        int openingBalanceCount = imported.stream().mapToInt(ImportedClient::getOpeningBalanceCount).sum();
+        log.info("Imported {} client(s) with {} company(ies), {} with an opening balance, from a workbook",
+                imported.size(), companyCount, openingBalanceCount);
 
         return ClientImportResponse.builder()
                 .clientCount(imported.size())
                 .companyCount(companyCount)
+                .openingBalanceCount(openingBalanceCount)
+                .openingBalanceTotal(sum(imported.stream().map(ImportedClient::getOpeningBalanceTotal)))
                 .clients(imported)
                 .build();
     }
@@ -214,12 +267,26 @@ public class ClientImportServiceImpl implements ClientImportService {
                     .lastName(cells.text(2))
                     .phone(cells.text(3))
                     .email(cells.text(4))
-                    .managerId(manager(cells, 5, managers))
-                    .discountPercent(cells.percent(6))
-                    .whatsappOptIn(cells.yesNo(7));
+                    .managerId(manager(cells, MANAGER_EMAIL, managers))
+                    .discountPercent(cells.percent(6));
             clients.put(SpreadsheetImport.key(ref), new PendingClient(row, ref, request));
         });
         return clients;
+    }
+
+    /** A company as created, with the opening balance the ledger recorded for it, if any. */
+    private static ImportedCompany imported(CompanyResponse company) {
+        return ImportedCompany.builder()
+                .companyId(company.getId())
+                .companyName(company.getCompanyName())
+                .openingBalanceAmount(company.getOpeningBalanceAmount())
+                .openingBalanceDate(company.getOpeningBalanceDate())
+                .build();
+    }
+
+    /** Amounts added up, at two decimals; 0.00 when there are none. */
+    private static BigDecimal sum(Stream<BigDecimal> amounts) {
+        return amounts.reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
     }
 
     /** Every manager's identifier by email, lower-cased; emails are unique ignoring case. */

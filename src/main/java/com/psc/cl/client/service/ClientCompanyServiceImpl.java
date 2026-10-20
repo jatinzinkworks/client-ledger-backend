@@ -18,6 +18,7 @@ import com.psc.cl.client.repository.CompanyServiceCount;
 import com.psc.cl.client.repository.ServiceAssignmentRepository;
 import com.psc.cl.exception.ResourceInUseException;
 import com.psc.cl.ledger.dto.CompanyBalance;
+import com.psc.cl.ledger.dto.OpeningBalance;
 import com.psc.cl.ledger.model.FinancialYear;
 import com.psc.cl.ledger.service.LedgerService;
 import lombok.RequiredArgsConstructor;
@@ -67,14 +68,16 @@ public class ClientCompanyServiceImpl implements ClientCompanyService {
         Map<UUID, CompanyBalance> balances = financialYear == null
                 ? Map.of()
                 : ledgerService.companyBalances(clientId, financialYear);
+        Map<UUID, OpeningBalance> openings = ledgerService.openingBalances(companyIds);
 
         return client.getCompanies().stream()
                 .map(company -> {
                     long serviceCount = serviceCounts.getOrDefault(company.getId(), 0L);
+                    OpeningBalance opening = openings.get(company.getId());
                     return financialYear == null
-                            ? CompanyResponse.from(company, serviceCount)
+                            ? CompanyResponse.from(company, serviceCount, opening)
                             : CompanyResponse.from(company, serviceCount, financialYear.label(),
-                                    balances.getOrDefault(company.getId(), CompanyBalance.ZERO));
+                                    balances.getOrDefault(company.getId(), CompanyBalance.ZERO), opening);
                 })
                 .sorted(ClientResponse.BY_COMPANY_NAME)
                 .toList();
@@ -94,11 +97,17 @@ public class ClientCompanyServiceImpl implements ClientCompanyService {
         client.addCompany(company);
         client.setUpdatedAt(Instant.now());
 
-        // Flushing here assigns the new company its identifier before it is returned.
+        // Flushing here assigns the new company its identifier, which its opening balance needs.
         clientRepository.flush();
-        log.info("Added company {} to client {}", company.getId(), clientId);
+        if (request.hasOpeningBalance()) {
+            ledgerService.recordOpeningBalance(clientId, company.getId(), request.openingBalance(),
+                    request.openingBalanceDate());
+        }
+        log.info("Added company {} to client {}, with an opening balance: {}", company.getId(), clientId,
+                request.hasOpeningBalance());
 
-        return CompanyResponse.from(company);
+        // A company just added has an opening balance only when it brought one.
+        return CompanyResponse.from(company, request.hasOpeningBalance() ? openingOf(company.getId()) : null);
     }
 
     @Override
@@ -108,7 +117,7 @@ public class ClientCompanyServiceImpl implements ClientCompanyService {
             throw new ClientNotFoundException(clientId);
         }
         return clientCompanyRepository.findByIdAndClientId(companyId, clientId)
-                .map(CompanyResponse::from)
+                .map(company -> CompanyResponse.from(company, openingOf(companyId)))
                 .orElseThrow(() -> new CompanyNotFoundException(clientId, companyId));
     }
 
@@ -123,9 +132,14 @@ public class ClientCompanyServiceImpl implements ClientCompanyService {
         client.setUpdatedAt(Instant.now());
 
         clientRepository.flush();
+        // An omitted opening balance leaves the company's as it is.
+        if (request.openingBalance() != null) {
+            ledgerService.setOpeningBalance(clientId, companyId, request.openingBalance(),
+                    request.openingBalanceDate());
+        }
         log.info("Updated company {} of client {}", companyId, clientId);
 
-        return CompanyResponse.from(company);
+        return CompanyResponse.from(company, openingOf(companyId));
     }
 
     @Override
@@ -142,10 +156,12 @@ public class ClientCompanyServiceImpl implements ClientCompanyService {
         if (serviceAssignmentRepository.existsByCompanyIdIn(Set.of(companyId))) {
             throw new CompanyHasServicesException(clientId, companyId);
         }
-        // Payments and opening balances need no service, so a company without services may still have them.
-        if (ledgerService.companyHasEntries(companyId)) {
+        // Payments need no service, so a company without services may still have them. An opening balance
+        // alone is no history of dealings with the firm, so it goes with the company.
+        if (ledgerService.companyHasEntriesBesidesOpeningBalance(companyId)) {
             throw new CompanyHasLedgerEntriesException(clientId, companyId);
         }
+        ledgerService.removeCompanyOpeningBalance(companyId);
 
         client.getCompanies().remove(company);
         client.setUpdatedAt(Instant.now());
@@ -159,6 +175,11 @@ public class ClientCompanyServiceImpl implements ClientCompanyService {
                     + "service or a ledger entry while it was being deleted, and cannot be deleted.");
         }
         log.info("Deleted company {} of client {}", companyId, clientId);
+    }
+
+    /** A company's opening balance, as its ledger now holds it, or null when it has none. */
+    private OpeningBalance openingOf(UUID companyId) {
+        return ledgerService.openingBalances(Set.of(companyId)).get(companyId);
     }
 
     private Client requireClient(UUID clientId) {

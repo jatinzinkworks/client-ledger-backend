@@ -4,6 +4,7 @@ import com.psc.cl.globalsettings.model.FirmDetails;
 import com.psc.cl.ledger.dto.ClientLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.CompanyLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.LastPayment;
+import com.psc.cl.ledger.dto.OpeningBalance;
 import org.springframework.web.util.HtmlUtils;
 
 import java.math.BigDecimal;
@@ -21,6 +22,10 @@ import java.util.Locale;
  *
  * <p>Every value taken from the data is HTML-escaped before it goes into the HTML body. Styles are
  * inline and the layout is a table, as most mail readers ignore style sheets.
+ *
+ * <p>Besides the year's figures, each company's opening balance is noted with the date it stood at,
+ * whatever the year it falls in; only one dated in the year counts in the figures. A company without
+ * one is not mentioned.
  *
  * @param subject the subject line
  * @param html    the HTML body
@@ -43,11 +48,13 @@ record LedgerSummaryEmail(String subject, String html, String text) {
      * @param billed      what it was billed in the year
      * @param opening     the opening balance it was taken on with, when dated in the year: positive when
      *                    owed, negative when in credit; zero otherwise
-     * @param received    what it paid in the year
-     * @param pending     billed plus opening balance less received; negative when in credit
+     * @param received       what it paid in the year
+     * @param pending        billed plus opening balance less received; negative when in credit
+     * @param openingBalance the opening balance it was taken on with, whatever its year, or null when it
+     *                       has none
      */
     record CompanyLine(String companyName, BigDecimal billed, BigDecimal opening, BigDecimal received,
-                       BigDecimal pending) {
+                       BigDecimal pending, OpeningBalance openingBalance) {
     }
 
     /**
@@ -61,11 +68,13 @@ record LedgerSummaryEmail(String subject, String html, String text) {
      * @param totalPending billed plus opening balances less received across every year; the same as
      *                     pending for a summary
      * @param companies    the per-company breakdown; empty for a single company's summary
+     * @param companyOpening a single company's opening balance, whatever its year; null for a client's
+     *                       summary, whose companies carry their own, or for a company without one
      */
     private record Content(String topic, String accountHtml, String accountText, String financialYear,
                            LocalDate fromDate, LocalDate toDate, BigDecimal billed, BigDecimal opening,
                            BigDecimal received, BigDecimal pending, BigDecimal totalPending,
-                           LastPayment lastPayment, List<CompanyLine> companies) {
+                           LastPayment lastPayment, List<CompanyLine> companies, OpeningBalance companyOpening) {
 
         /** What was carried into the year from earlier ones; zero for a summary. */
         BigDecimal earlierBalance() {
@@ -77,21 +86,23 @@ record LedgerSummaryEmail(String subject, String html, String text) {
      * Writes the email for one company's summary.
      *
      * @param summary        the company's summary for the year
+     * @param opening        the company's opening balance, whatever its year, or null when it has none
      * @param clientName     the name to greet the client by
      * @param firm           the firm's details for the signature and footer, or null when none are saved
      * @param asOf           the day the figures are as of
      * @param attachmentName the name of the attached PDF ledger statement
      * @return the email
      */
-    static LedgerSummaryEmail forCompany(CompanyLedgerSummaryResponse summary, String clientName, FirmDetails firm,
-                                         LocalDate asOf, String attachmentName) {
+    static LedgerSummaryEmail forCompany(CompanyLedgerSummaryResponse summary, OpeningBalance opening,
+                                         String clientName, FirmDetails firm, LocalDate asOf,
+                                         String attachmentName) {
         return of(new Content(summary.getCompanyName(),
                         "the account of <strong>" + escape(summary.getCompanyName()) + "</strong>",
                         "the account of " + summary.getCompanyName(),
                         summary.getFinancialYear(), summary.getFromDate(), summary.getToDate(),
                         summary.getTotalBilled(), orZero(summary.getOpeningBalance()),
                         summary.getTotalPaymentReceived(), summary.getPending(), summary.getPending(),
-                        summary.getLastPayment(), List.of()),
+                        summary.getLastPayment(), List.of(), opening),
                 Purpose.SUMMARY, clientName, firm, asOf, attachmentName);
     }
 
@@ -144,7 +155,7 @@ record LedgerSummaryEmail(String subject, String html, String text) {
         return new Content("all of your companies", account, account,
                 summary.getFinancialYear(), summary.getFromDate(), summary.getToDate(),
                 summary.getTotalBilled(), orZero(summary.getOpeningBalance()), summary.getTotalPaymentReceived(),
-                summary.getPending(), totalPending, summary.getLastPayment(), companies);
+                summary.getPending(), totalPending, summary.getLastPayment(), companies, null);
     }
 
     /** Summaries always carry an opening balance; zero stands in for one built without it. */
@@ -247,9 +258,13 @@ record LedgerSummaryEmail(String subject, String html, String text) {
             rows.append(row(figure.label(), figure.amount(), figure.highlight()));
         }
 
-        String lastPayment = content.lastPayment() == null ? ""
+        String notes = content.lastPayment() == null ? ""
                 : "<p style=\"margin:16px 0 0;font-size:14px;color:#555555;\">"
                         + escape(lastPaymentLine(content.lastPayment())) + "</p>";
+        if (content.companyOpening() != null) {
+            notes += "<p style=\"margin:16px 0 0;font-size:14px;color:#555555;\">"
+                    + escape("Opening balance: " + openingLine(content.companyOpening()) + ".") + "</p>";
+        }
         String firmName = firm == null || firm.getFirmName() == null ? "" : firm.getFirmName();
 
         return """
@@ -296,8 +311,8 @@ record LedgerSummaryEmail(String subject, String html, String text) {
                 escape(clientName),
                 introHtml(content, purpose, asOf),
                 rows,
-                lastPayment,
-                breakdownHtml(content.companies()),
+                notes,
+                breakdownHtml(content.companies()) + openingBalancesHtml(content.companies()),
                 closing(purpose, "<em>" + escape(attachmentName) + "</em>"),
                 escape(firmName.isEmpty() ? "Accounts team" : firmName),
                 escape(String.join(" | ", footer(firm))));
@@ -347,6 +362,23 @@ record LedgerSummaryEmail(String subject, String html, String text) {
         return table.append("</table>").toString();
     }
 
+    /** Each company's opening balance and its date, for those that have one; nothing when none does. */
+    private static String openingBalancesHtml(List<CompanyLine> companies) {
+        List<CompanyLine> withOpening = companies.stream().filter(company -> company.openingBalance() != null)
+                .toList();
+        if (withOpening.isEmpty()) {
+            return "";
+        }
+        StringBuilder html = new StringBuilder()
+                .append("<p style=\"margin:24px 0 8px;font-size:15px;font-weight:bold;\">Opening balances</p>");
+        for (CompanyLine company : withOpening) {
+            html.append("<p style=\"margin:0 0 4px;font-size:14px;color:#555555;\">")
+                    .append(escape(company.companyName() + ": " + openingLine(company.openingBalance())))
+                    .append("</p>");
+        }
+        return html.toString();
+    }
+
     private static String amountCell(String amount) {
         return "<td align=\"right\" style=\"" + CELL + "\">" + escape(amount) + "</td>";
     }
@@ -366,6 +398,9 @@ record LedgerSummaryEmail(String subject, String html, String text) {
         if (content.lastPayment() != null) {
             text.append('\n').append(lastPaymentLine(content.lastPayment())).append('\n');
         }
+        if (content.companyOpening() != null) {
+            text.append('\n').append("Opening balance: ").append(openingLine(content.companyOpening())).append(".\n");
+        }
         if (!content.companies().isEmpty()) {
             text.append("\nBy company:\n");
             for (CompanyLine company : content.companies()) {
@@ -375,6 +410,16 @@ record LedgerSummaryEmail(String subject, String html, String text) {
                 }
                 text.append(", received ").append(rupees(company.received()))
                         .append(", pending ").append(pendingCell(company.pending())).append('\n');
+            }
+        }
+        List<CompanyLine> withOpening = content.companies().stream()
+                .filter(company -> company.openingBalance() != null)
+                .toList();
+        if (!withOpening.isEmpty()) {
+            text.append("\nOpening balances:\n");
+            for (CompanyLine company : withOpening) {
+                text.append("- ").append(company.companyName()).append(": ")
+                        .append(openingLine(company.openingBalance())).append('\n');
             }
         }
         text.append('\n').append(closing(purpose, attachmentName)).append("\n\n")
@@ -398,6 +443,11 @@ record LedgerSummaryEmail(String subject, String html, String text) {
     /** A company's pending amount in the breakdown, marking a credit rather than showing it negative. */
     private static String pendingCell(BigDecimal pending) {
         return pending.signum() < 0 ? rupees(pending.abs()) + " in credit" : rupees(pending);
+    }
+
+    /** An opening balance and the date it stood at, such as ₹25,000.00 as of 31 Mar 2026. */
+    private static String openingLine(OpeningBalance opening) {
+        return pendingCell(opening.amount()) + " as of " + DATE.format(opening.date());
     }
 
     /** The last payment, naming the company that made it when the summary spans several. */

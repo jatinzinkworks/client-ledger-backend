@@ -17,6 +17,7 @@ import com.lowagie.text.pdf.PdfWriter;
 import com.psc.cl.ledger.dto.ClientLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.CompanyLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.LastPayment;
+import com.psc.cl.ledger.dto.OpeningBalance;
 import com.psc.cl.ledger.model.LedgerEntry;
 import com.psc.cl.ledger.model.LedgerEntryType;
 import org.slf4j.Logger;
@@ -48,7 +49,9 @@ import java.util.stream.Collectors;
  *
  * <p>An opening balance, the balance a company was taken on with, is shown as a figure of its own,
  * not as billed, and as a line of the company's details: under Total Fee when owed, under Amount Paid
- * when the company started in credit.
+ * when the company started in credit. Above its details, each company also shows its opening balance
+ * and the date it stood at, whatever the year it falls in, or None; only one dated in the year counts
+ * in the year's figures.
  *
  * <p>Amounts carry the rupee sign when the fonts {@value #REGULAR_FONT} and {@value #BOLD_FONT} are on
  * the classpath, and are embedded. Without them the built-in Helvetica is used, which has no rupee
@@ -95,17 +98,19 @@ final class LedgerStatementPdf {
      * @param summary      the client's summary for the year
      * @param entries      every entry of the year, in the order to list them
      * @param companyNames the name of each of the client's companies, by identifier
+     * @param openings     the opening balance of each company that has one, by identifier
      * @param generatedOn  the firm's calendar day the statement was made
      * @return the content of the .pdf file
      */
     static byte[] forClient(ClientLedgerSummaryResponse summary, List<LedgerEntry> entries,
-                            Map<UUID, String> companyNames, LocalDate generatedOn) {
+                            Map<UUID, String> companyNames, Map<UUID, OpeningBalance> openings,
+                            LocalDate generatedOn) {
         Map<UUID, List<LedgerEntry>> entriesByCompany = entries.stream()
                 .collect(Collectors.groupingBy(LedgerEntry::getCompanyId));
         List<Section> sections = companyNames.entrySet().stream()
                 .sorted(Map.Entry.<UUID, String>comparingByValue(String.CASE_INSENSITIVE_ORDER)
                         .thenComparing(Map.Entry.comparingByKey()))
-                .map(company -> new Section(company.getValue(),
+                .map(company -> new Section(company.getValue(), openings.get(company.getKey()),
                         entriesByCompany.getOrDefault(company.getKey(), List.of())))
                 .toList();
         Figures figures = new Figures(summary.getFinancialYear(), summary.getFromDate(), summary.getToDate(),
@@ -121,16 +126,17 @@ final class LedgerStatementPdf {
      * @param clientName  the name of the client the company belongs to
      * @param summary     the company's summary for the year
      * @param entries     every entry of the year, in the order to list them
+     * @param opening     the company's opening balance, or null when it has none
      * @param generatedOn the firm's calendar day the statement was made
      * @return the content of the .pdf file
      */
     static byte[] forCompany(String clientName, CompanyLedgerSummaryResponse summary, List<LedgerEntry> entries,
-                             LocalDate generatedOn) {
+                             OpeningBalance opening, LocalDate generatedOn) {
         Figures figures = new Figures(summary.getFinancialYear(), summary.getFromDate(), summary.getToDate(),
                 summary.getTotalBilled(), orZero(summary.getOpeningBalance()), summary.getTotalPaymentReceived(),
                 summary.getPending(), summary.getLastPayment());
         return write(clientName, summary.getCompanyName(), figures,
-                List.of(new Section(summary.getCompanyName(), entries)), generatedOn);
+                List.of(new Section(summary.getCompanyName(), opening, entries)), generatedOn);
     }
 
     /**
@@ -231,7 +237,7 @@ final class LedgerStatementPdf {
         if (sections.isEmpty()) {
             return;
         }
-        boolean withOpening = sections.stream().anyMatch(section -> section.opening().signum() != 0);
+        boolean withOpening = sections.stream().anyMatch(section -> section.openingInYear().signum() != 0);
         document.add(paragraph("By company", fonts.bold(14, BRAND), 18, 6));
         PdfPTable table = new PdfPTable(withOpening ? new float[] {4, 2, 2, 2, 2} : new float[] {4, 2, 2, 2});
         table.setWidthPercentage(withOpening ? 90 : 75);
@@ -246,7 +252,7 @@ final class LedgerStatementPdf {
             table.addCell(cell(section.companyName(), font, Element.ALIGN_LEFT));
             table.addCell(cell(fonts.money(section.billed()), font, Element.ALIGN_RIGHT));
             if (withOpening) {
-                table.addCell(cell(pendingCell(fonts, section.opening()), font, Element.ALIGN_RIGHT));
+                table.addCell(cell(pendingCell(fonts, section.openingInYear()), font, Element.ALIGN_RIGHT));
             }
             table.addCell(cell(fonts.money(section.received()), font, Element.ALIGN_RIGHT));
             table.addCell(cell(pendingCell(fonts, section.pending()), font, Element.ALIGN_RIGHT));
@@ -262,20 +268,39 @@ final class LedgerStatementPdf {
             throws DocumentException {
         if (titled) {
             document.add(paragraph(section.companyName(), fonts.bold(14, BRAND), 0, 4));
-            String opening = section.opening().signum() == 0 ? ""
-                    : "  |  Opening balance " + pendingCell(fonts, section.opening());
+            String opening = section.openingInYear().signum() == 0 ? ""
+                    : "  |  Opening balance " + pendingCell(fonts, section.openingInYear());
             document.add(paragraph("Billed " + fonts.money(section.billed()) + opening + "  |  Received "
                     + fonts.money(section.received()) + "  |  Pending " + pendingCell(fonts, section.pending()),
                     fonts.regular(10, MUTED), 0, 10));
         } else {
             document.add(paragraph("Details", fonts.bold(14, BRAND), 18, 6));
         }
+        addOpeningBalance(document, fonts, section.openingBalance());
         if (section.entries().isEmpty()) {
             document.add(paragraph("No charges or payments in this financial year.", fonts.regular(10, MUTED), 0,
                     0));
             return;
         }
         addEntries(document, fonts, section);
+    }
+
+    /**
+     * The company's opening balance and the date it stood at, whatever the year it falls in; None when
+     * it has none.
+     */
+    private static void addOpeningBalance(Document document, Fonts fonts, OpeningBalance opening)
+            throws DocumentException {
+        PdfPTable table = new PdfPTable(new float[] {3, 2});
+        table.setWidthPercentage(40);
+        table.setHorizontalAlignment(Element.ALIGN_LEFT);
+        table.setSpacingAfter(10);
+        addFigure(table, fonts, "Opening balance", opening == null ? "None" : pendingCell(fonts, opening.amount()),
+                false);
+        if (opening != null) {
+            addFigure(table, fonts, "Opening balance date", DATE.format(opening.date()), false);
+        }
+        document.add(table);
     }
 
     /** Every entry with its running balance, then a totals row. */
@@ -376,15 +401,20 @@ final class LedgerStatementPdf {
         return pending.signum() < 0 ? fonts.money(pending.abs()) + " in credit" : fonts.money(pending);
     }
 
-    /** One company's part of a statement: its entries of the year, and what they add up to. */
-    private record Section(String companyName, List<LedgerEntry> entries) {
+    /**
+     * One company's part of a statement: its opening balance, its entries of the year, and what they
+     * add up to.
+     *
+     * @param openingBalance the company's opening balance whatever its year, or null when it has none
+     */
+    private record Section(String companyName, OpeningBalance openingBalance, List<LedgerEntry> entries) {
 
         BigDecimal billed() {
             return total(LedgerEntryType.SERVICE_CHARGE);
         }
 
-        /** The opening balance dated in the year: positive when owed, negative when in credit. */
-        BigDecimal opening() {
+        /** The opening balance dated in the year: positive when owed, negative when in credit; else zero. */
+        BigDecimal openingInYear() {
             return total(LedgerEntryType.OPENING_BALANCE);
         }
 
@@ -394,7 +424,7 @@ final class LedgerStatementPdf {
         }
 
         BigDecimal pending() {
-            return billed().add(opening()).subtract(received());
+            return billed().add(openingInYear()).subtract(received());
         }
 
         private BigDecimal total(LedgerEntryType type) {

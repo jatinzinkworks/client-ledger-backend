@@ -14,6 +14,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -126,6 +127,68 @@ public class XlsxWorkbookTest {
         assertThat(second).isEqualTo("Mehta Textiles and Garments (2)").hasSize(31);
         workbook.addSheet(second);
         assertThat(workbook.sheetName(longName, "Company")).isEqualTo("Mehta Textiles and Garments (3)");
+    }
+
+    @Test
+    @DisplayName("freezes several rows at the top, such as lines above a table and its headings")
+    void freezesRows() {
+        XlsxWorkbook workbook = new XlsxWorkbook();
+        XlsxWorkbook.Sheet sheet = workbook.addSheet("Company").freezeRows(4);
+
+        assertThat(parts(workbook.toBytes()).get("xl/worksheets/sheet1.xml"))
+                .contains("<pane ySplit=\"4\" topLeftCell=\"A5\" activePane=\"bottomLeft\" state=\"frozen\"/>");
+        assertThatThrownBy(() -> sheet.freezeRows(0)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("writes drop-downs after the sheet's data, refusing or warning about other values")
+    void writesDropDowns() {
+        XlsxWorkbook workbook = new XlsxWorkbook();
+        workbook.addSheet("Services")
+                .addRow(Cell.bold("Category"), Cell.bold("GST %"))
+                .addDropDown(0, 2, List.of("TAX", "AUDIT"), true)
+                .addDropDown(1, 2, List.of("5", "18"), false);
+
+        String sheet = parts(workbook.toBytes()).get("xl/worksheets/sheet1.xml");
+
+        assertThat(sheet)
+                .contains("</sheetData><dataValidations count=\"2\">")
+                .contains("<dataValidation type=\"list\" allowBlank=\"1\" showErrorMessage=\"1\" "
+                        + "errorTitle=\"Not in the list\" error=\"Choose a value from the drop-down.\" "
+                        + "sqref=\"A2:A1048576\"><formula1>&quot;TAX,AUDIT&quot;</formula1></dataValidation>")
+                .contains("<dataValidation type=\"list\" errorStyle=\"warning\" allowBlank=\"1\"")
+                .contains("sqref=\"B2:B1048576\"><formula1>&quot;5,18&quot;</formula1>")
+                .endsWith("</dataValidations></worksheet>");
+    }
+
+    @Test
+    @DisplayName("writes a drop-down of a range's values, quoting the sheet's name")
+    void writesDropDownFromRange() {
+        XlsxWorkbook workbook = new XlsxWorkbook();
+        workbook.addSheet("Companies")
+                .addDropDown(0, 2, new XlsxWorkbook.Range("Rohan's Clients", 0, 2, 501), true);
+
+        String sheet = parts(workbook.toBytes()).get("xl/worksheets/sheet1.xml");
+
+        assertThat(sheet).contains("sqref=\"A2:A1048576\"><formula1>'Rohan''s Clients'!$A$2:$A$501</formula1>");
+        assertThatThrownBy(() -> new XlsxWorkbook.Range("Clients", 0, 5, 4))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("refuses drop-down choices Excel cannot hold")
+    void rejectsInvalidDropDowns() {
+        XlsxWorkbook.Sheet sheet = new XlsxWorkbook().addSheet("Services");
+
+        assertThatThrownBy(() -> sheet.addDropDown(0, 2, List.of(), true))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> sheet.addDropDown(0, 2, List.of("A,B"), true))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> sheet.addDropDown(0, 2, List.of("\"A\""), true))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> sheet.addDropDown(0, 2, List.of("A".repeat(256)), true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("255");
     }
 
     /**

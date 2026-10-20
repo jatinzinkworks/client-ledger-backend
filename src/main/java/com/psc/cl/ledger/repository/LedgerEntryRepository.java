@@ -6,6 +6,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -58,21 +59,69 @@ public interface LedgerEntryRepository extends JpaRepository<LedgerEntry, UUID> 
     Optional<LedgerEntry> findByIdAndCompanyId(UUID id, UUID companyId);
 
     /**
-     * Whether any company of a client has a ledger entry of any type. Served by the
-     * (client_id, entry_date) index.
+     * Whether any company of a client has a ledger entry of any type but one, such as anything besides
+     * an opening balance. Served by the (client_id, entry_date) index.
      *
-     * @param clientId the client
-     * @return true when the client's ledger holds anything
+     * @param clientId  the client
+     * @param entryType the type to leave out
+     * @return true when the client's ledger holds an entry of another type
      */
-    boolean existsByClientId(UUID clientId);
+    boolean existsByClientIdAndEntryTypeNot(UUID clientId, LedgerEntryType entryType);
 
     /**
-     * Whether a company has a ledger entry of any type. Served by the (company_id, due_date) index.
+     * Whether a company has a ledger entry of any type but one, such as anything besides an opening
+     * balance. Served by the (company_id, due_date) index.
      *
      * @param companyId the company
-     * @return true when the company's ledger holds anything
+     * @param entryType the type to leave out
+     * @return true when the company's ledger holds an entry of another type
      */
-    boolean existsByCompanyId(UUID companyId);
+    boolean existsByCompanyIdAndEntryTypeNot(UUID companyId, LedgerEntryType entryType);
+
+    /**
+     * Deletes every entry of one type across a client's companies, such as their opening balances, in
+     * one statement. Pending changes are flushed first, and the entries are gone before it returns.
+     *
+     * @param clientId  the client
+     * @param entryType the type to delete
+     * @return how many entries were deleted
+     */
+    @Modifying
+    @Query("delete from LedgerEntry e where e.clientId = :clientId and e.entryType = :entryType")
+    int deleteByClientIdAndEntryType(@Param("clientId") UUID clientId, @Param("entryType") LedgerEntryType entryType);
+
+    /**
+     * Deletes a company's entries of one type, such as its opening balance, in one statement. Pending
+     * changes are flushed first, and the entries are gone before it returns.
+     *
+     * @param companyId the company
+     * @param entryType the type to delete
+     * @return how many entries were deleted
+     */
+    @Modifying
+    @Query("delete from LedgerEntry e where e.companyId = :companyId and e.entryType = :entryType")
+    int deleteByCompanyIdAndEntryType(@Param("companyId") UUID companyId,
+                                      @Param("entryType") LedgerEntryType entryType);
+
+    /**
+     * Finds a company's entry of a type it has at most one of, such as its opening balance, which a
+     * unique index holds to one per company and serves.
+     *
+     * @param companyId the company
+     * @param entryType a type a company has at most one entry of
+     * @return the entry, or empty when the company has none of the type
+     */
+    Optional<LedgerEntry> findByCompanyIdAndEntryType(UUID companyId, LedgerEntryType entryType);
+
+    /**
+     * Finds several companies' entries of a type each has at most one of, such as their opening
+     * balances, in one query.
+     *
+     * @param companyIds the companies
+     * @param entryType  a type a company has at most one entry of
+     * @return the entries found, at most one per company
+     */
+    List<LedgerEntry> findByCompanyIdInAndEntryType(Collection<UUID> companyIds, LedgerEntryType entryType);
 
     /**
      * Finds the latest entry of one type for one company within a range of dates, both ends

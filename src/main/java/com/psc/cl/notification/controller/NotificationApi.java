@@ -3,10 +3,8 @@ package com.psc.cl.notification.controller;
 import com.psc.cl.config.ApiPaths;
 import com.psc.cl.dto.ErrorResponse;
 import com.psc.cl.notification.dto.BulkLedgerSummaryEmailResponse;
-import com.psc.cl.notification.dto.ClientWhatsAppResult;
 import com.psc.cl.notification.dto.LedgerSummaryEmailResponse;
 import com.psc.cl.notification.dto.PaymentReminderResponse;
-import com.psc.cl.notification.dto.WhatsAppReminderResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -40,12 +38,6 @@ public interface NotificationApi {
 
     /** Path payment reminders are sent to every client with an amount pending from. */
     String PAYMENT_REMINDERS_PATH = ApiPaths.V1 + "/notifications/payment-reminders";
-
-    /** Path WhatsApp payment reminders are sent to every client with an amount pending from. */
-    String WHATSAPP_PAYMENT_REMINDERS_PATH = ApiPaths.V1 + "/notifications/whatsapp-payment-reminders";
-
-    /** Path a WhatsApp payment reminder is sent to one client from. */
-    String CLIENT_WHATSAPP_PAYMENT_REMINDER_PATH = ApiPaths.V1 + "/clients/{clientId}/whatsapp-payment-reminder";
 
     @Operation(
             summary = "Email a client the ledger summary of one of their companies",
@@ -171,68 +163,4 @@ public interface NotificationApi {
                             schema = @Schema(implementation = ErrorResponse.class)))})
     @PostMapping(PAYMENT_REMINDERS_PATH)
     ResponseEntity<PaymentReminderResponse> sendPaymentReminders();
-
-    @Operation(
-            summary = "Send a WhatsApp payment reminder to every client with an amount pending",
-            description = "Takes no input. Sends every client who has opted in to WhatsApp messages "
-                    + "(whatsappOptIn) and owes something across every financial year (billed less received "
-                    + "across all of their companies, to date, is more than zero) a WhatsApp payment reminder on "
-                    + "the phone number in their record, through Meta's WhatsApp Cloud API. Each is the approved "
-                    + "template set in WHATSAPP_PAYMENT_REMINDER_TEMPLATE, filled with the client's first name, "
-                    + "the firm's name, the amount pending and today's date. Numbers without a country code get "
-                    + "WHATSAPP_DEFAULT_COUNTRY_CODE. Clients not opted in are counted in notOptedInCount; those "
-                    + "settled or in credit overall in skippedCount. Each client is sent to on its own, so one "
-                    + "that fails, such as a phone number WhatsApp cannot use, is listed under failures and the "
-                    + "others are still reminded. The response returns once every client has been tried.")
-    @ApiResponses({
-            @ApiResponse(responseCode = "200",
-                    description = "The run's outcome, including any clients that could not be reminded",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                            schema = @Schema(implementation = WhatsAppReminderResponse.class))),
-            @ApiResponse(responseCode = "502",
-                    description = "WhatsApp is not configured; no client was sent a message",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                            schema = @Schema(implementation = ErrorResponse.class))),
-            @ApiResponse(responseCode = "500", description = "Unexpected server error",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                            schema = @Schema(implementation = ErrorResponse.class)))})
-    @PostMapping(WHATSAPP_PAYMENT_REMINDERS_PATH)
-    ResponseEntity<WhatsAppReminderResponse> sendWhatsAppPaymentReminders();
-
-    @Operation(
-            summary = "Send one client a WhatsApp payment reminder",
-            description = "Sends the client a WhatsApp payment reminder for what they owe across every financial "
-                    + "year and all of their companies, on the phone number in their record, through Meta's "
-                    + "WhatsApp Cloud API: the approved template set in WHATSAPP_PAYMENT_REMINDER_TEMPLATE, filled "
-                    + "with their first name, the firm's name, the amount pending and today's date. The client "
-                    + "must have opted in to WhatsApp messages (whatsappOptIn) and owe something. The message is "
-                    + "sent before the response returns.")
-    @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "The reminder was accepted by WhatsApp",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                            schema = @Schema(implementation = ClientWhatsAppResult.class))),
-            @ApiResponse(responseCode = "400", description = "The identifier is not a valid UUID",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                            schema = @Schema(implementation = ErrorResponse.class))),
-            @ApiResponse(responseCode = "404", description = "No client carries this identifier",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                            schema = @Schema(implementation = ErrorResponse.class))),
-            @ApiResponse(responseCode = "409",
-                    description = "The client has not opted in to WhatsApp messages, owes nothing, or has a phone "
-                            + "number WhatsApp cannot use; nothing was sent",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                            schema = @Schema(implementation = ErrorResponse.class))),
-            @ApiResponse(responseCode = "502",
-                    description = "WhatsApp is not configured, or refused the message or could not be reached; "
-                            + "nothing was sent",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                            schema = @Schema(implementation = ErrorResponse.class))),
-            @ApiResponse(responseCode = "500", description = "Unexpected server error",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                            schema = @Schema(implementation = ErrorResponse.class)))})
-    @PostMapping(CLIENT_WHATSAPP_PAYMENT_REMINDER_PATH)
-    ResponseEntity<ClientWhatsAppResult> sendWhatsAppPaymentReminder(
-            @Parameter(description = "Identifier of the client", required = true,
-                    example = "7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35")
-            @PathVariable UUID clientId);
 }

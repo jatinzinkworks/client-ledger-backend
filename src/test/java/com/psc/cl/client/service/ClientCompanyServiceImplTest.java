@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -26,17 +27,20 @@ import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.client.repository.CompanyServiceCount;
 import com.psc.cl.client.repository.ServiceAssignmentRepository;
 import com.psc.cl.ledger.dto.CompanyBalance;
+import com.psc.cl.ledger.dto.OpeningBalance;
 import com.psc.cl.ledger.model.FinancialYear;
 import com.psc.cl.ledger.service.FinancialYears;
 import com.psc.cl.ledger.service.LedgerService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -75,6 +79,9 @@ class ClientCompanyServiceImplTest {
         // The HUF has no services, so the query returns no row for it.
         when(serviceAssignmentRepository.countByCompanyIdIn(Set.of(hufId, textilesId)))
                 .thenReturn(List.of(serviceCount(textilesId, 3)));
+        // Only the textiles company was taken on with a balance.
+        when(ledgerService.openingBalances(Set.of(hufId, textilesId))).thenReturn(Map.of(textilesId,
+                new OpeningBalance(new BigDecimal("25000.00"), LocalDate.of(2026, 3, 31))));
 
         List<CompanyResponse> companies = clientCompanyService.listCompanies(stored.getId(), null);
 
@@ -84,14 +91,17 @@ class ClientCompanyServiceImplTest {
         assertThat(companies).extracting("discountPercent")
                 .containsExactly(new BigDecimal("7.50"), new BigDecimal("10.00"));
         assertThat(companies).extracting("discountInherited").containsExactly(false, true);
+        assertThat(companies).extracting("openingBalanceAmount").containsExactly(new BigDecimal("25000.00"), null);
+        assertThat(companies).extracting("openingBalanceDate").containsExactly(LocalDate.of(2026, 3, 31), null);
         assertThat(companies).allSatisfy(company -> {
             assertThat(company.getAddress()).isNotBlank();
             // Without a financial year, no billing figures.
             assertThat(company.getFinancialYear()).isNull();
             assertThat(company.getTotalBilled()).isNull();
+            assertThat(company.getOpeningBalance()).isNull();
             assertThat(company.getPending()).isNull();
         });
-        verifyNoInteractions(ledgerService);
+        verify(ledgerService, never()).companyBalances(any(), any());
     }
 
     @Test
@@ -106,6 +116,8 @@ class ClientCompanyServiceImplTest {
         when(ledgerService.companyBalances(stored.getId(), year)).thenReturn(Map.of(textilesId,
                 new CompanyBalance(new BigDecimal("39235.00"), new BigDecimal("15605.00"),
                         new BigDecimal("23630.00"), new BigDecimal("0.00"))));
+        when(ledgerService.openingBalances(any())).thenReturn(Map.of(textilesId,
+                new OpeningBalance(new BigDecimal("25000.00"), LocalDate.of(2026, 3, 31))));
 
         List<CompanyResponse> companies = clientCompanyService.listCompanies(stored.getId(), year);
 
@@ -116,8 +128,14 @@ class ClientCompanyServiceImplTest {
         assertThat(textiles.getTotalPaymentReceived()).isEqualTo(new BigDecimal("15605.00"));
         assertThat(textiles.getPending()).isEqualTo(new BigDecimal("23630.00"));
 
+        // Dated in the year before, so it is not in this year's figures, but is shown all the same.
+        assertThat(textiles.getOpeningBalance()).isEqualTo(new BigDecimal("0.00"));
+        assertThat(textiles.getOpeningBalanceAmount()).isEqualTo(new BigDecimal("25000.00"));
+        assertThat(textiles.getOpeningBalanceDate()).isEqualTo(LocalDate.of(2026, 3, 31));
+
         CompanyResponse huf = companies.get(1);
         assertThat(huf.getFinancialYear()).isEqualTo("2026-27");
+        assertThat(huf.getOpeningBalanceAmount()).isNull();
         assertThat(huf.getTotalBilled()).isEqualTo(new BigDecimal("0.00"));
         assertThat(huf.getTotalPaymentReceived()).isEqualTo(new BigDecimal("0.00"));
         assertThat(huf.getPending()).isEqualTo(new BigDecimal("0.00"));
@@ -186,6 +204,52 @@ class ClientCompanyServiceImplTest {
     }
 
     @Test
+    @DisplayName("records an added company's opening balance in its ledger, once it has its id")
+    void addsCompanyWithOpeningBalance() {
+        Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF");
+        when(clientRepository.findByIdForUpdate(stored.getId())).thenReturn(Optional.of(stored));
+        UUID generatedId = UUID.randomUUID();
+        doAnswer(invocation -> {
+            stored.getCompanies().stream()
+                    .filter(company -> company.getId() == null)
+                    .forEach(company -> company.setId(generatedId));
+            return null;
+        }).when(clientRepository).flush();
+        when(ledgerService.openingBalances(Set.of(generatedId))).thenReturn(Map.of(generatedId,
+                new OpeningBalance(new BigDecimal("25000.00"), LocalDate.of(2026, 3, 31))));
+
+        CompanyResponse response = clientCompanyService.addCompany(stored.getId(), CompanyRequest.builder()
+                .companyName("Mehta Exports LLP")
+                .companyType(CompanyType.LLP)
+                .address("8 Nariman Point, Mumbai")
+                .openingBalance(new BigDecimal("25000.00"))
+                .openingBalanceDate(LocalDate.of(2026, 3, 31))
+                .build());
+
+        verify(ledgerService).recordOpeningBalance(stored.getId(), generatedId, new BigDecimal("25000.00"),
+                LocalDate.of(2026, 3, 31));
+        assertThat(response.getOpeningBalanceAmount()).isEqualTo(new BigDecimal("25000.00"));
+        assertThat(response.getOpeningBalanceDate()).isEqualTo(LocalDate.of(2026, 3, 31));
+    }
+
+    @Test
+    @DisplayName("records nothing in the ledger for an added company without an opening balance, or with one of 0")
+    void addsCompanyWithoutOpeningBalance() {
+        Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF");
+        when(clientRepository.findByIdForUpdate(stored.getId())).thenReturn(Optional.of(stored));
+
+        clientCompanyService.addCompany(stored.getId(), company("Mehta Exports LLP", null));
+        clientCompanyService.addCompany(stored.getId(), CompanyRequest.builder()
+                .companyName("Mehta Textiles Pvt Ltd")
+                .companyType(CompanyType.PRIVATE_LIMITED)
+                .address("12 MG Road, Bengaluru")
+                .openingBalance(BigDecimal.ZERO)
+                .build());
+
+        verifyNoInteractions(ledgerService);
+    }
+
+    @Test
     @DisplayName("refuses to add a company to a client that already holds the most allowed")
     void addCompanyRejectsOverLimit() {
         String[] names = new String[ClientRequest.MAX_COMPANIES];
@@ -223,11 +287,15 @@ class ClientCompanyServiceImplTest {
         when(clientRepository.existsById(stored.getId())).thenReturn(true);
         when(clientCompanyRepository.findByIdAndClientId(company.getId(), stored.getId()))
                 .thenReturn(Optional.of(company));
+        when(ledgerService.openingBalances(Set.of(company.getId()))).thenReturn(Map.of(company.getId(),
+                new OpeningBalance(new BigDecimal("-5000.50"), LocalDate.of(2026, 4, 1))));
 
         CompanyResponse response = clientCompanyService.getCompany(stored.getId(), company.getId());
 
         assertThat(response.getId()).isEqualTo(company.getId());
         assertThat(response.getCompanyName()).isEqualTo("Rohan Mehta HUF");
+        assertThat(response.getOpeningBalanceAmount()).isEqualTo(new BigDecimal("-5000.50"));
+        assertThat(response.getOpeningBalanceDate()).isEqualTo(LocalDate.of(2026, 4, 1));
     }
 
     @Test
@@ -302,6 +370,47 @@ class ClientCompanyServiceImplTest {
     }
 
     @Test
+    @DisplayName("on company update, an omitted opening balance leaves the company's as it is, and returns it")
+    void updateCompanyKeepsOpeningBalanceWhenOmitted() {
+        Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF");
+        ClientCompany company = stored.getCompanies().getFirst();
+        when(clientRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
+        when(ledgerService.openingBalances(Set.of(company.getId()))).thenReturn(Map.of(company.getId(),
+                new OpeningBalance(new BigDecimal("25000.00"), LocalDate.of(2026, 3, 31))));
+
+        CompanyResponse response = clientCompanyService.updateCompany(stored.getId(), company.getId(),
+                company("Rohan Mehta HUF", null));
+
+        verify(ledgerService, never()).setOpeningBalance(any(), any(), any(), any());
+        assertThat(response.getOpeningBalanceAmount()).isEqualTo(new BigDecimal("25000.00"));
+    }
+
+    @Test
+    @DisplayName("on company update, an opening balance given, 0 included, is set in the company's ledger")
+    void updateCompanySetsOpeningBalance() {
+        Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF");
+        ClientCompany company = stored.getCompanies().getFirst();
+        when(clientRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
+        CompanyRequest.CompanyRequestBuilder request = CompanyRequest.builder()
+                .companyName("Rohan Mehta HUF")
+                .companyType(CompanyType.HUF)
+                .address("12 MG Road, Bengaluru");
+
+        clientCompanyService.updateCompany(stored.getId(), company.getId(), request
+                .openingBalance(new BigDecimal("-5000.50"))
+                .openingBalanceDate(LocalDate.of(2026, 4, 1))
+                .build());
+        clientCompanyService.updateCompany(stored.getId(), company.getId(), request
+                .openingBalance(BigDecimal.ZERO)
+                .openingBalanceDate(null)
+                .build());
+
+        verify(ledgerService).setOpeningBalance(stored.getId(), company.getId(), new BigDecimal("-5000.50"),
+                LocalDate.of(2026, 4, 1));
+        verify(ledgerService).setOpeningBalance(stored.getId(), company.getId(), BigDecimal.ZERO, null);
+    }
+
+    @Test
     @DisplayName("raises company not found when updating a company the client does not hold")
     void updateCompanyFailsForCompanyOfAnotherClient() {
         Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF");
@@ -347,6 +456,25 @@ class ClientCompanyServiceImplTest {
     }
 
     @Test
+    @DisplayName("deletes a company whose only ledger entry is an opening balance, removing the balance first")
+    void deletesCompanyWithOnlyOpeningBalance() {
+        Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF", "Mehta Textiles Pvt Ltd");
+        ClientCompany doomed = stored.getCompanies().get(1);
+        when(clientRepository.findByIdForUpdate(stored.getId())).thenReturn(Optional.of(stored));
+        when(serviceAssignmentRepository.existsByCompanyIdIn(Set.of(doomed.getId()))).thenReturn(false);
+        when(ledgerService.companyHasEntriesBesidesOpeningBalance(doomed.getId())).thenReturn(false);
+        when(ledgerService.removeCompanyOpeningBalance(doomed.getId())).thenReturn(1);
+
+        clientCompanyService.deleteCompany(stored.getId(), doomed.getId());
+
+        assertThat(stored.getCompanies()).hasSize(1).doesNotContain(doomed);
+        // The balance goes before the company, which its foreign key would otherwise stop.
+        InOrder order = inOrder(ledgerService, clientRepository);
+        order.verify(ledgerService).removeCompanyOpeningBalance(doomed.getId());
+        order.verify(clientRepository).flush();
+    }
+
+    @Test
     @DisplayName("refuses to delete a client's only company")
     void deleteCompanyRejectsLastCompany() {
         Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF");
@@ -384,15 +512,17 @@ class ClientCompanyServiceImplTest {
         ClientCompany paid = stored.getCompanies().get(0);
         when(clientRepository.findByIdForUpdate(stored.getId())).thenReturn(Optional.of(stored));
         when(serviceAssignmentRepository.existsByCompanyIdIn(Set.of(paid.getId()))).thenReturn(false);
-        when(ledgerService.companyHasEntries(paid.getId())).thenReturn(true);
+        when(ledgerService.companyHasEntriesBesidesOpeningBalance(paid.getId())).thenReturn(true);
 
         assertThatThrownBy(() -> clientCompanyService.deleteCompany(stored.getId(), paid.getId()))
                 .isInstanceOf(CompanyHasLedgerEntriesException.class)
-                .hasMessageContaining("ledger entries")
-                .hasMessageNotContaining("services");
+                .hasMessageContaining("payments or service charges")
+                .hasMessageNotContaining("services assigned");
 
         assertThat(stored.getCompanies()).hasSize(2);
         verify(clientRepository, never()).flush();
+        // Nothing is removed from the ledger when the company stays.
+        verify(ledgerService, never()).removeCompanyOpeningBalance(any());
     }
 
     @Test

@@ -3,6 +3,7 @@ package com.psc.cl.servicecatalog.service;
 import com.psc.cl.exception.SpreadsheetValidationException;
 import com.psc.cl.service.SpreadsheetImport;
 import com.psc.cl.service.SpreadsheetImport.CellErrors;
+import com.psc.cl.service.SpreadsheetImport.Choices;
 import com.psc.cl.service.SpreadsheetImport.Column;
 import com.psc.cl.service.SpreadsheetImport.Row;
 import com.psc.cl.service.SpreadsheetImport.SheetLayout;
@@ -34,6 +35,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 /**
  * Default {@link ServiceCatalogImportService}.
@@ -70,6 +72,9 @@ public class ServiceCatalogImportServiceImpl implements ServiceCatalogImportServ
 
     private static final int INVOICE_MONTH = 8;
 
+    /** GST rates the template's drop-down offers: the slabs services are usually charged at. */
+    private static final String[] GST_RATES = {"0", "5", "12", "18", "28", "40"};
+
     /** The Services sheet, column A onwards; each field is the {@link CatalogServiceRequest} component it fills. */
     static final SheetLayout SERVICES = new SheetLayout(SERVICES_SHEET, List.of(
             new Column("Service Name", "serviceName", 32, true, "Name of the service, up to 150 characters. "
@@ -77,23 +82,28 @@ public class ServiceCatalogImportServiceImpl implements ServiceCatalogImportServ
             new Column("Description", "description", 45, false, "What the service covers, up to 1000 characters",
                     "Preparation and filing of GSTR-1 and GSTR-3B each month"),
             new Column("Category", "category", 16, true, "One of " + SpreadsheetImport.choices(ServiceCategory.class)
-                    + ", in any case", "COMPLIANCE"),
+                    + ", picked from the drop-down", "COMPLIANCE", Choices.of(ServiceCategory.class)),
             new Column("Billing Frequency", "billingFrequency", 18, true, "One of "
-                    + SpreadsheetImport.choices(BillingFrequency.class) + ". Spaces may stand for underscores, so "
-                    + "One Off is accepted", "MONTHLY"),
+                    + SpreadsheetImport.choices(BillingFrequency.class) + ", picked from the drop-down", "MONTHLY",
+                    Choices.of(BillingFrequency.class)),
             new Column("Standard Fee", "standardFee", 14, true, "Fee charged for the service, excluding GST; not "
                     + "negative, at most 2 decimals", "5000"),
-            new Column("GST %", "gstRatePercent", 8, false, "GST rate, 0 to 100 with at most 2 decimals. Type 18 or "
-                    + "18%. Blank for 18", "18"),
+            new Column("GST %", "gstRatePercent", 8, false, "GST rate, 0 to 100 with at most 2 decimals. The "
+                    + "drop-down offers the usual rates, but any other may be typed, as 18 or 18%. Blank for 18", "18",
+                    Choices.suggested(GST_RATES)),
             new Column("Invoice Day", "invoiceSchedule.dayOfMonth", 12, false, "Day of the month the invoice is "
                     + "raised, 1 to 31; in shorter months, their last day. Required unless ONE_OFF, which must "
-                    + "leave it blank", "7"),
+                    + "leave it blank", "7", new Choices(IntStream.rangeClosed(1, 31).mapToObj(String::valueOf)
+                    .toList(), true)),
             new Column("Invoice Month of Quarter", "invoiceSchedule.monthOfQuarter", 24, false, "QUARTERLY only, "
                     + "and required for it: which month after the quarter closes the invoice is raised in, "
                     + SpreadsheetImport.choices(QuarterInvoiceMonth.class) + ", or 1, 2 or 3. For the quarter "
-                    + "ending March, FIRST_MONTH is April", "FIRST_MONTH"),
+                    + "ending March, FIRST_MONTH is April", "FIRST_MONTH",
+                    // Not strict: 1, 2 and 3 are accepted too.
+                    new Choices(Choices.of(QuarterInvoiceMonth.class).values(), false)),
             new Column("Invoice Month", "invoiceSchedule.month", 16, false, "ANNUAL only, and required for it: the "
-                    + "month the invoice is raised in, by name, such as April", "APRIL")), 0);
+                    + "month the invoice is raised in, picked from the drop-down", "APRIL",
+                    Choices.of(InvoiceMonth.class))), 0);
 
     /**
      * What a broken rule about the invoice schedule says on the sheet, against the column it
@@ -138,7 +148,8 @@ public class ServiceCatalogImportServiceImpl implements ServiceCatalogImportServ
         Sheet instructions = workbook.addSheet(INSTRUCTIONS_SHEET, 14, 24, 10, 100, 40);
         instructions.addRow(Cell.bold("Importing services into the catalog"))
                 .addBlankRow()
-                .addRow(Cell.text("1. On the " + SERVICES_SHEET + " sheet, add one row per service."))
+                .addRow(Cell.text("1. On the " + SERVICES_SHEET + " sheet, add one row per service. Columns with a "
+                        + "set list of values offer it in a drop-down."))
                 .addRow(Cell.text("2. Fill in the invoice schedule to match the billing frequency: ONE_OFF leaves "
                         + "it blank; MONTHLY needs an Invoice Day; QUARTERLY an Invoice Day and an Invoice Month of "
                         + "Quarter; ANNUAL an Invoice Day and an Invoice Month."))

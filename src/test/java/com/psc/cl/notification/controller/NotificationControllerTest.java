@@ -15,16 +15,10 @@ import com.psc.cl.notification.dto.BulkLedgerSummaryEmailResponse;
 import com.psc.cl.notification.dto.ClientEmailFailure;
 import com.psc.cl.notification.dto.ClientEmailResult;
 import com.psc.cl.notification.dto.ClientReminderResult;
-import com.psc.cl.notification.dto.ClientWhatsAppFailure;
-import com.psc.cl.notification.dto.ClientWhatsAppResult;
 import com.psc.cl.notification.dto.LedgerSummaryEmailResponse;
 import com.psc.cl.notification.dto.PaymentReminderResponse;
-import com.psc.cl.notification.dto.WhatsAppReminderResponse;
 import com.psc.cl.notification.exception.EmailDeliveryException;
-import com.psc.cl.notification.exception.WhatsAppDeliveryException;
-import com.psc.cl.notification.exception.WhatsAppNotOptedInException;
 import com.psc.cl.notification.service.NotificationService;
-import com.psc.cl.notification.service.WhatsAppNotificationService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -54,9 +48,6 @@ class NotificationControllerTest {
 
     @MockitoBean
     private NotificationService notificationService;
-
-    @MockitoBean
-    private WhatsAppNotificationService whatsAppNotificationService;
 
     @Test
     @DisplayName("emails the ledger summary and says who it went to")
@@ -206,82 +197,6 @@ class NotificationControllerTest {
         mockMvc.perform(post(ApiPaths.V1 + "/notifications/payment-reminders"))
                 .andExpect(status().isBadGateway())
                 .andExpect(jsonPath("$.code").value("EXTERNAL_SERVICE_ERROR"));
-    }
-
-    @Test
-    @DisplayName("sends WhatsApp payment reminders without any input, listing who was reminded and who failed")
-    void sendsWhatsAppPaymentReminders() throws Exception {
-        UUID failedClient = UUID.randomUUID();
-        when(whatsAppNotificationService.sendPaymentReminders()).thenReturn(WhatsAppReminderResponse.builder()
-                .clientCount(3)
-                .sentCount(1)
-                .notOptedInCount(1)
-                .skippedCount(1)
-                .sent(List.of(ClientWhatsAppResult.builder()
-                        .clientId(CLIENT_ID)
-                        .clientName("Rohan Mehta")
-                        .pending(new BigDecimal("24235.00"))
-                        .messageId("wamid.ABC123")
-                        .build()))
-                .failures(List.of(ClientWhatsAppFailure.builder()
-                        .clientId(failedClient)
-                        .clientName("Anita Shah")
-                        .error("The client's phone number cannot be used for WhatsApp")
-                        .build()))
-                .build());
-
-        mockMvc.perform(post(ApiPaths.V1 + "/notifications/whatsapp-payment-reminders"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.sentCount").value(1))
-                .andExpect(jsonPath("$.notOptedInCount").value(1))
-                .andExpect(jsonPath("$.skippedCount").value(1))
-                .andExpect(jsonPath("$.sent[0].messageId").value("wamid.ABC123"))
-                .andExpect(jsonPath("$.sent[0].pending").value(24235.0))
-                .andExpect(jsonPath("$.failures[0].clientId").value(failedClient.toString()));
-    }
-
-    @Test
-    @DisplayName("sends one client a WhatsApp payment reminder")
-    void sendsWhatsAppPaymentReminderToOneClient() throws Exception {
-        when(whatsAppNotificationService.sendPaymentReminder(CLIENT_ID)).thenReturn(ClientWhatsAppResult.builder()
-                .clientId(CLIENT_ID)
-                .clientName("Rohan Mehta")
-                .pending(new BigDecimal("24235.00"))
-                .messageId("wamid.ABC123")
-                .build());
-
-        mockMvc.perform(post(ApiPaths.V1 + "/clients/" + CLIENT_ID + "/whatsapp-payment-reminder"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.clientId").value(CLIENT_ID.toString()))
-                .andExpect(jsonPath("$.pending").value(24235.0))
-                .andExpect(jsonPath("$.messageId").value("wamid.ABC123"));
-    }
-
-    @Test
-    @DisplayName("returns 409 when the client has not opted in to WhatsApp, and 404 when there is no such client")
-    void rejectsWhatsAppReminderToOneClient() throws Exception {
-        String url = ApiPaths.V1 + "/clients/" + CLIENT_ID + "/whatsapp-payment-reminder";
-        when(whatsAppNotificationService.sendPaymentReminder(CLIENT_ID))
-                .thenThrow(new WhatsAppNotOptedInException(CLIENT_ID))
-                .thenThrow(new ClientNotFoundException(CLIENT_ID));
-
-        mockMvc.perform(post(url))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("BUSINESS_RULE_VIOLATION"));
-        mockMvc.perform(post(url))
-                .andExpect(status().isNotFound());
-    }
-
-    @Test
-    @DisplayName("returns 502 when sending WhatsApp reminders while WhatsApp is not configured")
-    void reportsWhatsAppNotConfigured() throws Exception {
-        when(whatsAppNotificationService.sendPaymentReminders())
-                .thenThrow(new WhatsAppDeliveryException("WhatsApp is not configured"));
-
-        mockMvc.perform(post(ApiPaths.V1 + "/notifications/whatsapp-payment-reminders"))
-                .andExpect(status().isBadGateway())
-                .andExpect(jsonPath("$.code").value("EXTERNAL_SERVICE_ERROR"))
-                .andExpect(jsonPath("$.message").value("WhatsApp is not configured"));
     }
 
     @Test

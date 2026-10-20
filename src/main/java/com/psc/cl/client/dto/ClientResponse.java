@@ -2,6 +2,7 @@ package com.psc.cl.client.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.psc.cl.client.model.Client;
+import com.psc.cl.ledger.dto.OpeningBalance;
 import com.psc.cl.managercatalog.model.Manager;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -12,6 +13,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -53,10 +55,6 @@ public class ClientResponse {
     @Schema(description = "Discount granted to the client, as a percentage", example = "10.00")
     BigDecimal discountPercent;
 
-    @Schema(description = "Whether the client has agreed to receive WhatsApp messages from the firm",
-            example = "true")
-    boolean whatsappOptIn;
-
     @ArraySchema(arraySchema = @Schema(description = "Companies the client holds, ordered by name"),
             schema = @Schema(implementation = CompanyResponse.class))
     List<CompanyResponse> companies;
@@ -75,12 +73,13 @@ public class ClientResponse {
     /**
      * Maps a persisted entity onto its API representation.
      *
-     * @param entity  the stored client
-     * @param manager the manager assigned to the client
+     * @param entity   the stored client
+     * @param manager  the manager assigned to the client
+     * @param openings the opening balances of the client's companies, by company
      * @return the response payload
      */
-    public static ClientResponse from(Client entity, Manager manager) {
-        return builderFrom(entity, manager).build();
+    public static ClientResponse from(Client entity, Manager manager, Map<UUID, OpeningBalance> openings) {
+        return builderFrom(entity, manager, openings).build();
     }
 
     /**
@@ -88,14 +87,17 @@ public class ClientResponse {
      *
      * @param entity       the stored client
      * @param manager      the manager assigned to the client
+     * @param openings     the opening balances of the client's companies, by company
      * @param totalPending what the client still owes, across all companies and financial years
      * @return the response payload
      */
-    public static ClientResponse from(Client entity, Manager manager, BigDecimal totalPending) {
-        return builderFrom(entity, manager).totalPending(totalPending).build();
+    public static ClientResponse from(Client entity, Manager manager, Map<UUID, OpeningBalance> openings,
+                                      BigDecimal totalPending) {
+        return builderFrom(entity, manager, openings).totalPending(totalPending).build();
     }
 
-    private static ClientResponseBuilder builderFrom(Client entity, Manager manager) {
+    private static ClientResponseBuilder builderFrom(Client entity, Manager manager,
+                                                     Map<UUID, OpeningBalance> openings) {
         return ClientResponse.builder()
                 .id(entity.getId())
                 .firstName(entity.getFirstName())
@@ -105,8 +107,7 @@ public class ClientResponse {
                 .managerId(entity.getManagerId())
                 .managerName(managerName(manager))
                 .discountPercent(entity.getDiscountPercent())
-                .whatsappOptIn(entity.isWhatsappOptIn())
-                .companies(companiesOf(entity))
+                .companies(companiesOf(entity, openings))
                 .createdAt(entity.getCreatedAt())
                 .updatedAt(entity.getUpdatedAt());
     }
@@ -114,12 +115,13 @@ public class ClientResponse {
     /**
      * Maps the companies of a client onto their API representation, ordered by name.
      *
-     * @param entity the stored client, with its companies loaded
+     * @param entity   the stored client, with its companies loaded
+     * @param openings the opening balances of the client's companies, by company
      * @return the companies, ordered by name
      */
-    public static List<CompanyResponse> companiesOf(Client entity) {
+    public static List<CompanyResponse> companiesOf(Client entity, Map<UUID, OpeningBalance> openings) {
         return entity.getCompanies().stream()
-                .map(CompanyResponse::from)
+                .map(company -> CompanyResponse.from(company, openings.get(company.getId())))
                 .sorted(BY_COMPANY_NAME)
                 .toList();
     }

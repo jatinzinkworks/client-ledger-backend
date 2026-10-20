@@ -24,6 +24,7 @@ import com.psc.cl.ledger.dto.LedgerListResponse;
 import com.psc.cl.ledger.dto.LedgerSummary;
 import com.psc.cl.ledger.dto.ManagerBalance;
 import com.psc.cl.ledger.dto.MonthlyTotals;
+import com.psc.cl.ledger.dto.OpeningBalance;
 import com.psc.cl.ledger.dto.PageMetadata;
 import com.psc.cl.ledger.dto.PaymentListResponse;
 import com.psc.cl.ledger.dto.PaymentRequest;
@@ -71,6 +72,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -233,19 +235,14 @@ public class LedgerServiceImpl implements LedgerService {
         }
         // "Today" is the firm's calendar day, read from the business clock.
         LocalDate today = LocalDate.now(clock);
-        LocalDate date = balanceDate == null ? today : balanceDate;
-        if (date.isAfter(today)) {
-            throw new FutureOpeningBalanceDateException(date, today);
-        }
+        LocalDate date = openingBalanceDate(balanceDate == null ? today : balanceDate, today);
 
         LedgerEntry opening = new LedgerEntry();
         opening.setClientId(clientId);
         opening.setCompanyId(companyId);
         opening.setEntryType(LedgerEntryType.OPENING_BALANCE);
-        opening.setDueDate(date);
-        opening.setFinancialYear(FinancialYears.of(date));
         opening.setEntryDate(today);
-        opening.setTotalAmount(twoPlaces(amount));
+        applyOpeningBalance(opening, amount, date);
 
         LedgerEntry saved = ledgerEntryRepository.save(opening);
         log.info("Recorded the opening balance {} of company {} of client {}, as of {}", saved.getId(), companyId,
@@ -254,15 +251,87 @@ public class LedgerServiceImpl implements LedgerService {
     }
 
     @Override
-    @Transactional(readOnly = true)
-    public boolean clientHasEntries(UUID clientId) {
-        return ledgerEntryRepository.existsByClientId(clientId);
+    @Transactional
+    public void setOpeningBalance(UUID clientId, UUID companyId, BigDecimal amount, LocalDate balanceDate) {
+        Optional<LedgerEntry> current = ledgerEntryRepository.findByCompanyIdAndEntryType(companyId,
+                LedgerEntryType.OPENING_BALANCE);
+        if (amount.signum() == 0) {
+            current.ifPresent(opening -> {
+                ledgerEntryRepository.delete(opening);
+                log.info("Removed the opening balance {} of company {} of client {}", opening.getId(), companyId,
+                        clientId);
+            });
+            return;
+        }
+        if (current.isEmpty()) {
+            recordOpeningBalance(clientId, companyId, amount, balanceDate);
+            return;
+        }
+
+        LedgerEntry opening = current.get();
+        LocalDate date = openingBalanceDate(balanceDate == null ? opening.getDueDate() : balanceDate,
+                LocalDate.now(clock));
+        applyOpeningBalance(opening, amount, date);
+        // Flushing here stamps updatedAt, as a correction does.
+        ledgerEntryRepository.flush();
+        log.info("Replaced the opening balance {} of company {} of client {}, now as of {}", opening.getId(),
+                companyId, clientId, date);
     }
 
     @Override
     @Transactional(readOnly = true)
-    public boolean companyHasEntries(UUID companyId) {
-        return ledgerEntryRepository.existsByCompanyId(companyId);
+    public Map<UUID, OpeningBalance> openingBalances(Collection<UUID> companyIds) {
+        if (companyIds.isEmpty()) {
+            return Map.of();
+        }
+        return ledgerEntryRepository.findByCompanyIdInAndEntryType(companyIds, LedgerEntryType.OPENING_BALANCE)
+                .stream()
+                .collect(Collectors.toMap(LedgerEntry::getCompanyId,
+                        opening -> new OpeningBalance(opening.getTotalAmount(), opening.getDueDate())));
+    }
+
+    /** The date of an opening balance, which must not be after today. */
+    private static LocalDate openingBalanceDate(LocalDate date, LocalDate today) {
+        if (date.isAfter(today)) {
+            throw new FutureOpeningBalanceDateException(date, today);
+        }
+        return date;
+    }
+
+    /** Sets an opening balance's amount and the date it stood at, which places it in a financial year. */
+    private static void applyOpeningBalance(LedgerEntry opening, BigDecimal amount, LocalDate date) {
+        opening.setDueDate(date);
+        opening.setFinancialYear(FinancialYears.of(date));
+        opening.setTotalAmount(twoPlaces(amount));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public boolean clientHasEntriesBesidesOpeningBalances(UUID clientId) {
+        return ledgerEntryRepository.existsByClientIdAndEntryTypeNot(clientId, LedgerEntryType.OPENING_BALANCE);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public boolean companyHasEntriesBesidesOpeningBalance(UUID companyId) {
+        return ledgerEntryRepository.existsByCompanyIdAndEntryTypeNot(companyId, LedgerEntryType.OPENING_BALANCE);
+    }
+
+    @Override
+    @Transactional
+    public int removeClientOpeningBalances(UUID clientId) {
+        int removed = ledgerEntryRepository.deleteByClientIdAndEntryType(clientId, LedgerEntryType.OPENING_BALANCE);
+        log.info("Removed {} opening balance(s) of client {}, which is being deleted", removed, clientId);
+        return removed;
+    }
+
+    @Override
+    @Transactional
+    public int removeCompanyOpeningBalance(UUID companyId) {
+        int removed = ledgerEntryRepository.deleteByCompanyIdAndEntryType(companyId,
+                LedgerEntryType.OPENING_BALANCE);
+        log.info("Removed {} opening balance(s) of company {}, which is being deleted", removed, companyId);
+        return removed;
     }
 
     @Override
@@ -462,7 +531,9 @@ public class LedgerServiceImpl implements LedgerService {
         ClientLedgerSummaryResponse summary = summarizeClient(clientId, financialYear);
         List<LedgerEntry> entries = ledgerEntryRepository.findAllByClientIdAndDueDateBetween(clientId,
                 financialYear.firstDay(), financialYear.lastDay(), EXPORT_ORDER);
-        byte[] content = LedgerWorkbook.forClient(summary, entries, companyNames, LocalDate.now(clock));
+        // Each company sheet shows its opening balance, whatever the year it falls in.
+        Map<UUID, OpeningBalance> openings = openingBalances(companyNames.keySet());
+        byte[] content = LedgerWorkbook.forClient(summary, entries, companyNames, openings, LocalDate.now(clock));
 
         log.info("Exported {} ledger entries of client {} for FY {}", entries.size(), clientId,
                 financialYear.label());
@@ -478,7 +549,9 @@ public class LedgerServiceImpl implements LedgerService {
         CompanyLedgerSummaryResponse summary = summarize(clientId, company, financialYear);
         List<LedgerEntry> entries = ledgerEntryRepository.findAllByCompanyIdAndDueDateBetween(companyId,
                 financialYear.firstDay(), financialYear.lastDay(), EXPORT_ORDER);
-        byte[] content = LedgerWorkbook.forCompany(fullName(company.getClient()), summary, entries,
+        // The Ledger sheet shows the company's opening balance, whatever the year it falls in.
+        OpeningBalance opening = openingBalances(Set.of(companyId)).get(companyId);
+        byte[] content = LedgerWorkbook.forCompany(fullName(company.getClient()), summary, entries, opening,
                 LocalDate.now(clock));
 
         log.info("Exported {} ledger entries of company {} of client {} for FY {}", entries.size(), companyId,
@@ -497,7 +570,10 @@ public class LedgerServiceImpl implements LedgerService {
         ClientLedgerSummaryResponse summary = summarizeClient(clientId, financialYear);
         List<LedgerEntry> entries = ledgerEntryRepository.findAllByClientIdAndDueDateBetween(clientId,
                 financialYear.firstDay(), financialYear.lastDay(), EXPORT_ORDER);
-        byte[] content = LedgerStatementPdf.forClient(summary, entries, companyNames, LocalDate.now(clock));
+        // Each company shows its opening balance, whatever the year it falls in.
+        Map<UUID, OpeningBalance> openings = openingBalances(companyNames.keySet());
+        byte[] content = LedgerStatementPdf.forClient(summary, entries, companyNames, openings,
+                LocalDate.now(clock));
 
         log.info("Wrote a statement of {} ledger entries of client {} for FY {}", entries.size(), clientId,
                 financialYear.label());
@@ -513,7 +589,9 @@ public class LedgerServiceImpl implements LedgerService {
         CompanyLedgerSummaryResponse summary = summarize(clientId, company, financialYear);
         List<LedgerEntry> entries = ledgerEntryRepository.findAllByCompanyIdAndDueDateBetween(companyId,
                 financialYear.firstDay(), financialYear.lastDay(), EXPORT_ORDER);
-        byte[] content = LedgerStatementPdf.forCompany(fullName(company.getClient()), summary, entries,
+        // The details show the company's opening balance, whatever the year it falls in.
+        OpeningBalance opening = openingBalances(Set.of(companyId)).get(companyId);
+        byte[] content = LedgerStatementPdf.forCompany(fullName(company.getClient()), summary, entries, opening,
                 LocalDate.now(clock));
 
         log.info("Wrote a statement of {} ledger entries of company {} of client {} for FY {}", entries.size(),

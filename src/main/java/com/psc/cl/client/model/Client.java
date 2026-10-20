@@ -69,10 +69,6 @@ public class Client {
     @Column(name = "discount_percent", nullable = false, precision = 5, scale = 2)
     private BigDecimal discountPercent;
 
-    /** Whether the client has agreed to receive WhatsApp messages, which WhatsApp requires before any is sent. */
-    @Column(name = "whatsapp_opt_in", nullable = false)
-    private boolean whatsappOptIn;
-
     /** Owned by the client: saved, replaced and removed together with it. */
     @OneToMany(mappedBy = "client", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<ClientCompany> companies = new ArrayList<>();

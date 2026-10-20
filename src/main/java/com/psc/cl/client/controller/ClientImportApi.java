@@ -40,7 +40,7 @@ public interface ClientImportApi {
             summary = "Download the client import template",
             description = "Returns the Excel workbook to fill in for POST /clients/import. Its Clients sheet takes "
                     + "one row per client: Client Ref, First Name, Last Name, Phone, Email, Manager Email, "
-                    + "Discount % and WhatsApp Opt-In. Its Companies sheet takes one row per company: Client Ref, "
+                    + "and Discount %. Its Companies sheet takes one row per company: Client Ref, "
                     + "Company Name, Company Type, Address and Discount %, linked to its client by the Client Ref. "
                     + "An Instructions sheet describes every column with an example. Only clients and their "
                     + "companies are imported; services are assigned afterwards as usual.")
@@ -68,9 +68,12 @@ public interface ClientImportApi {
                     + "such as Clients!F3. Managers are named by their email in the Manager Catalog. Up to 500 "
                     + "clients may be imported at once, each with 1 to 50 companies. Clients already on file "
                     + "are not looked for, so importing the same workbook twice creates its clients twice. "
-                    + "Clients opted in to WhatsApp are sent the confirmation message as on create.")
+                    + "The response lists each company created with the opening balance recorded for it, and "
+                    + "counts and adds those balances up per client and overall, so they can be checked "
+                    + "against the workbook.")
     @ApiResponses({
-            @ApiResponse(responseCode = "201", description = "Every client and company was created",
+            @ApiResponse(responseCode = "201", description = "Every client and company was created, with the "
+                    + "opening balances recorded",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ClientImportResponse.class))),
             @ApiResponse(responseCode = "400",

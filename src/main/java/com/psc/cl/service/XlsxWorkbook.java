@@ -17,7 +17,7 @@ import java.util.zip.ZipOutputStream;
 /**
  * Writes a small Excel workbook (Office Open XML, .xlsx) with nothing but the JDK: a zip of the few
  * XML parts Excel, LibreOffice and Google Sheets need. Enough for a ledger export: text, amounts
- * and dates, a bold heading style, column widths and a frozen header row.
+ * and dates, a bold heading style, column widths, frozen rows at the top and drop-downs of choices.
  *
  * <p>Text is written as inline strings, never as formulas, so a value such as {@code =SUM(A1)}
  * typed into a comment shows as typed and is not evaluated when the file is opened.
@@ -31,6 +31,12 @@ public final class XlsxWorkbook {
 
     /** Excel refuses sheet names longer than this. */
     private static final int MAX_SHEET_NAME_LENGTH = 31;
+
+    /** Excel's last row, to offer a drop-down down the whole of a column. */
+    private static final int MAX_ROW = 1_048_576;
+
+    /** Excel refuses a drop-down whose choices, joined by commas, are longer than this. */
+    private static final int MAX_CHOICES_LENGTH = 255;
 
     /** Characters Excel refuses in a sheet name. */
     private static final Pattern FORBIDDEN_IN_SHEET_NAME = Pattern.compile("[:\\\\/?*\\[\\]]");
@@ -286,7 +292,9 @@ public final class XlsxWorkbook {
 
         private final List<List<Cell>> rows = new ArrayList<>();
 
-        private boolean headerFrozen;
+        private final List<DropDown> dropDowns = new ArrayList<>();
+
+        private int frozenRows;
 
         private Sheet(String name, int[] columnWidths) {
             this.name = name;
@@ -312,16 +320,71 @@ public final class XlsxWorkbook {
 
         /** Keeps the first row in view while scrolling down. */
         public Sheet freezeHeaderRow() {
-            headerFrozen = true;
+            return freezeRows(1);
+        }
+
+        /**
+         * Keeps the first rows in view while scrolling down, such as a few lines above a table's
+         * headings and the headings themselves.
+         *
+         * @param count how many rows from the top to keep in view, at least 1
+         * @return this sheet
+         */
+        public Sheet freezeRows(int count) {
+            if (count < 1) {
+                throw new IllegalArgumentException("Freeze at least one row, not " + count);
+            }
+            frozenRows = count;
+            return this;
+        }
+
+        /**
+         * Offers a drop-down of choices in a column, from a row to the bottom of the sheet.
+         *
+         * @param column   the column, from 0
+         * @param firstRow the first row to offer it in, from 1
+         * @param choices  the values offered, in order: none may hold a comma or a double quote, and
+         *                 joined by commas they may be at most 255 characters, as Excel requires
+         * @param strict   whether Excel refuses a value typed that is not among them; otherwise it
+         *                 warns, and keeps the value if asked to
+         * @return this sheet
+         */
+        public Sheet addDropDown(int column, int firstRow, List<String> choices, boolean strict) {
+            if (choices.isEmpty() || choices.stream().anyMatch(choice -> choice.isBlank()
+                    || choice.contains(",") || choice.contains("\""))) {
+                throw new IllegalArgumentException("Not valid drop-down choices: " + choices);
+            }
+            if (String.join(",", choices).length() > MAX_CHOICES_LENGTH) {
+                throw new IllegalArgumentException("Drop-down choices longer than " + MAX_CHOICES_LENGTH
+                        + " characters: " + choices);
+            }
+            dropDowns.add(new DropDown(column, firstRow, "\"" + String.join(",", choices) + "\"", strict));
+            return this;
+        }
+
+        /**
+         * Offers a drop-down of the values in a range of cells, such as a list on another sheet, in a
+         * column from a row to the bottom of the sheet. Blank cells of the range offer nothing.
+         *
+         * @param column   the column, from 0
+         * @param firstRow the first row to offer it in, from 1
+         * @param source   the cells whose values are offered
+         * @param strict   whether Excel refuses a value typed that is not among them; otherwise it
+         *                 warns, and keeps the value if asked to
+         * @return this sheet
+         */
+        public Sheet addDropDown(int column, int firstRow, Range source, boolean strict) {
+            dropDowns.add(new DropDown(column, firstRow, source.formula(), strict));
             return this;
         }
 
         private String toXml() {
             StringBuilder xml = new StringBuilder(XML_DECLARATION)
                     .append("<worksheet xmlns=\"").append(MAIN_NS).append("\">");
-            if (headerFrozen) {
+            if (frozenRows > 0) {
                 xml.append("<sheetViews><sheetView workbookViewId=\"0\">")
-                        .append("<pane ySplit=\"1\" topLeftCell=\"A2\" activePane=\"bottomLeft\" state=\"frozen\"/>")
+                        .append("<pane ySplit=\"").append(frozenRows).append("\" topLeftCell=\"A")
+                        .append(frozenRows + 1).append("\" activePane=\"bottomLeft\" state=\"frozen\"/>")
                         .append("</sheetView></sheetViews>");
             }
             if (columnWidths.length > 0) {
@@ -336,7 +399,14 @@ public final class XlsxWorkbook {
             for (int r = 0; r < rows.size(); r++) {
                 appendRow(xml, r + 1, rows.get(r));
             }
-            return xml.append("</sheetData></worksheet>").toString();
+            xml.append("</sheetData>");
+            // Excel requires the validations after the sheet's data.
+            if (!dropDowns.isEmpty()) {
+                xml.append("<dataValidations count=\"").append(dropDowns.size()).append("\">");
+                dropDowns.forEach(dropDown -> dropDown.appendXml(xml));
+                xml.append("</dataValidations>");
+            }
+            return xml.append("</worksheet>").toString();
         }
 
         private static void appendRow(StringBuilder xml, int rowNumber, List<Cell> cells) {
@@ -359,6 +429,51 @@ public final class XlsxWorkbook {
                 default -> xml.append(" t=\"inlineStr\"><is><t xml:space=\"preserve\">")
                         .append(escape(cell.value().toString())).append("</t></is></c>");
             }
+        }
+    }
+
+    /**
+     * Cells of one column of a sheet, from one row to another.
+     *
+     * @param sheet    the sheet's name
+     * @param column   the column, from 0
+     * @param firstRow the first row, from 1
+     * @param lastRow  the last row, no earlier than the first
+     */
+    public record Range(String sheet, int column, int firstRow, int lastRow) {
+
+        public Range {
+            if (firstRow < 1 || lastRow < firstRow) {
+                throw new IllegalArgumentException("Not a valid range of rows: " + firstRow + " to " + lastRow);
+            }
+        }
+
+        /** The range as a formula refers to it, such as 'Clients'!$A$2:$A$501. */
+        String formula() {
+            String letters = columnName(column);
+            return "'" + sheet.replace("'", "''") + "'!$" + letters + "$" + firstRow + ":$" + letters + "$" + lastRow;
+        }
+    }
+
+    /**
+     * A drop-down down a column, written as a list validation.
+     *
+     * @param formula what the list offers: its choices in double quotes, separated by commas, or a range
+     */
+    private record DropDown(int column, int firstRow, String formula, boolean strict) {
+
+        private void appendXml(StringBuilder xml) {
+            String letters = columnName(column);
+            xml.append("<dataValidation type=\"list\"");
+            if (!strict) {
+                xml.append(" errorStyle=\"warning\"");
+            }
+            xml.append(" allowBlank=\"1\" showErrorMessage=\"1\" errorTitle=\"Not in the list\" error=\"")
+                    .append(strict ? "Choose a value from the drop-down." : "This is not one of the values listed.")
+                    .append("\" sqref=\"").append(letters).append(firstRow).append(':').append(letters)
+                    .append(MAX_ROW).append("\"><formula1>")
+                    .append(escape(formula))
+                    .append("</formula1></dataValidation>");
         }
     }
 }

@@ -14,6 +14,7 @@ import com.psc.cl.ledger.dto.LedgerListResponse;
 import com.psc.cl.ledger.dto.LedgerSummary;
 import com.psc.cl.ledger.dto.ManagerBalance;
 import com.psc.cl.ledger.dto.MonthlyTotals;
+import com.psc.cl.ledger.dto.OpeningBalance;
 import com.psc.cl.ledger.dto.PaymentListResponse;
 import com.psc.cl.ledger.dto.PaymentRequest;
 import com.psc.cl.ledger.dto.UnpaidCharge;
@@ -99,21 +100,64 @@ public interface LedgerService {
                                              LocalDate balanceDate);
 
     /**
-     * Whether any company of a client has an entry in its ledger, of any type: a service charge, a
-     * payment or an opening balance.
+     * Sets the opening balance of a company already held, as an update of the company gives it:
+     * records one when the company has none, replaces the amount and date of the one it has, or
+     * removes it when the amount is zero. It is meant for a company being updated, in the same
+     * transaction, so the company is not looked up again.
      *
-     * @param clientId the client
-     * @return true when the client's ledger holds anything
+     * @param clientId    the client
+     * @param companyId   the company of the client
+     * @param amount      the balance, at most two decimals: positive when the company owes it, negative
+     *                    when it starts in credit; zero to remove it
+     * @param balanceDate the date the balance stood at, which places it in a financial year; null to
+     *                    keep the date of the balance the company has, or today for a new one
+     * @throws com.psc.cl.ledger.exception.FutureOpeningBalanceDateException when the date is after today
      */
-    boolean clientHasEntries(UUID clientId);
+    void setOpeningBalance(UUID clientId, UUID companyId, BigDecimal amount, LocalDate balanceDate);
 
     /**
-     * Whether a company has an entry in its ledger, of any type.
+     * The opening balances of several companies, in one query.
+     *
+     * @param companyIds the companies
+     * @return each company's opening balance, by company; a company without one is left out
+     */
+    Map<UUID, OpeningBalance> openingBalances(Collection<UUID> companyIds);
+
+    /**
+     * Whether any company of a client has a service charge or a payment in its ledger: the history
+     * that stops a client from being deleted. An opening balance alone does not.
+     *
+     * @param clientId the client
+     * @return true when the client's ledger holds anything besides opening balances
+     */
+    boolean clientHasEntriesBesidesOpeningBalances(UUID clientId);
+
+    /**
+     * Whether a company has a service charge or a payment in its ledger: the history that stops a
+     * company from being deleted. An opening balance alone does not.
      *
      * @param companyId the company
-     * @return true when the company's ledger holds anything
+     * @return true when the company's ledger holds anything besides its opening balance
      */
-    boolean companyHasEntries(UUID companyId);
+    boolean companyHasEntriesBesidesOpeningBalance(UUID companyId);
+
+    /**
+     * Removes the opening balances of every company of a client, as the client is deleted, in the
+     * same transaction and before it.
+     *
+     * @param clientId the client being deleted
+     * @return how many opening balances were removed
+     */
+    int removeClientOpeningBalances(UUID clientId);
+
+    /**
+     * Removes a company's opening balance, as the company is deleted, in the same transaction and
+     * before it.
+     *
+     * @param companyId the company being deleted
+     * @return how many opening balances were removed: 1, or 0 when it had none
+     */
+    int removeCompanyOpeningBalance(UUID companyId);
 
     /**
      * Lists one page of the payments recorded for one company of a client.

@@ -22,6 +22,7 @@ import com.psc.cl.managercatalog.repository.ManagerRepository;
 import com.psc.cl.service.XlsxReader;
 import com.psc.cl.service.XlsxWorkbook;
 import com.psc.cl.service.XlsxWorkbook.Cell;
+import com.psc.cl.service.XlsxWorkbookTest;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import jakarta.validation.ValidatorFactory;
@@ -35,12 +36,14 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.IntStream;
 
@@ -52,7 +55,7 @@ class ClientImportServiceImplTest {
     private static final ValidatorFactory VALIDATION = Validation.buildDefaultValidatorFactory();
 
     private static final Cell[] CLIENT_HEADINGS = headings("Client Ref", "First Name", "Last Name", "Phone", "Email",
-            "Manager Email", "Discount %", "WhatsApp Opt-In");
+            "Manager Email", "Discount %");
 
     private static final Cell[] COMPANY_HEADINGS = headings("Client Ref", "Company Name", "Company Type", "Address",
             "Discount %", "Opening Balance", "Opening Balance Date");
@@ -85,11 +88,12 @@ class ClientImportServiceImplTest {
         XlsxReader.Workbook template = XlsxReader.read(importService.template());
 
         assertThat(template.sheets()).extracting(XlsxReader.Sheet::name)
-                .containsExactly("Clients", "Companies", "Instructions");
+                .containsExactly("Clients", "Companies", "Instructions", "Managers");
         XlsxReader.Sheet clients = template.sheet("Clients").orElseThrow();
-        assertThat(IntStream.range(0, 8).mapToObj(column -> clients.cell(1, column)))
+        assertThat(IntStream.range(0, 7).mapToObj(column -> clients.cell(1, column)))
                 .containsExactly("Client Ref", "First Name", "Last Name", "Phone", "Email", "Manager Email",
-                        "Discount %", "WhatsApp Opt-In");
+                        "Discount %");
+        assertThat(clients.cell(1, 7)).isNull();
         assertThat(clients.rows()).containsOnlyKeys(1);
         XlsxReader.Sheet companies = template.sheet("Companies").orElseThrow();
         assertThat(IntStream.range(0, 7).mapToObj(column -> companies.cell(1, column)))
@@ -98,6 +102,42 @@ class ClientImportServiceImplTest {
         assertThat(template.sheet("Instructions").orElseThrow().rows().values())
                 .anySatisfy(row -> assertThat(row.values()).contains("Manager Email"))
                 .anySatisfy(row -> assertThat(row.get(3)).contains("PRIVATE_LIMITED"));
+    }
+
+    @Test
+    @DisplayName("the template offers drop-downs, the managers' emails from a Managers sheet listing them")
+    void offersDropDowns() {
+        when(managerRepository.findAll()).thenReturn(List.of(manager()));
+
+        byte[] template = importService.template();
+
+        Map<String, String> parts = XlsxWorkbookTest.parts(template);
+        // On the Clients sheet, only the manager's email has a set list of values.
+        assertThat(parts.get("xl/worksheets/sheet1.xml"))
+                .contains("<dataValidations count=\"1\">")
+                .contains("sqref=\"F2:F1048576\"><formula1>'Managers'!$A$2:$A$2</formula1>")
+                .doesNotContain("errorStyle");
+        assertThat(parts.get("xl/worksheets/sheet2.xml"))
+                .contains("<dataValidations count=\"2\">")
+                .contains("sqref=\"A2:A1048576\"><formula1>'Clients'!$A$2:$A$501</formula1>")
+                .contains("sqref=\"C2:C1048576\"><formula1>&quot;PRIVATE_LIMITED,PUBLIC_LIMITED,LLP,PARTNERSHIP,"
+                        + "PROPRIETORSHIP,TRUST,HUF,INDIVIDUAL&quot;</formula1>")
+                .doesNotContain("errorStyle");
+        XlsxReader.Sheet managers = XlsxReader.read(template).sheet("Managers").orElseThrow();
+        assertThat(managers.rows()).containsOnlyKeys(1, 2);
+        assertThat(managers.cell(2, 0)).isEqualTo("pranay@example.com");
+        assertThat(managers.cell(2, 1)).isEqualTo("Pranay Singhal");
+    }
+
+    @Test
+    @DisplayName("without managers in the catalog, the template offers no Manager Email drop-down")
+    void offersNoManagerDropDownWithoutManagers() {
+        String clients = XlsxWorkbookTest.parts(importService.template()).get("xl/worksheets/sheet1.xml");
+
+        // That was the Clients sheet's only drop-down, so it has none at all.
+        assertThat(clients)
+                .doesNotContain("<dataValidations")
+                .doesNotContain("'Managers'");
     }
 
     @Test
@@ -118,9 +158,9 @@ class ClientImportServiceImplTest {
         byte[] workbook = workbook(
                 List.of(
                         row("C1", "Rohan", "Mehta", "+91 98200 12345", "rohan@example.com",
-                                "PRANAY@Example.com", "10", "Yes"),
+                                "PRANAY@Example.com", "10"),
                         row("C2", "Asha", "Kapoor", "9820012345", "asha@example.com", "pranay@example.com",
-                                null, null)),
+                                null)),
                 List.of(
                         row("C1", "Mehta Textiles Pvt Ltd", "Private Limited", "12 MG Road, Bengaluru", "5%"),
                         row("c2", "Kapoor & Sons", "PARTNERSHIP", "4 Park Street, Kolkata", null),
@@ -136,7 +176,6 @@ class ClientImportServiceImplTest {
         // The manager is found by email, ignoring case.
         assertThat(rohan.managerId()).isEqualTo(MANAGER_ID);
         assertThat(rohan.discountPercent()).isEqualByComparingTo("10");
-        assertThat(rohan.whatsappOptIn()).isTrue();
         assertThat(rohan.companies()).extracting("companyName")
                 .containsExactly("Mehta Textiles Pvt Ltd", "Rohan Mehta HUF");
         assertThat(rohan.companies()).extracting("companyType")
@@ -147,7 +186,6 @@ class ClientImportServiceImplTest {
 
         ClientRequest asha = captor.getAllValues().get(1);
         assertThat(asha.discountPercent()).isNull();
-        assertThat(asha.whatsappOptIn()).isNull();
         // Linked by a Client Ref differing only in case.
         assertThat(asha.companies()).extracting("companyName").containsExactly("Kapoor & Sons");
 
@@ -156,6 +194,11 @@ class ClientImportServiceImplTest {
         assertThat(response.getClients()).extracting(ClientImportResponse.ImportedClient::getClientRef)
                 .containsExactly("C1", "C2");
         assertThat(response.getClients().get(0).getClientName()).isEqualTo("Rohan Mehta");
+        // No company brought an opening balance.
+        assertThat(response.getOpeningBalanceCount()).isZero();
+        assertThat(response.getOpeningBalanceTotal()).isEqualTo(new BigDecimal("0.00"));
+        assertThat(response.getClients()).extracting(ClientImportResponse.ImportedClient::getOpeningBalanceTotal)
+                .containsExactly(new BigDecimal("0.00"), new BigDecimal("0.00"));
     }
 
     @Test
@@ -165,11 +208,10 @@ class ClientImportServiceImplTest {
         byte[] workbook = workbook(
                 List.of(
                         row("C1", "Rohan", "Mehta", "+91 98200 12345", "not-an-email", "nobody@example.com",
-                                "ten", "Maybe"),
+                                "ten"),
                         row("C1", "Asha", "Kapoor", "9820012345", "asha@example.com", "pranay@example.com",
-                                null, null),
-                        row("C3", null, "Shah", "9820012345", "shah@example.com", "pranay@example.com", "150",
-                                null)),
+                                null),
+                        row("C3", null, "Shah", "9820012345", "shah@example.com", "pranay@example.com", "150")),
                 List.of(
                         row("C1", "Mehta Textiles Pvt Ltd", "Corporation", "12 MG Road, Bengaluru", null),
                         row("C9", "Unknown Holdings", "LLP", "1 Main Road", null),
@@ -177,16 +219,15 @@ class ClientImportServiceImplTest {
 
         assertThatThrownBy(() -> importService.importClients(workbook))
                 .isInstanceOfSatisfying(SpreadsheetValidationException.class, e -> {
-                    assertThat(e.getMessage()).startsWith("11 cell(s) of the workbook are invalid");
+                    assertThat(e.getMessage()).startsWith("10 cell(s) of the workbook are invalid");
                     assertThat(e.getErrors()).extracting(ErrorResponse.FieldError::getField).containsExactly(
-                            "Clients!E2", "Clients!F2", "Clients!G2", "Clients!H2",
+                            "Clients!E2", "Clients!F2", "Clients!G2",
                             "Clients!A3",
                             "Clients!A4", "Clients!B4", "Clients!G4",
                             "Companies!C2", "Companies!A3", "Companies!A4");
                     assertThat(e.getErrors()).extracting(ErrorResponse.FieldError::getMessage).contains(
                             "Manager Email: no manager in the Manager Catalog has the email nobody@example.com",
                             "Discount %: must be a number, such as 10, 12.5 or 10%",
-                            "WhatsApp Opt-In: must be Yes or No",
                             "Client Ref: repeats the Client Ref of row 2; give each client its own",
                             "Client Ref: must contain at least one company on the Companies sheet",
                             "First Name: must not be blank",
@@ -204,7 +245,7 @@ class ClientImportServiceImplTest {
         when(clientService.createClient(any())).thenAnswer(invocation -> created(invocation.getArgument(0)));
         XlsxWorkbook workbook = new XlsxWorkbook();
         workbook.addSheet("Clients").addRow(CLIENT_HEADINGS)
-                .addRow(row("C1", "Rohan", "Mehta", "9820012345", "rohan@example.com", "pranay@example.com", null,
+                .addRow(row("C1", "Rohan", "Mehta", "9820012345", "rohan@example.com", "pranay@example.com",
                         null));
         workbook.addSheet("Companies").addRow(COMPANY_HEADINGS)
                 // A number cell and a date cell, as Excel stores them.
@@ -214,7 +255,7 @@ class ClientImportServiceImplTest {
                 .addRow(row("C1", "Rohan Mehta HUF", "HUF", "Pune", null, "₹ -1,23,456.50", "01/04/2026"))
                 .addRow(row("C1", "Mehta Exports", "LLP", "Pune", null, null, null));
 
-        importService.importClients(workbook.toBytes());
+        ClientImportResponse response = importService.importClients(workbook.toBytes());
 
         ArgumentCaptor<ClientRequest> captor = ArgumentCaptor.forClass(ClientRequest.class);
         verify(clientService).createClient(captor.capture());
@@ -225,6 +266,23 @@ class ClientImportServiceImplTest {
         assertThat(companies.get(1).openingBalanceDate()).isEqualTo(LocalDate.of(2026, 4, 1));
         assertThat(companies.get(2).openingBalance()).isNull();
         assertThat(companies.get(2).openingBalanceDate()).isNull();
+
+        // Two of the three companies brought one; owed and in credit net to the total.
+        ClientImportResponse.ImportedClient rohan = response.getClients().getFirst();
+        assertThat(rohan.getOpeningBalanceCount()).isEqualTo(2);
+        assertThat(rohan.getOpeningBalanceTotal()).isEqualTo(new BigDecimal("-98456.50"));
+        assertThat(response.getOpeningBalanceCount()).isEqualTo(2);
+        assertThat(response.getOpeningBalanceTotal()).isEqualTo(new BigDecimal("-98456.50"));
+        // Each company with the balance recorded for it, and none for the company that brought none.
+        assertThat(rohan.getCompanies())
+                .extracting(ClientImportResponse.ImportedCompany::getCompanyName,
+                        ClientImportResponse.ImportedCompany::getOpeningBalanceAmount,
+                        ClientImportResponse.ImportedCompany::getOpeningBalanceDate)
+                .containsExactly(
+                        tuple("Mehta Textiles Pvt Ltd", new BigDecimal("25000.00"), LocalDate.of(2026, 3, 31)),
+                        tuple("Rohan Mehta HUF", new BigDecimal("-123456.50"), LocalDate.of(2026, 4, 1)),
+                        tuple("Mehta Exports", null, null));
+        assertThat(rohan.getCompanies()).allSatisfy(company -> assertThat(company.getCompanyId()).isNotNull());
     }
 
     @Test
@@ -232,8 +290,9 @@ class ClientImportServiceImplTest {
     void reportsInvalidOpeningBalances() {
         when(managerRepository.findAll()).thenReturn(List.of(manager()));
         byte[] workbook = workbook(
-                List.of(row("C1", "Rohan", "Mehta", "9820012345", "rohan@example.com", "pranay@example.com", null,
-                        null)),
+                // One row is itself an array, so List.of needs telling it is the only element, not the elements.
+                List.<Cell[]>of(row("C1", "Rohan", "Mehta", "9820012345", "rohan@example.com",
+                        "pranay@example.com", null)),
                 List.of(
                         row("C1", "Mehta Textiles Pvt Ltd", "LLP", "Pune", null, "lots", "31/02/2026"),
                         row("C1", "Rohan Mehta HUF", "HUF", "Pune", null, "1000", "17/10/2026"),
@@ -266,7 +325,7 @@ class ClientImportServiceImplTest {
         when(clientService.createClient(any())).thenAnswer(invocation -> created(invocation.getArgument(0)));
         XlsxWorkbook workbook = new XlsxWorkbook();
         workbook.addSheet("Clients").addRow(CLIENT_HEADINGS)
-                .addRow(row("C1", "Rohan", "Mehta", "9820012345", "rohan@example.com", "pranay@example.com", null,
+                .addRow(row("C1", "Rohan", "Mehta", "9820012345", "rohan@example.com", "pranay@example.com",
                         null));
         workbook.addSheet("Companies")
                 .addRow(headings("Client Ref", "Company Name", "Company Type", "Address", "Discount %"))
@@ -282,7 +341,7 @@ class ClientImportServiceImplTest {
     void refusesWrongHeadings() {
         XlsxWorkbook workbook = new XlsxWorkbook();
         workbook.addSheet("Clients").addRow(headings("Ref", "First Name", "Surname", "Phone", "Email",
-                "Manager Email", "Discount %", "WhatsApp Opt-In"));
+                "Manager Email", "Discount %"));
         workbook.addSheet("Companies").addRow(COMPANY_HEADINGS);
 
         assertThatThrownBy(() -> importService.importClients(workbook.toBytes()))
@@ -309,7 +368,7 @@ class ClientImportServiceImplTest {
     void refusesTooManyClients() {
         List<Cell[]> clients = IntStream.rangeClosed(1, ClientImportServiceImpl.MAX_CLIENTS + 1)
                 .mapToObj(n -> row("C" + n, "Client", "Number " + n, "9820012345", "c" + n + "@example.com",
-                        "pranay@example.com", null, null))
+                        "pranay@example.com", null))
                 .toList();
 
         assertThatThrownBy(() -> importService.importClients(workbook(clients, List.of())))
@@ -356,6 +415,10 @@ class ClientImportServiceImplTest {
                         .map(company -> CompanyResponse.builder()
                                 .id(UUID.randomUUID())
                                 .companyName(company.companyName())
+                                // As the ledger records it: at two decimals, and only when not zero.
+                                .openingBalanceAmount(company.hasOpeningBalance()
+                                        ? company.openingBalance().setScale(2, RoundingMode.HALF_UP) : null)
+                                .openingBalanceDate(company.hasOpeningBalance() ? company.openingBalanceDate() : null)
                                 .build())
                         .toList())
                 .build();

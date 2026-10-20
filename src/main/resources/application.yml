@@ -35,20 +35,6 @@ spring:
   jackson:
     default-property-inclusion: non_null
 
-  task:
-    # Runs @Async work in the background, such as WhatsApp opt-in confirmations.
-    execution:
-      thread-name-prefix: background-
-      pool:
-        core-size: ${BACKGROUND_POOL_CORE_SIZE:4}
-        max-size: ${BACKGROUND_POOL_MAX_SIZE:8}
-        # Tasks waiting for a free thread; beyond this, extra threads up to max-size are started.
-        queue-capacity: ${BACKGROUND_QUEUE_CAPACITY:100}
-      shutdown:
-        # On shutdown, let queued confirmations finish rather than drop them, for up to this long.
-        await-termination: true
-        await-termination-period: ${BACKGROUND_SHUTDOWN_WAIT:60s}
-
   mail:
     # SMTP server emails to clients are sent through, such as smtp.gmail.com or smtp.office365.com.
     # Credentials come only from the environment; for Gmail and Microsoft 365 use an app password.
@@ -78,29 +64,6 @@ client-ledger:
     from: ${MAIL_FROM:${MAIL_USERNAME:jatin.marwaha@gmail.com}}
     # Name shown beside the from address; the firm's name from Global Settings when left empty.
     from-name: ${MAIL_FROM_NAME:Jatin Marwaha}
-
-    # WhatsApp payment reminders, sent through Meta's WhatsApp Cloud API as an approved template message.
-    whatsapp:
-      api-base-url: ${WHATSAPP_API_BASE_URL:https://graph.facebook.com}
-      # Graph API version; check Meta's changelog for the latest.
-      api-version: ${WHATSAPP_API_VERSION:v23.0}
-      # Phone Number ID from the WhatsApp Manager / developer dashboard (not the phone number itself).
-      phone-number-id: ${WHATSAPP_PHONE_NUMBER_ID:}
-      # System User permanent access token with whatsapp_business_messaging. Secret: set it only in the
-      # environment, never as a default here.
-      access-token: ${WHATSAPP_ACCESS_TOKEN:}
-      # Approved Utility template whose body takes, in order: {{1}} client's first name, {{2}} firm's name,
-      # {{3}} amount pending (such as ₹24,235.00), {{4}} as-of date (such as 14 Oct 2026).
-      payment-reminder-template: ${WHATSAPP_PAYMENT_REMINDER_TEMPLATE:payment_reminder}
-      # Approved Utility template sent to confirm a client's opt-in, whose body takes {{1}} the client's
-      # first name and {{2}} the firm's name. Empty sends no confirmation.
-      opt-in-confirmation-template: ${WHATSAPP_OPT_IN_CONFIRMATION_TEMPLATE:}
-      # Language code the template was approved in, such as en or en_US.
-      template-language: ${WHATSAPP_TEMPLATE_LANGUAGE:en}
-      # Country calling code added to numbers stored without one, such as 98200 12345.
-      default-country-code: ${WHATSAPP_DEFAULT_COUNTRY_CODE:91}
-      # How long to wait to connect to, and hear back from, the API.
-      timeout: ${WHATSAPP_TIMEOUT:10s}
 
 server:
   port: ${SERVER_PORT:8080}

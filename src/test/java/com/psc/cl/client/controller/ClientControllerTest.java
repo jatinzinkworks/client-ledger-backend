@@ -4,14 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -25,7 +23,6 @@ import com.psc.cl.client.dto.ClientResponse;
 import com.psc.cl.client.dto.ClientSummaryResponse;
 import com.psc.cl.client.dto.ClientUpdateRequest;
 import com.psc.cl.client.dto.CompanyResponse;
-import com.psc.cl.client.dto.WhatsAppOptInRequest;
 import com.psc.cl.client.exception.AssignedManagerNotFoundException;
 import com.psc.cl.client.exception.ClientHasServicesException;
 import com.psc.cl.client.exception.ClientNotFoundException;
@@ -402,44 +399,6 @@ class ClientControllerTest {
         assertThat(received.email()).isEqualTo("rohit.mehta@example.com");
         assertThat(received.managerId()).isEqualTo(UUID.fromString(MANAGER_ID));
         assertThat(received.discountPercent()).isEqualByComparingTo("15");
-    }
-
-    @Test
-    @DisplayName("records the WhatsApp opt-in alone through PATCH")
-    void updatesWhatsAppOptIn() throws Exception {
-        UUID id = UUID.randomUUID();
-        when(clientService.updateWhatsAppOptIn(any(), any())).thenReturn(ClientResponse.builder()
-                .id(id)
-                .firstName("Rohan")
-                .whatsappOptIn(true)
-                .build());
-
-        mockMvc.perform(patch(CLIENTS_URL + "/" + id + "/whatsapp-opt-in")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"whatsappOptIn\": true}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.whatsappOptIn").value(true));
-
-        ArgumentCaptor<WhatsAppOptInRequest> bodyCaptor = ArgumentCaptor.forClass(WhatsAppOptInRequest.class);
-        verify(clientService).updateWhatsAppOptIn(eq(id), bodyCaptor.capture());
-        assertThat(bodyCaptor.getValue().whatsappOptIn()).isTrue();
-    }
-
-    @Test
-    @DisplayName("rejects a WhatsApp opt-in without a value, and returns 404 for an unknown client")
-    void rejectsInvalidWhatsAppOptIn() throws Exception {
-        UUID id = UUID.randomUUID();
-        when(clientService.updateWhatsAppOptIn(eq(id), any())).thenThrow(new ClientNotFoundException(id));
-
-        mockMvc.perform(patch(CLIENTS_URL + "/" + id + "/whatsapp-opt-in")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.errors[*].field", hasItem("whatsappOptIn")));
-        mockMvc.perform(patch(CLIENTS_URL + "/" + id + "/whatsapp-opt-in")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"whatsappOptIn\": false}"))
-                .andExpect(status().isNotFound());
     }
 
     @Test

@@ -325,7 +325,10 @@ public interface LedgerApi {
                     + "companies, earliest first, with charges as debits, payments as credits, a running "
                     + "balance, and a totals row. One sheet per company follows, by company name, listing "
                     + "only that company's entries with its own running balance and totals; a company with "
-                    + "no entries in the year gets headings and zero totals. As in the summary, charges count "
+                    + "no entries in the year gets headings and zero totals. Above its entries, each company "
+                    + "sheet shows the company's opening balance and the date it stood at, whatever the year "
+                    + "it falls in, or None; it is counted in the balances only when dated in the year "
+                    + "exported, as an opening balance entry. As in the summary, charges count "
                     + "in the year they fell due and payments in the year they were received, and each "
                     + "balance starts from zero.")
     @ApiResponses({
@@ -366,9 +369,12 @@ public interface LedgerApi {
                     + "Mehta_Textiles_Pvt_Ltd_Ledger_FY2026-27.xlsx. Its Summary sheet holds the figures of "
                     + "the company's ledger summary for the year; its Ledger sheet lists every service "
                     + "charge and payment of the company in the year, earliest first, with charges as "
-                    + "debits, payments as credits, a running balance, and a totals row. As in the summary, "
-                    + "charges count in the year they fell due and payments in the year they were received, "
-                    + "and the balance starts from zero.")
+                    + "debits, payments as credits, a running balance, and a totals row. Above its entries, "
+                    + "the Ledger sheet shows the company's opening balance and the date it stood at, "
+                    + "whatever the year it falls in, or None; it is counted in the balance only when dated "
+                    + "in the year exported, as an opening balance entry. As in the summary, charges count "
+                    + "in the year they fell due and payments in the year they were received, and the "
+                    + "balance starts from zero.")
     @ApiResponses({
             @ApiResponse(responseCode = "200",
                     description = "The workbook, as an attachment; a year with no entries gives zero totals "

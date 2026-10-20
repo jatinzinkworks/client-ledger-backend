@@ -68,9 +68,48 @@ public final class SpreadsheetImport {
      * @param required    whether every row must fill it
      * @param description what to put in it, for the instructions
      * @param example     an example value, for the instructions
+     * @param choices     the values the template offers in a drop-down, or null for none
      */
     public record Column(String heading, String field, int width, boolean required, String description,
-                         String example) {
+                         String example, Choices choices) {
+
+        /** A column without a drop-down. */
+        public Column(String heading, String field, int width, boolean required, String description,
+                      String example) {
+            this(heading, field, width, required, description, example, null);
+        }
+    }
+
+    /**
+     * Values a template offers in a column's drop-down: either listed, or those in a range of cells.
+     *
+     * @param values the values, in order; empty when they come from a range
+     * @param source the cells holding the values, such as the references on another sheet; null when
+     *               they are listed
+     * @param strict whether Excel refuses a value typed that is not among them: true when the
+     *               import accepts nothing else; false when it does, so Excel only warns
+     */
+    public record Choices(List<String> values, XlsxWorkbook.Range source, boolean strict) {
+
+        /** Listed values. */
+        public Choices(List<String> values, boolean strict) {
+            this(values, null, strict);
+        }
+
+        /** The values in a range of cells, and nothing else. */
+        public static Choices from(XlsxWorkbook.Range source) {
+            return new Choices(List.of(), source, true);
+        }
+
+        /** Every constant of an enum by name, and nothing else. */
+        public static <E extends Enum<E>> Choices of(Class<E> type) {
+            return new Choices(Arrays.stream(type.getEnumConstants()).map(Enum::name).toList(), true);
+        }
+
+        /** These values as the usual ones, while the import accepts others too. */
+        public static Choices suggested(String... values) {
+            return new Choices(List.of(values), false);
+        }
     }
 
     /**
@@ -95,15 +134,26 @@ public final class SpreadsheetImport {
 
     /**
      * Adds a sheet laid out for an import to a template: its headings in a frozen first row, at the
-     * columns' widths.
+     * columns' widths, and a drop-down below the heading of each column offering choices.
      *
      * @param workbook the template being written
      * @param layout   the sheet to add
+     * @return the sheet added, for anything more the template needs on it
      */
-    public static void addSheet(XlsxWorkbook workbook, SheetLayout layout) {
-        workbook.addSheet(layout.name(), layout.columns().stream().mapToInt(Column::width).toArray())
+    public static XlsxWorkbook.Sheet addSheet(XlsxWorkbook workbook, SheetLayout layout) {
+        List<Column> columns = layout.columns();
+        XlsxWorkbook.Sheet sheet = workbook.addSheet(layout.name(), columns.stream().mapToInt(Column::width).toArray())
                 .freezeHeaderRow()
-                .addRow(layout.columns().stream().map(column -> Cell.bold(column.heading())).toArray(Cell[]::new));
+                .addRow(columns.stream().map(column -> Cell.bold(column.heading())).toArray(Cell[]::new));
+        for (int column = 0; column < columns.size(); column++) {
+            Choices choices = columns.get(column).choices();
+            if (choices != null && choices.source() != null) {
+                sheet.addDropDown(column, 2, choices.source(), choices.strict());
+            } else if (choices != null) {
+                sheet.addDropDown(column, 2, choices.values(), choices.strict());
+            }
+        }
+        return sheet;
     }
 
     /**

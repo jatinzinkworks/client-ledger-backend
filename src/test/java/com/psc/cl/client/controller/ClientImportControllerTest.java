@@ -28,6 +28,8 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -65,11 +67,26 @@ class ClientImportControllerTest {
         when(clientImportService.importClients(any())).thenReturn(ClientImportResponse.builder()
                 .clientCount(1)
                 .companyCount(2)
+                .openingBalanceCount(1)
+                .openingBalanceTotal(new BigDecimal("25000.00"))
                 .clients(List.of(ClientImportResponse.ImportedClient.builder()
                         .clientRef("C1")
                         .clientId(UUID.randomUUID())
                         .clientName("Rohan Mehta")
                         .companyCount(2)
+                        .openingBalanceCount(1)
+                        .openingBalanceTotal(new BigDecimal("25000.00"))
+                        .companies(List.of(
+                                ClientImportResponse.ImportedCompany.builder()
+                                        .companyId(UUID.randomUUID())
+                                        .companyName("Mehta Textiles Pvt Ltd")
+                                        .openingBalanceAmount(new BigDecimal("25000.00"))
+                                        .openingBalanceDate(LocalDate.of(2026, 3, 31))
+                                        .build(),
+                                ClientImportResponse.ImportedCompany.builder()
+                                        .companyId(UUID.randomUUID())
+                                        .companyName("Rohan Mehta HUF")
+                                        .build()))
                         .build()))
                 .build());
 
@@ -78,8 +95,18 @@ class ClientImportControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.clientCount").value(1))
                 .andExpect(jsonPath("$.companyCount").value(2))
+                .andExpect(jsonPath("$.openingBalanceCount").value(1))
+                .andExpect(jsonPath("$.openingBalanceTotal").value(25000.00))
                 .andExpect(jsonPath("$.clients[0].clientRef").value("C1"))
-                .andExpect(jsonPath("$.clients[0].clientName").value("Rohan Mehta"));
+                .andExpect(jsonPath("$.clients[0].clientName").value("Rohan Mehta"))
+                .andExpect(jsonPath("$.clients[0].openingBalanceCount").value(1))
+                .andExpect(jsonPath("$.clients[0].openingBalanceTotal").value(25000.00))
+                .andExpect(jsonPath("$.clients[0].companies[0].companyName").value("Mehta Textiles Pvt Ltd"))
+                .andExpect(jsonPath("$.clients[0].companies[0].openingBalanceAmount").value(25000.00))
+                .andExpect(jsonPath("$.clients[0].companies[0].openingBalanceDate").value("2026-03-31"))
+                // A company that brought no opening balance leaves both fields out.
+                .andExpect(jsonPath("$.clients[0].companies[1].openingBalanceAmount").doesNotExist())
+                .andExpect(jsonPath("$.clients[0].companies[1].openingBalanceDate").doesNotExist());
 
         ArgumentCaptor<byte[]> captor = ArgumentCaptor.forClass(byte[].class);
         verify(clientImportService).importClients(captor.capture());

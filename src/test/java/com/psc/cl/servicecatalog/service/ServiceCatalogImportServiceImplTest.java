@@ -14,6 +14,7 @@ import com.psc.cl.exception.SpreadsheetValidationException;
 import com.psc.cl.service.XlsxReader;
 import com.psc.cl.service.XlsxWorkbook;
 import com.psc.cl.service.XlsxWorkbook.Cell;
+import com.psc.cl.service.XlsxWorkbookTest;
 import com.psc.cl.servicecatalog.dto.CatalogServiceRequest;
 import com.psc.cl.servicecatalog.dto.CatalogServiceResponse;
 import com.psc.cl.servicecatalog.dto.ServiceCatalogImportResponse;
@@ -34,7 +35,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
@@ -81,6 +81,28 @@ class ServiceCatalogImportServiceImplTest {
         assertThat(template.sheet("Instructions").orElseThrow().rows().values())
                 .anySatisfy(row -> assertThat(row.get(3)).contains("COMPLIANCE"))
                 .anySatisfy(row -> assertThat(row.get(3)).contains("FIRST_MONTH"));
+    }
+
+    @Test
+    @DisplayName("the template offers drop-downs for the columns with a set list of values")
+    void offersDropDowns() {
+        String services = XlsxWorkbookTest.parts(importService.template()).get("xl/worksheets/sheet1.xml");
+
+        assertThat(services)
+                .contains("<dataValidations count=\"6\">")
+                .contains("sqref=\"C2:C1048576\"><formula1>&quot;COMPLIANCE,TAX,AUDIT,ACCOUNTING,ADVISORY,"
+                        + "CERTIFICATION&quot;</formula1>")
+                .contains("sqref=\"D2:D1048576\"><formula1>&quot;ONE_OFF,MONTHLY,QUARTERLY,ANNUAL&quot;</formula1>")
+                .contains("sqref=\"F2:F1048576\"><formula1>&quot;0,5,12,18,28,40&quot;</formula1>")
+                .contains("sqref=\"G2:G1048576\"><formula1>&quot;1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,"
+                        + "20,21,22,23,24,25,26,27,28,29,30,31&quot;</formula1>")
+                .contains("sqref=\"H2:H1048576\"><formula1>&quot;FIRST_MONTH,SECOND_MONTH,THIRD_MONTH&quot;")
+                .contains("sqref=\"I2:I1048576\"><formula1>&quot;JANUARY,FEBRUARY,MARCH,APRIL,MAY,JUNE,JULY,"
+                        + "AUGUST,SEPTEMBER,OCTOBER,NOVEMBER,DECEMBER&quot;</formula1>")
+                // Only GST and the month of a quarter accept values beyond their lists, so only they just warn.
+                .containsSubsequence("errorStyle=\"warning\"", "sqref=\"F2:F1048576\"",
+                        "errorStyle=\"warning\"", "sqref=\"H2:H1048576\"");
+        assertThat(services.split("errorStyle=\"warning\"", -1)).hasSize(3);
     }
 
     @Test
@@ -171,7 +193,7 @@ class ServiceCatalogImportServiceImplTest {
                                                 + "billing, and left blank otherwise"),
                                         tuple("Services!D7", "Billing Frequency: is ONE_OFF, so leave Invoice Day, "
                                                 + "Invoice Month of Quarter and Invoice Month blank"),
-                                        tuple("Services!A8", "Service Name: must not be blank"))));
+                                        tuple("Services!A8", "Service Name: must not be blank")));
 
         verify(serviceCatalogService, never()).createService(any());
     }

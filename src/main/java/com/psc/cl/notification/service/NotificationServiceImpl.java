@@ -2,6 +2,7 @@ package com.psc.cl.notification.service;
 
 import com.psc.cl.client.exception.ClientNotFoundException;
 import com.psc.cl.client.model.Client;
+import com.psc.cl.client.model.ClientCompany;
 import com.psc.cl.client.repository.ClientCompanyRepository;
 import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.globalsettings.model.FirmDetails;
@@ -10,6 +11,7 @@ import com.psc.cl.ledger.dto.ClientLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.CompanyBalance;
 import com.psc.cl.ledger.dto.CompanyLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.LedgerExport;
+import com.psc.cl.ledger.dto.OpeningBalance;
 import com.psc.cl.ledger.model.FinancialYear;
 import com.psc.cl.ledger.service.FinancialYears;
 import com.psc.cl.ledger.service.LedgerService;
@@ -43,6 +45,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -87,8 +90,10 @@ public class NotificationServiceImpl implements NotificationService {
         FirmDetails firm = firm();
         LedgerExport ledger = ledgerService.statementForCompany(clientId, companyId, year);
 
-        LedgerSummaryEmail email = LedgerSummaryEmail.forCompany(summary, client.getFirstName(), firm, today,
-                ledger.fileName());
+        OpeningBalance opening = ledgerService.openingBalances(Set.of(companyId)).get(companyId);
+
+        LedgerSummaryEmail email = LedgerSummaryEmail.forCompany(summary, opening, client.getFirstName(), firm,
+                today, ledger.fileName());
         send(client.getEmail(), cc, firm, email, ledger);
         log.info("Emailed the FY {} ledger summary of company {} to client {}", year.label(), companyId, clientId);
 
@@ -222,14 +227,21 @@ public class NotificationServiceImpl implements NotificationService {
                 .build();
     }
 
-    /** Every company of the client by name, with its figures for the year; zero for those without entries. */
+    /**
+     * Every company of the client by name, with its figures for the year, zero for those without
+     * entries, and its opening balance whatever its year.
+     */
     private List<LedgerSummaryEmail.CompanyLine> companyLines(UUID clientId, FinancialYear year) {
         Map<UUID, CompanyBalance> balances = ledgerService.companyBalances(clientId, year);
-        return clientCompanyRepository.findByClientIdOrderByCompanyNameAsc(clientId).stream()
+        List<ClientCompany> companies = clientCompanyRepository.findByClientIdOrderByCompanyNameAsc(clientId);
+        Map<UUID, OpeningBalance> openings = ledgerService.openingBalances(
+                companies.stream().map(ClientCompany::getId).toList());
+        return companies.stream()
                 .map(company -> {
                     CompanyBalance balance = balances.getOrDefault(company.getId(), CompanyBalance.ZERO);
                     return new LedgerSummaryEmail.CompanyLine(company.getCompanyName(), balance.totalBilled(),
-                            balance.openingBalance(), balance.totalPaymentReceived(), balance.pending());
+                            balance.openingBalance(), balance.totalPaymentReceived(), balance.pending(),
+                            openings.get(company.getId()));
                 })
                 .toList();
     }

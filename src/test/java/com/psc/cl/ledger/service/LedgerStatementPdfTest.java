@@ -7,6 +7,7 @@ import com.lowagie.text.pdf.parser.PdfTextExtractor;
 import com.psc.cl.ledger.dto.ClientLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.CompanyLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.LastPayment;
+import com.psc.cl.ledger.dto.OpeningBalance;
 import com.psc.cl.ledger.model.LedgerEntry;
 import com.psc.cl.ledger.model.LedgerEntryType;
 import com.psc.cl.ledger.model.PaymentMethod;
@@ -45,7 +46,7 @@ class LedgerStatementPdfTest {
                 payment(TEXTILES_ID, LocalDate.of(2026, 9, 10), "-3000.00"),
                 charge(HUF_ID, LocalDate.of(2026, 9, 20), "Company Incorporation", "28025.00"));
 
-        byte[] pdf = LedgerStatementPdf.forClient(summary(), entries, COMPANY_NAMES, GENERATED_ON);
+        byte[] pdf = LedgerStatementPdf.forClient(summary(), entries, COMPANY_NAMES, Map.of(), GENERATED_ON);
 
         assertThat(new String(pdf, 0, 5, StandardCharsets.US_ASCII)).isEqualTo("%PDF-");
         PdfReader reader = new PdfReader(pdf);
@@ -84,7 +85,7 @@ class LedgerStatementPdfTest {
         List<LedgerEntry> entries = List.of(charge(TEXTILES_ID, LocalDate.of(2026, 9, 7), "Monthly Return Filing",
                 "5605.00"));
 
-        PdfReader reader = new PdfReader(LedgerStatementPdf.forClient(summary(), entries, COMPANY_NAMES,
+        PdfReader reader = new PdfReader(LedgerStatementPdf.forClient(summary(), entries, COMPANY_NAMES, Map.of(),
                 GENERATED_ON));
 
         for (int page = 1; page <= reader.getNumberOfPages(); page++) {
@@ -115,7 +116,7 @@ class LedgerStatementPdfTest {
                 .pending(new BigDecimal("28605.00"))
                 .build();
 
-        PdfReader reader = new PdfReader(LedgerStatementPdf.forClient(summary, entries, COMPANY_NAMES,
+        PdfReader reader = new PdfReader(LedgerStatementPdf.forClient(summary, entries, COMPANY_NAMES, Map.of(),
                 GENERATED_ON));
 
         assertThat(text(reader, 1))
@@ -134,7 +135,7 @@ class LedgerStatementPdfTest {
     @Test
     @DisplayName("gives a company with no entries in the year its page, saying so")
     void writesIdleCompany() throws IOException {
-        PdfReader reader = new PdfReader(LedgerStatementPdf.forClient(summary(), List.of(), COMPANY_NAMES,
+        PdfReader reader = new PdfReader(LedgerStatementPdf.forClient(summary(), List.of(), COMPANY_NAMES, Map.of(),
                 GENERATED_ON));
 
         assertThat(reader.getNumberOfPages()).isEqualTo(3);
@@ -151,7 +152,7 @@ class LedgerStatementPdfTest {
                 payment(TEXTILES_ID, LocalDate.of(2026, 9, 10), "-3000.00"));
 
         PdfReader reader = new PdfReader(LedgerStatementPdf.forCompany("Rohan Mehta", companySummary(), entries,
-                GENERATED_ON));
+                null, GENERATED_ON));
 
         assertThat(reader.getNumberOfPages()).isEqualTo(1);
         assertThat(text(reader, 1))
@@ -162,6 +163,40 @@ class LedgerStatementPdfTest {
                 .contains("Monthly Return Filing")
                 .contains("Rs. 2,605.00")
                 .doesNotContain("By company");
+    }
+
+    @Test
+    @DisplayName("shows each company's opening balance and date above its details, whatever its year, or None")
+    void showsOpeningBalanceRows() throws IOException {
+        // Dated in the year before, so it is shown but not counted in this year's figures.
+        Map<UUID, OpeningBalance> openings = Map.of(TEXTILES_ID,
+                new OpeningBalance(new BigDecimal("-5000.50"), LocalDate.of(2026, 3, 31)));
+
+        PdfReader reader = new PdfReader(LedgerStatementPdf.forClient(summary(), List.of(), COMPANY_NAMES,
+                openings, GENERATED_ON));
+
+        assertThat(text(reader, 2))
+                .contains("Mehta Textiles Pvt Ltd")
+                .contains("Opening balance").contains("Rs. 5,000.50 in credit")
+                .contains("Opening balance date").contains("31 Mar 2026")
+                // Not dated in the year, so the year's line leaves it out.
+                .doesNotContainPattern("\\|\\s*Opening balance");
+        assertThat(text(reader, 3))
+                .contains("Rohan Mehta HUF")
+                .contains("Opening balance").contains("None")
+                .doesNotContain("Opening balance date");
+    }
+
+    @Test
+    @DisplayName("shows a company's opening balance and date above the details of its own statement")
+    void showsOpeningBalanceRowsOnCompanyStatement() throws IOException {
+        PdfReader reader = new PdfReader(LedgerStatementPdf.forCompany("Rohan Mehta", companySummary(), List.of(),
+                new OpeningBalance(new BigDecimal("25000.00"), LocalDate.of(2026, 3, 31)), GENERATED_ON));
+
+        assertThat(text(reader, 1))
+                .contains("Details")
+                .contains("Opening balance").contains("Rs. 25,000.00")
+                .contains("Opening balance date").contains("31 Mar 2026");
     }
 
     @Test

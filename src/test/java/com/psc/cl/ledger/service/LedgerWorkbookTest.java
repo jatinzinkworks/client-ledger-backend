@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.psc.cl.ledger.dto.ClientLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.CompanyLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.LastPayment;
+import com.psc.cl.ledger.dto.OpeningBalance;
 import com.psc.cl.ledger.model.LedgerEntry;
 import com.psc.cl.ledger.model.LedgerEntryType;
 import com.psc.cl.ledger.model.PaymentMethod;
@@ -38,7 +39,7 @@ class LedgerWorkbookTest {
                 .amount(new BigDecimal("10000.00"))
                 .companyId(HUF_ID)
                 .companyName("Rohan Mehta HUF")
-                .build()), List.of(), COMPANY_NAMES, GENERATED_ON);
+                .build()), List.of(), COMPANY_NAMES, Map.of(), GENERATED_ON);
 
         Map<String, String> parts = XlsxWorkbookTest.parts(xlsx);
         assertThat(parts.get("xl/workbook.xml")).contains("name=\"Summary\"").contains("name=\"Ledger\"");
@@ -62,7 +63,7 @@ class LedgerWorkbookTest {
     @Test
     @DisplayName("leaves the last payment out of the Summary sheet when the year had none")
     void writesSummaryWithoutPayment() {
-        byte[] xlsx = LedgerWorkbook.forClient(summary(null), List.of(), COMPANY_NAMES, GENERATED_ON);
+        byte[] xlsx = LedgerWorkbook.forClient(summary(null), List.of(), COMPANY_NAMES, Map.of(), GENERATED_ON);
 
         assertThat(XlsxWorkbookTest.parts(xlsx).get("xl/worksheets/sheet1.xml"))
                 .contains(">Pending<")
@@ -79,7 +80,7 @@ class LedgerWorkbookTest {
                 charge(HUF_ID, LocalDate.of(2026, 9, 20), "Company Incorporation", BillingFrequency.ONE_OFF,
                         "25000.00", "1250.00", "23750.00", "4275.00", "28025.00"));
 
-        String ledger = XlsxWorkbookTest.parts(LedgerWorkbook.forClient(summary(null), entries, COMPANY_NAMES,
+        String ledger = XlsxWorkbookTest.parts(LedgerWorkbook.forClient(summary(null), entries, COMPANY_NAMES, Map.of(),
                 GENERATED_ON)).get("xl/worksheets/sheet2.xml");
 
         assertThat(ledger)
@@ -124,7 +125,7 @@ class LedgerWorkbookTest {
                         "25000.00", "1250.00", "23750.00", "4275.00", "28025.00"));
 
         Map<String, String> parts = XlsxWorkbookTest.parts(LedgerWorkbook.forClient(summary(null), entries,
-                COMPANY_NAMES, GENERATED_ON));
+                COMPANY_NAMES, Map.of(), GENERATED_ON));
 
         assertThat(parts.get("xl/workbook.xml"))
                 .contains("<sheet name=\"Summary\" sheetId=\"1\"")
@@ -132,23 +133,24 @@ class LedgerWorkbookTest {
                 .contains("<sheet name=\"Mehta Textiles Pvt Ltd\" sheetId=\"3\"")
                 .contains("<sheet name=\"Rohan Mehta HUF\" sheetId=\"4\"");
 
-        // Mehta Textiles: its charge and payment only, without a Company column, balance 2605.00.
+        // Mehta Textiles: its charge and payment only, without a Company column, balance 2605.00. The
+        // opening balance rows come first, so the headings are on row 4.
         assertThat(parts.get("xl/worksheets/sheet3.xml"))
-                .contains("state=\"frozen\"")
-                .contains("<c r=\"B1\" s=\"1\" t=\"inlineStr\"><is><t xml:space=\"preserve\">Entry Type</t>")
+                .contains("<pane ySplit=\"4\" topLeftCell=\"A5\" activePane=\"bottomLeft\" state=\"frozen\"/>")
+                .contains("<c r=\"B4\" s=\"1\" t=\"inlineStr\"><is><t xml:space=\"preserve\">Entry Type</t>")
                 .contains(">GST Monthly Return Filing<")
                 .doesNotContain(">Company Incorporation<")
-                .contains("<c r=\"M3\" s=\"2\"><v>2605.00</v></c>")
-                .contains("<c r=\"K4\" s=\"4\"><v>5605.00</v></c>")
-                .contains("<c r=\"L4\" s=\"4\"><v>3000.00</v></c>")
-                .contains("<c r=\"M4\" s=\"4\"><v>2605.00</v></c>");
+                .contains("<c r=\"M6\" s=\"2\"><v>2605.00</v></c>")
+                .contains("<c r=\"K7\" s=\"4\"><v>5605.00</v></c>")
+                .contains("<c r=\"L7\" s=\"4\"><v>3000.00</v></c>")
+                .contains("<c r=\"M7\" s=\"4\"><v>2605.00</v></c>");
 
         // Rohan Mehta HUF: its own balance, starting from zero rather than after Mehta Textiles.
         assertThat(parts.get("xl/worksheets/sheet4.xml"))
                 .contains(">Company Incorporation<")
                 .doesNotContain(">GST Monthly Return Filing<")
-                .contains("<c r=\"M2\" s=\"2\"><v>28025.00</v></c>")
-                .contains("<c r=\"M3\" s=\"4\"><v>28025.00</v></c>");
+                .contains("<c r=\"M5\" s=\"2\"><v>28025.00</v></c>")
+                .contains("<c r=\"M6\" s=\"4\"><v>28025.00</v></c>");
     }
 
     @Test
@@ -157,12 +159,42 @@ class LedgerWorkbookTest {
         List<LedgerEntry> entries = List.of(payment(TEXTILES_ID, LocalDate.of(2026, 9, 10), PaymentMethod.CASH,
                 "-3000.00"));
 
-        String huf = XlsxWorkbookTest.parts(LedgerWorkbook.forClient(summary(null), entries, COMPANY_NAMES,
+        String huf = XlsxWorkbookTest.parts(LedgerWorkbook.forClient(summary(null), entries, COMPANY_NAMES, Map.of(),
                 GENERATED_ON)).get("xl/worksheets/sheet4.xml");
 
         assertThat(huf)
-                .contains("<c r=\"A2\" s=\"1\" t=\"inlineStr\"><is><t xml:space=\"preserve\">Total</t>")
-                .contains("<c r=\"M2\" s=\"4\"><v>0.00</v></c>");
+                .contains("<c r=\"A5\" s=\"1\" t=\"inlineStr\"><is><t xml:space=\"preserve\">Total</t>")
+                .contains("<c r=\"M5\" s=\"4\"><v>0.00</v></c>");
+    }
+
+    @Test
+    @DisplayName("shows each company's opening balance and date above its ledger, whatever its year, or None")
+    void writesOpeningBalanceRows() {
+        // Dated in the year before the one exported, so it is not among the year's entries.
+        Map<UUID, OpeningBalance> openings = Map.of(TEXTILES_ID,
+                new OpeningBalance(new BigDecimal("-5000.50"), LocalDate.of(2026, 3, 31)));
+
+        Map<String, String> parts = XlsxWorkbookTest.parts(LedgerWorkbook.forClient(summary(null), List.of(),
+                COMPANY_NAMES, openings, GENERATED_ON));
+
+        assertThat(parts.get("xl/worksheets/sheet3.xml"))
+                .contains("<c r=\"A1\" s=\"0\" t=\"inlineStr\"><is><t xml:space=\"preserve\">Opening Balance</t>")
+                .contains("<c r=\"B1\" s=\"2\"><v>-5000.50</v></c>")
+                .contains("<c r=\"A2\" s=\"0\" t=\"inlineStr\"><is><t xml:space=\"preserve\">Opening Balance Date</t>")
+                // 31 March 2026 as an Excel day number.
+                .contains("<c r=\"B2\" s=\"3\"><v>46112</v></c>")
+                .contains("<row r=\"3\"></row>")
+                .contains("<c r=\"A4\" s=\"1\" t=\"inlineStr\"><is><t xml:space=\"preserve\">Date</t>")
+                // Wide enough for the labels above the Date column.
+                .contains("<col min=\"1\" max=\"1\" width=\"21\" customWidth=\"1\"/>");
+        assertThat(parts.get("xl/worksheets/sheet4.xml"))
+                .contains("<c r=\"B1\" s=\"0\" t=\"inlineStr\"><is><t xml:space=\"preserve\">None</t>")
+                .doesNotContain("<c r=\"B2\"")
+                .contains("<c r=\"A4\" s=\"1\" t=\"inlineStr\"><is><t xml:space=\"preserve\">Date</t>");
+        // The client's own Ledger sheet keeps its headings on row 1.
+        assertThat(parts.get("xl/worksheets/sheet2.xml"))
+                .contains("<c r=\"A1\" s=\"1\" t=\"inlineStr\"><is><t xml:space=\"preserve\">Date</t>")
+                .doesNotContain(">Opening Balance Date<");
     }
 
     @Test
@@ -172,7 +204,7 @@ class LedgerWorkbookTest {
         Map<UUID, String> names = Map.of(TEXTILES_ID, "M/s Mehta & Sons", otherId, "M:s Mehta & Sons",
                 HUF_ID, "summary");
 
-        String workbook = XlsxWorkbookTest.parts(LedgerWorkbook.forClient(summary(null), List.of(), names,
+        String workbook = XlsxWorkbookTest.parts(LedgerWorkbook.forClient(summary(null), List.of(), names, Map.of(),
                 GENERATED_ON)).get("xl/workbook.xml");
 
         assertThat(workbook)
@@ -185,7 +217,7 @@ class LedgerWorkbookTest {
     @DisplayName("writes a ledger with only headings and zero totals for a year with no entries")
     void writesEmptyLedger() {
         String ledger = XlsxWorkbookTest.parts(LedgerWorkbook.forClient(summary(null), List.of(), COMPANY_NAMES,
-                GENERATED_ON)).get("xl/worksheets/sheet2.xml");
+                Map.of(), GENERATED_ON)).get("xl/worksheets/sheet2.xml");
 
         assertThat(ledger)
                 .contains("<c r=\"A2\" s=\"1\" t=\"inlineStr\"><is><t xml:space=\"preserve\">Total</t>")
@@ -198,7 +230,7 @@ class LedgerWorkbookTest {
         byte[] xlsx = LedgerWorkbook.forCompany("Rohan Mehta", companySummary(LastPayment.builder()
                 .date(LocalDate.of(2026, 10, 2))
                 .amount(new BigDecimal("3000.00"))
-                .build()), List.of(), GENERATED_ON);
+                .build()), List.of(), null, GENERATED_ON);
 
         assertThat(XlsxWorkbookTest.parts(xlsx).get("xl/worksheets/sheet1.xml"))
                 .contains(">Company Ledger<")
@@ -215,35 +247,57 @@ class LedgerWorkbookTest {
     }
 
     @Test
-    @DisplayName("leaves the Company column out of a company's Ledger sheet, keeping the running balance")
+    @DisplayName("leaves the Company column out of a company's Ledger sheet, below its opening balance")
     void writesCompanyLedgerSheet() {
         List<LedgerEntry> entries = List.of(
                 charge(TEXTILES_ID, LocalDate.of(2026, 9, 7), "GST Monthly Return Filing", BillingFrequency.MONTHLY,
                         "5000.00", "250.00", "4750.00", "855.00", "5605.00"),
                 payment(TEXTILES_ID, LocalDate.of(2026, 9, 10), PaymentMethod.CASH, "-3000.00"));
+        // Dated in the year before, so it is shown above the ledger but is not among the year's entries.
+        OpeningBalance opening = new OpeningBalance(new BigDecimal("25000.00"), LocalDate.of(2026, 3, 31));
 
         String ledger = XlsxWorkbookTest.parts(LedgerWorkbook.forCompany("Rohan Mehta", companySummary(null),
-                entries, GENERATED_ON)).get("xl/worksheets/sheet2.xml");
+                entries, opening, GENERATED_ON)).get("xl/worksheets/sheet2.xml");
 
         assertThat(ledger)
                 .doesNotContain(">Company<")
                 .doesNotContain(">Mehta Textiles Pvt Ltd<")
+                // The opening balance and its date, then a blank row, with the headings kept in view below them.
+                .contains("<pane ySplit=\"4\" topLeftCell=\"A5\" activePane=\"bottomLeft\" state=\"frozen\"/>")
+                .contains("<c r=\"A1\" s=\"0\" t=\"inlineStr\"><is><t xml:space=\"preserve\">Opening Balance</t>")
+                .contains("<c r=\"B1\" s=\"2\"><v>25000.00</v></c>")
+                .contains("<c r=\"B2\" s=\"3\"><v>46112</v></c>")
+                .contains("<row r=\"3\"></row>")
                 // One column fewer: 17 widths, and Entry Type moves to column B.
+                .contains("<col min=\"1\" max=\"1\" width=\"21\" customWidth=\"1\"/>")
                 .contains("<col min=\"17\" max=\"17\"")
                 .doesNotContain("<col min=\"18\"")
-                .contains("<c r=\"B1\" s=\"1\" t=\"inlineStr\"><is><t xml:space=\"preserve\">Entry Type</t>")
-                .contains("<c r=\"B2\" s=\"0\" t=\"inlineStr\"><is><t xml:space=\"preserve\">Service charge")
+                .contains("<c r=\"B4\" s=\"1\" t=\"inlineStr\"><is><t xml:space=\"preserve\">Entry Type</t>")
+                .contains("<c r=\"B5\" s=\"0\" t=\"inlineStr\"><is><t xml:space=\"preserve\">Service charge")
                 // Debit, credit and balance one column to the left of a client's.
-                .contains("<c r=\"K2\" s=\"2\"><v>5605.00</v></c>")
-                .contains("<c r=\"L3\" s=\"2\"><v>3000.00</v></c>")
-                .contains("<c r=\"M3\" s=\"2\"><v>2605.00</v></c>")
-                .contains("<c r=\"N3\" s=\"0\" t=\"inlineStr\"><is><t xml:space=\"preserve\">Cash</t>")
-                // Totals row.
-                .contains("<c r=\"A4\" s=\"1\" t=\"inlineStr\"><is><t xml:space=\"preserve\">Total</t>")
-                .contains("<c r=\"G4\" s=\"4\"><v>250.00</v></c>")
-                .contains("<c r=\"K4\" s=\"4\"><v>5605.00</v></c>")
-                .contains("<c r=\"L4\" s=\"4\"><v>3000.00</v></c>")
-                .contains("<c r=\"M4\" s=\"4\"><v>2605.00</v></c>");
+                .contains("<c r=\"K5\" s=\"2\"><v>5605.00</v></c>")
+                .contains("<c r=\"L6\" s=\"2\"><v>3000.00</v></c>")
+                .contains("<c r=\"M6\" s=\"2\"><v>2605.00</v></c>")
+                .contains("<c r=\"N6\" s=\"0\" t=\"inlineStr\"><is><t xml:space=\"preserve\">Cash</t>")
+                // Totals row, which the opening balance from the year before does not change.
+                .contains("<c r=\"A7\" s=\"1\" t=\"inlineStr\"><is><t xml:space=\"preserve\">Total</t>")
+                .contains("<c r=\"G7\" s=\"4\"><v>250.00</v></c>")
+                .contains("<c r=\"K7\" s=\"4\"><v>5605.00</v></c>")
+                .contains("<c r=\"L7\" s=\"4\"><v>3000.00</v></c>")
+                .contains("<c r=\"M7\" s=\"4\"><v>2605.00</v></c>");
+    }
+
+    @Test
+    @DisplayName("shows None above a company's Ledger sheet when it has no opening balance")
+    void writesCompanyLedgerSheetWithoutOpeningBalance() {
+        String ledger = XlsxWorkbookTest.parts(LedgerWorkbook.forCompany("Rohan Mehta", companySummary(null),
+                List.of(), null, GENERATED_ON)).get("xl/worksheets/sheet2.xml");
+
+        assertThat(ledger)
+                .contains("<c r=\"B1\" s=\"0\" t=\"inlineStr\"><is><t xml:space=\"preserve\">None</t>")
+                .doesNotContain("<c r=\"B2\"")
+                .contains("<c r=\"A4\" s=\"1\" t=\"inlineStr\"><is><t xml:space=\"preserve\">Date</t>")
+                .contains("<c r=\"A5\" s=\"1\" t=\"inlineStr\"><is><t xml:space=\"preserve\">Total</t>");
     }
 
     @Test

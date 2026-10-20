@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -16,7 +17,6 @@ import com.psc.cl.client.dto.ClientResponse;
 import com.psc.cl.client.dto.ClientSummaryResponse;
 import com.psc.cl.client.dto.ClientUpdateRequest;
 import com.psc.cl.client.dto.NewCompanyRequest;
-import com.psc.cl.client.dto.WhatsAppOptInRequest;
 import com.psc.cl.client.exception.AssignedManagerNotFoundException;
 import com.psc.cl.client.exception.ClientHasLedgerEntriesException;
 import com.psc.cl.client.exception.ClientHasServicesException;
@@ -24,11 +24,11 @@ import com.psc.cl.client.exception.ClientNotFoundException;
 import com.psc.cl.client.exception.ClientsNotFoundException;
 import com.psc.cl.client.model.Client;
 import com.psc.cl.client.model.ClientCompany;
-import com.psc.cl.client.model.ClientOptedInToWhatsApp;
 import com.psc.cl.client.model.CompanyType;
 import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.client.repository.ServiceAssignmentRepository;
 import com.psc.cl.exception.ResourceInUseException;
+import com.psc.cl.ledger.dto.OpeningBalance;
 import com.psc.cl.ledger.service.LedgerService;
 import com.psc.cl.managercatalog.model.Manager;
 import com.psc.cl.managercatalog.repository.ManagerRepository;
@@ -37,10 +37,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Sort;
 
@@ -68,9 +68,6 @@ class ClientServiceImplTest {
 
     @Mock
     private LedgerService ledgerService;
-
-    @Mock
-    private ApplicationEventPublisher eventPublisher;
 
     @InjectMocks
     private ClientServiceImpl clientService;
@@ -104,91 +101,6 @@ class ClientServiceImplTest {
         assertThat(response.getId()).isEqualTo(saved.getId());
         assertThat(response.getManagerId()).isEqualTo(MANAGER_ID);
         assertThat(response.getManagerName()).isEqualTo("Pranay Singhal");
-    }
-
-    @Test
-    @DisplayName("stores the WhatsApp opt-in when given, and no opt-in when it is omitted")
-    void storesWhatsAppOptIn() {
-        when(managerRepository.findById(MANAGER_ID)).thenReturn(Optional.of(manager()));
-        stubSave();
-
-        ClientResponse optedIn = clientService.createClient(request().whatsappOptIn(true).build());
-        ClientResponse omitted = clientService.createClient(request().build());
-
-        verify(clientRepository, times(2)).save(clientCaptor.capture());
-        assertThat(clientCaptor.getAllValues()).extracting(Client::isWhatsappOptIn).containsExactly(true, false);
-        assertThat(optedIn.isWhatsappOptIn()).isTrue();
-        assertThat(omitted.isWhatsappOptIn()).isFalse();
-        // Only the client created opted in is announced, so they can be sent a confirmation.
-        verify(eventPublisher).publishEvent(new ClientOptedInToWhatsApp(optedIn.getId()));
-        verify(eventPublisher, never()).publishEvent(new ClientOptedInToWhatsApp(omitted.getId()));
-    }
-
-    @Test
-    @DisplayName("on update, leaves the WhatsApp opt-in as it is: consent changes only when it is recorded")
-    void updateKeepsWhatsAppOptIn() {
-        Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF");
-        stored.setWhatsappOptIn(true);
-        when(clientRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
-        when(managerRepository.findById(MANAGER_ID)).thenReturn(Optional.of(manager()));
-
-        ClientResponse response = clientService.updateClient(stored.getId(), updateRequest().build());
-
-        assertThat(stored.isWhatsappOptIn()).isTrue();
-        assertThat(response.isWhatsappOptIn()).isTrue();
-        verify(eventPublisher, never()).publishEvent(any());
-    }
-
-    @Test
-    @DisplayName("records a WhatsApp opt-in alone, announcing the change so it can be confirmed")
-    void optsInToWhatsApp() {
-        Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF");
-        stored.setDiscountPercent(new BigDecimal("10.00"));
-        when(clientRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
-        when(managerRepository.findById(MANAGER_ID)).thenReturn(Optional.of(manager()));
-
-        ClientResponse response = clientService.updateWhatsAppOptIn(stored.getId(),
-                WhatsAppOptInRequest.builder().whatsappOptIn(true).build());
-
-        verify(clientRepository).flush();
-        assertThat(stored.isWhatsappOptIn()).isTrue();
-        assertThat(stored.getDiscountPercent()).isEqualByComparingTo("10.00");
-        assertThat(response.isWhatsappOptIn()).isTrue();
-        assertThat(response.getManagerName()).isEqualTo("Pranay Singhal");
-        verify(eventPublisher).publishEvent(new ClientOptedInToWhatsApp(stored.getId()));
-    }
-
-    @Test
-    @DisplayName("announces nothing when a client already opted in is opted in again, or opts out")
-    void announcesOnlyAChangeToOptedIn() {
-        Client optedIn = stored("Rohan", "Mehta", "Rohan Mehta HUF");
-        optedIn.setWhatsappOptIn(true);
-        Client optingOut = stored("Anita", "Shah", "Shah Traders");
-        optingOut.setWhatsappOptIn(true);
-        when(clientRepository.findById(optedIn.getId())).thenReturn(Optional.of(optedIn));
-        when(clientRepository.findById(optingOut.getId())).thenReturn(Optional.of(optingOut));
-        when(managerRepository.findById(MANAGER_ID)).thenReturn(Optional.of(manager()));
-
-        clientService.updateWhatsAppOptIn(optedIn.getId(), WhatsAppOptInRequest.builder().whatsappOptIn(true).build());
-        clientService.updateWhatsAppOptIn(optingOut.getId(),
-                WhatsAppOptInRequest.builder().whatsappOptIn(false).build());
-
-        assertThat(optedIn.isWhatsappOptIn()).isTrue();
-        assertThat(optingOut.isWhatsappOptIn()).isFalse();
-        verify(eventPublisher, never()).publishEvent(any());
-    }
-
-    @Test
-    @DisplayName("raises not found when recording the WhatsApp opt-in of an unknown client")
-    void optInOfUnknownClient() {
-        UUID id = UUID.randomUUID();
-        when(clientRepository.findById(id)).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() -> clientService.updateWhatsAppOptIn(id,
-                WhatsAppOptInRequest.builder().whatsappOptIn(true).build()))
-                .isInstanceOf(ClientNotFoundException.class);
-
-        verify(eventPublisher, never()).publishEvent(any());
     }
 
     @Test
@@ -539,6 +451,24 @@ class ClientServiceImplTest {
     }
 
     @Test
+    @DisplayName("deletes a client whose only ledger entries are opening balances, removing them first")
+    void deletesClientWithOnlyOpeningBalances() {
+        Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF", "Mehta Textiles Pvt Ltd");
+        when(clientRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
+        when(serviceAssignmentRepository.existsByCompanyIdIn(any())).thenReturn(false);
+        when(ledgerService.clientHasEntriesBesidesOpeningBalances(stored.getId())).thenReturn(false);
+        when(ledgerService.removeClientOpeningBalances(stored.getId())).thenReturn(2);
+
+        clientService.deleteClient(stored.getId());
+
+        // The balances go before the client, which their foreign keys would otherwise stop.
+        InOrder order = inOrder(ledgerService, clientRepository);
+        order.verify(ledgerService).removeClientOpeningBalances(stored.getId());
+        order.verify(clientRepository).delete(stored);
+        order.verify(clientRepository).flush();
+    }
+
+    @Test
     @DisplayName("refuses to delete a client whose companies have services")
     void deleteRejectsClientWithServices() {
         Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF");
@@ -557,14 +487,16 @@ class ClientServiceImplTest {
         Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF");
         when(clientRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
         when(serviceAssignmentRepository.existsByCompanyIdIn(any())).thenReturn(false);
-        when(ledgerService.clientHasEntries(stored.getId())).thenReturn(true);
+        when(ledgerService.clientHasEntriesBesidesOpeningBalances(stored.getId())).thenReturn(true);
 
         assertThatThrownBy(() -> clientService.deleteClient(stored.getId()))
                 .isInstanceOf(ClientHasLedgerEntriesException.class)
-                .hasMessageContaining("ledger entries")
-                .hasMessageNotContaining("services");
+                .hasMessageContaining("payments or service charges")
+                .hasMessageNotContaining("services assigned");
 
         verify(clientRepository, never()).delete(any());
+        // Nothing is removed from the ledger when the client stays.
+        verify(ledgerService, never()).removeClientOpeningBalances(any());
     }
 
     @Test
@@ -612,6 +544,9 @@ class ClientServiceImplTest {
         when(managerRepository.findById(MANAGER_ID)).thenReturn(Optional.of(manager()));
         when(ledgerService.pendingByClient(List.of(stored.getId())))
                 .thenReturn(Map.of(stored.getId(), new BigDecimal("19630.00")));
+        UUID textilesId = stored.getCompanies().get(1).getId();
+        when(ledgerService.openingBalances(any())).thenReturn(Map.of(textilesId,
+                new OpeningBalance(new BigDecimal("25000.00"), LocalDate.of(2026, 3, 31))));
 
         ClientResponse response = clientService.getClient(stored.getId());
 
@@ -621,6 +556,12 @@ class ClientServiceImplTest {
         assertThat(response.getCompanies())
                 .extracting("companyName")
                 .containsExactly("Mehta Textiles Pvt Ltd", "Rohan Mehta HUF");
+        assertThat(response.getCompanies())
+                .extracting("openingBalanceAmount")
+                .containsExactly(new BigDecimal("25000.00"), null);
+        assertThat(response.getCompanies())
+                .extracting("openingBalanceDate")
+                .containsExactly(LocalDate.of(2026, 3, 31), null);
     }
 
     @Test

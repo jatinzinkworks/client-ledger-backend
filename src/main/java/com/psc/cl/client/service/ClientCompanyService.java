@@ -25,7 +25,8 @@ public interface ClientCompanyService {
     /**
      * Adds one company to an existing client.
      *
-     * <p>A company that does not set its own discount is given the client's.
+     * <p>A company that does not set its own discount is given the client's. An opening balance other
+     * than zero is recorded in the company's ledger.
      *
      * @param clientId the client to add the company to
      * @param request  the company to add
@@ -34,6 +35,8 @@ public interface ClientCompanyService {
      *         when no client carries this identifier
      * @throws com.psc.cl.client.exception.CompanyLimitExceededException
      *         when the client already holds the most companies allowed
+     * @throws com.psc.cl.ledger.exception.FutureOpeningBalanceDateException
+     *         when the opening balance is dated after today
      */
     CompanyResponse addCompany(UUID clientId, CompanyRequest request);
 
@@ -54,7 +57,8 @@ public interface ClientCompanyService {
      * Replaces one company of a client wholesale. The company keeps its identifier.
      *
      * <p>Nothing is left behind from the previous version: an omitted discount gives the company
-     * the client's.
+     * the client's. The opening balance alone is kept when omitted, since it is a ledger entry: one of
+     * zero removes it, and any other amount records it, or replaces the one the company has.
      *
      * @param clientId  the client the company belongs to
      * @param companyId the company to replace
@@ -64,6 +68,8 @@ public interface ClientCompanyService {
      *         when no client carries this identifier
      * @throws com.psc.cl.client.exception.CompanyNotFoundException
      *         when the client holds no company with this identifier
+     * @throws com.psc.cl.ledger.exception.FutureOpeningBalanceDateException
+     *         when the opening balance is dated after today
      */
     CompanyResponse updateCompany(UUID clientId, UUID companyId, CompanyRequest request);
 
@@ -81,7 +87,8 @@ public interface ClientCompanyService {
      * @throws com.psc.cl.client.exception.CompanyHasServicesException
      *         when services are still assigned to the company
      * @throws com.psc.cl.client.exception.CompanyHasLedgerEntriesException
-     *         when the company has ledger entries, such as payments or an opening balance
+     *         when the company has payments or service charges in its ledger; an opening balance alone
+     *         is deleted with the company
      */
     void deleteCompany(UUID clientId, UUID companyId);
 }

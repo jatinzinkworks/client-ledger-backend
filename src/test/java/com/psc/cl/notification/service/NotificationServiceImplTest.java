@@ -55,6 +55,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @ExtendWith(MockitoExtension.class)
@@ -118,6 +119,8 @@ class NotificationServiceImplTest {
         assertThat(message.getSubject())
                 .isEqualTo("Sharma & Associates: Your ledger summary for Mehta Textiles Pvt Ltd, FY 2026-27");
 
+        // The company's opening balance is noted whatever its year.
+        verify(ledgerService).openingBalances(Set.of(COMPANY_ID));
         assertThat(response.getFinancialYear()).isEqualTo("2026-27");
         assertThat(response.getTo()).isEqualTo("rohan@example.com");
         assertThat(response.getCc()).containsExactly("pranay@sharma.example");
@@ -222,6 +225,8 @@ class NotificationServiceImplTest {
         assertThat(addresses(message.getRecipients(Message.RecipientType.CC)))
                 .containsExactly("pranay@sharma.example");
         assertThat(message.getSubject()).isEqualTo("Your ledger summary for all of your companies, FY 2026-27");
+        // Every company's opening balance is looked up in one call, whatever its year.
+        verify(ledgerService).openingBalances(List.of(COMPANY_ID, otherCompanyId));
 
         assertThat(response.getCompanyId()).isNull();
         assertThat(response.getAttachmentName()).isEqualTo("Rohan_Mehta_Ledger_FY2026-27.pdf");

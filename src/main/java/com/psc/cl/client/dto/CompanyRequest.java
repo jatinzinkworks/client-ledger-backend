@@ -1,8 +1,10 @@
 package com.psc.cl.client.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.psc.cl.client.model.ClientCompany;
 import com.psc.cl.client.model.CompanyType;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
@@ -12,12 +14,16 @@ import jakarta.validation.constraints.Size;
 import lombok.Builder;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 /**
- * A company supplied as part of a client payload.
+ * A company added to a client, or the new content of one: the company's fields, plus the balance
+ * it is taken on with.
  *
- * <p>Every field except the discount is mandatory. Values are trimmed before storage, and a
- * company without a discount of its own takes the client's.
+ * <p>Every field except the discount and the opening balance is mandatory. Values are trimmed before
+ * storage, and a company without a discount of its own takes the client's. On an update, an omitted
+ * opening balance leaves the company's as it is, and one of zero removes it; its date may be given
+ * only with a balance other than zero.
  */
 @Builder
 @Schema(name = "CompanyRequest", description = "Company owned by, or acted for on behalf of, the client")
@@ -49,5 +55,43 @@ public record CompanyRequest(
         @Schema(description = "Discount granted on this company's work, as a percentage. When "
                 + "omitted, the company takes the client's discount", example = "5.00",
                 minimum = "0", maximum = "100")
-        BigDecimal discountPercent) implements CompanyDetails {
+        BigDecimal discountPercent,
+
+        @Digits(integer = NewCompanyRequest.OPENING_BALANCE_INTEGER_DIGITS, fraction = 2,
+                message = "must have at most 12 digits before the decimal point and 2 after it")
+        @Schema(description = "The balance the company is taken on with, brought over from before: positive "
+                + "when the company owes it, negative when it starts in credit, such as an advance. It is "
+                + "recorded in the company's ledger as an opening balance, counted in what is pending but "
+                + "not as billed. When adding a company, omit it, or send 0, for none. When updating one, "
+                + "omit it to leave the company's opening balance as it is, send 0 to remove it, or send "
+                + "another amount to record it, or replace the one the company has", example = "25000.00")
+        BigDecimal openingBalance,
+
+        @Schema(description = "The date the opening balance stood at, which places it in a financial year; not "
+                + "after today. Only with an openingBalance other than 0. Defaults to the day the company is "
+                + "added, or, when updating a company that has an opening balance, to that balance's date",
+                example = "2026-03-31")
+        LocalDate openingBalanceDate) implements CompanyDetails {
+
+    /**
+     * Whether an opening balance is to be recorded: one was given, and it is not zero.
+     *
+     * @return true when the company has an opening balance to record
+     */
+    @JsonIgnore
+    public boolean hasOpeningBalance() {
+        return openingBalance != null && openingBalance.signum() != 0;
+    }
+
+    /**
+     * A date is a date of a balance, so it may only come with one.
+     *
+     * @return true unless a date is given without a balance to date
+     */
+    @JsonIgnore
+    @Schema(hidden = true)
+    @AssertTrue(message = "must be given only with an openingBalance other than 0")
+    public boolean isOpeningBalanceDated() {
+        return openingBalanceDate == null || hasOpeningBalance();
+    }
 }
