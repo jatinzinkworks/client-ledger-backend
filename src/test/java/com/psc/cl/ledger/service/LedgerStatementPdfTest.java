@@ -2,6 +2,7 @@ package com.psc.cl.ledger.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.lowagie.text.pdf.PdfDictionary;
 import com.lowagie.text.pdf.PdfName;
 import com.lowagie.text.pdf.PdfReader;
 import com.lowagie.text.pdf.parser.PdfTextExtractor;
@@ -210,7 +211,8 @@ class LedgerStatementPdfTest {
         for (int page = 1; page <= reader.getNumberOfPages(); page++) {
             assertThat(text(reader, page)).contains("Sharma & Associates");
             // The logo, ca-logo.png from the main resources, is drawn as an image on the page.
-            assertThat(reader.getPageResources(page).getAsDict(PdfName.XOBJECT)).isNotNull();
+            PdfDictionary resources = reader.getPageN(page).getAsDict(PdfName.RESOURCES);
+            assertThat(resources.getAsDict(PdfName.XOBJECT)).isNotNull();
         }
     }
 
