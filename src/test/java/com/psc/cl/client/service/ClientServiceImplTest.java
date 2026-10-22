@@ -324,6 +324,40 @@ class ClientServiceImplTest {
     }
 
     @Test
+    @DisplayName("stores the client's birthday on create and returns it")
+    void createsClientWithBirthday() {
+        when(managerRepository.findById(MANAGER_ID)).thenReturn(Optional.of(manager()));
+        stubSave();
+
+        ClientResponse response = clientService.createClient(request()
+                .birthday(LocalDate.of(1985, 7, 23))
+                .build());
+
+        verify(clientRepository).save(clientCaptor.capture());
+        assertThat(clientCaptor.getValue().getBirthday()).isEqualTo(LocalDate.of(1985, 7, 23));
+        assertThat(response.getBirthday()).isEqualTo(LocalDate.of(1985, 7, 23));
+    }
+
+    @Test
+    @DisplayName("on update, sets a new birthday, and clears it when omitted")
+    void updateReplacesBirthday() {
+        Client stored = stored("Rohan", "Mehta", "Rohan Mehta HUF");
+        when(clientRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
+        when(managerRepository.findById(MANAGER_ID)).thenReturn(Optional.of(manager()));
+
+        ClientResponse response = clientService.updateClient(stored.getId(), updateRequest()
+                .birthday(LocalDate.of(1990, 2, 1))
+                .build());
+
+        assertThat(stored.getBirthday()).isEqualTo(LocalDate.of(1990, 2, 1));
+        assertThat(response.getBirthday()).isEqualTo(LocalDate.of(1990, 2, 1));
+
+        clientService.updateClient(stored.getId(), updateRequest().build());
+
+        assertThat(stored.getBirthday()).isNull();
+    }
+
+    @Test
     @DisplayName("raises not found when updating an unknown client")
     void updateFailsForUnknownClient() {
         UUID missing = UUID.randomUUID();

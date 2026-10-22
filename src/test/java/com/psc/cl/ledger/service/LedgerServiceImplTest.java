@@ -1385,7 +1385,8 @@ class LedgerServiceImplTest {
         when(ledgerEntryRepository.findByCompanyIdInAndEntryType(any(), eq(LedgerEntryType.OPENING_BALANCE)))
                 .thenReturn(List.of(openingBalance(new BigDecimal("25000.00"), LocalDate.of(2026, 3, 31))));
 
-        LedgerExport statement = ledgerService.statementForClient(CLIENT_ID, FinancialYears.parse("2026-27"));
+        LedgerExport statement = ledgerService.statementForClient(CLIENT_ID, FinancialYears.parse("2026-27"),
+                "Sharma & Associates");
 
         assertThat(statement.fileName()).isEqualTo("Rohan_Mehta_Ledger_FY2026-27.pdf");
         PdfReader reader = new PdfReader(statement.content());
@@ -1393,11 +1394,14 @@ class LedgerServiceImplTest {
         assertThat(reader.getNumberOfPages()).isEqualTo(2);
         PdfTextExtractor extractor = new PdfTextExtractor(reader);
         assertThat(extractor.getTextFromPage(1))
+                // The firm's name heads every page.
+                .contains("Sharma & Associates")
                 .contains("Rohan Mehta")
                 .contains("5,605.00")
                 // Generated on the firm's today.
                 .contains("14 Oct 2026");
         assertThat(extractor.getTextFromPage(2))
+                .contains("Sharma & Associates")
                 .contains("Mehta Textiles Pvt Ltd")
                 .contains("Opening balance date").contains("31 Mar 2026").contains("25,000.00")
                 .contains("GST Monthly Return Filing")
@@ -1409,7 +1413,7 @@ class LedgerServiceImplTest {
     void writesStatementOfUnknownClient() {
         when(clientRepository.findById(CLIENT_ID)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> ledgerService.statementForClient(CLIENT_ID, FinancialYears.parse("2026-27")))
+        assertThatThrownBy(() -> ledgerService.statementForClient(CLIENT_ID, FinancialYears.parse("2026-27"), null))
                 .isInstanceOf(ClientNotFoundException.class);
 
         verify(ledgerEntryRepository, never()).findAllByClientIdAndDueDateBetween(any(), any(), any(), any());
@@ -1432,7 +1436,7 @@ class LedgerServiceImplTest {
                 .thenReturn(List.of(storedEntry()));
 
         LedgerExport statement = ledgerService.statementForCompany(CLIENT_ID, COMPANY_ID,
-                FinancialYears.parse("2026-27"));
+                FinancialYears.parse("2026-27"), "Sharma & Associates");
 
         assertThat(statement.fileName()).isEqualTo("Mehta_Textiles_Pvt_Ltd_Ledger_FY2026-27.pdf");
         PdfReader reader = new PdfReader(statement.content());
@@ -1451,7 +1455,7 @@ class LedgerServiceImplTest {
         when(clientCompanyRepository.findByIdAndClientId(COMPANY_ID, CLIENT_ID)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> ledgerService.statementForCompany(CLIENT_ID, COMPANY_ID,
-                FinancialYears.parse("2026-27")))
+                FinancialYears.parse("2026-27"), null))
                 .isInstanceOf(CompanyNotFoundException.class);
 
         verify(ledgerEntryRepository, never()).findAllByCompanyIdAndDueDateBetween(any(), any(), any(), any());

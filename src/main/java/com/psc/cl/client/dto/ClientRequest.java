@@ -11,18 +11,21 @@ import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PastOrPresent;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Builder;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
 /**
  * Payload for creating a client.
  *
- * <p>Every field except the discount is mandatory, and at least one company must be supplied.
+ * <p>Every field except the birthday and the discount is mandatory, and at least one company must be
+ * supplied.
  * Values are trimmed before storage, and the assigned manager must exist in the Manager Catalog.
  * The discount defaults to zero, and applies to every company that does not set its own. Each
  * company may bring an opening balance, recorded in its ledger.
@@ -64,6 +67,10 @@ public record ClientRequest(
                 + "the client", example = "e9b2c4d1-7f35-4a68-91c0-3d8a5e2f6b47",
                 requiredMode = Schema.RequiredMode.REQUIRED)
         UUID managerId,
+
+        @PastOrPresent(message = "must not be in the future")
+        @Schema(description = "Date of birth of the client; not after today. Optional", example = "1985-07-23")
+        LocalDate birthday,
 
         @DecimalMin(value = "0.00", message = "must not be negative")
         @DecimalMax(value = "100.00", message = "must not exceed 100")

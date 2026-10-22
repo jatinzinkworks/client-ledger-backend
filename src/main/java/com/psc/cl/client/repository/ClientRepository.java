@@ -65,6 +65,18 @@ public interface ClientRepository extends JpaRepository<Client, UUID> {
     Optional<Client> findByIdForUpdate(@Param("id") UUID id);
 
     /**
+     * Loads the clients whose birthday falls in a month, whatever the year, in the order to greet them:
+     * by day of the month, then first and last name. Served by the index on the birthday's month.
+     * Companies are not loaded.
+     *
+     * @param month the month of the year, 1 for January to 12 for December
+     * @return the clients with a birthday in the month; empty when there are none
+     */
+    @Query("select c from Client c where extract(month from c.birthday) = :month "
+            + "order by extract(day from c.birthday), c.firstName, c.lastName, c.id")
+    List<Client> findByBirthdayMonth(@Param("month") int month);
+
+    /**
      * Counts the clients a manager looks after, served by the index on {@code manager_id}.
      *
      * @param managerId the manager to count clients for

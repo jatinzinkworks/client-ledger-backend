@@ -100,6 +100,30 @@ class ManagerCatalogServiceImplTest {
     }
 
     @Test
+    @DisplayName("stores a manager without an email, skipping the uniqueness check")
+    void createsManagerWithoutEmail() {
+        stubSave();
+
+        managerCatalogService.createManager(request().email(null).build());
+
+        verify(managerRepository).saveAndFlush(managerCaptor.capture());
+        assertThat(managerCaptor.getValue().getEmail()).isNull();
+        verify(managerRepository, never()).existsByEmailIgnoreCase(any());
+    }
+
+    @Test
+    @DisplayName("stores a blank email as none")
+    void storesBlankEmailAsNone() {
+        stubSave();
+
+        managerCatalogService.createManager(request().email("   ").build());
+
+        verify(managerRepository).saveAndFlush(managerCaptor.capture());
+        assertThat(managerCaptor.getValue().getEmail()).isNull();
+        verify(managerRepository, never()).existsByEmailIgnoreCase(any());
+    }
+
+    @Test
     @DisplayName("rejects an email another manager already holds")
     void rejectsDuplicateEmail() {
         when(managerRepository.existsByEmailIgnoreCase("pranay.singhal@pranaysinghal.in"))

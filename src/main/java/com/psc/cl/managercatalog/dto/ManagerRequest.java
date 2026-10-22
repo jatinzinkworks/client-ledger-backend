@@ -13,8 +13,8 @@ import lombok.Builder;
 /**
  * Payload for creating or updating a manager.
  *
- * <p>Every field is mandatory. Values are trimmed before storage, and the email address must be
- * unique across the catalog, ignoring case.
+ * <p>Every field but the email address is mandatory. Values are trimmed before storage; a blank email
+ * address is stored as none, and a given one must be unique across the catalog, ignoring case.
  */
 @Builder
 @Schema(name = "ManagerRequest", description = "Manager to store in the catalog")
@@ -32,12 +32,13 @@ public record ManagerRequest(
                 requiredMode = Schema.RequiredMode.REQUIRED, maxLength = Manager.MAX_NAME_LENGTH)
         String lastName,
 
-        @NotBlank(message = "must not be blank")
         @Email(message = "must be a valid email address")
         @Size(max = Manager.MAX_EMAIL_LENGTH, message = "must not exceed 254 characters")
-        @Schema(description = "Work email address, unique across the catalog",
+        @Schema(description = "Work email address, unique across the catalog when given. Optional; without "
+                + "one, the manager is not copied into client emails",
                 example = "pranay.singhal@pranaysinghal.in",
-                requiredMode = Schema.RequiredMode.REQUIRED, maxLength = Manager.MAX_EMAIL_LENGTH)
+                requiredMode = Schema.RequiredMode.NOT_REQUIRED, maxLength = Manager.MAX_EMAIL_LENGTH,
+                nullable = true)
         String email,
 
         @NotNull(message = "must be provided")

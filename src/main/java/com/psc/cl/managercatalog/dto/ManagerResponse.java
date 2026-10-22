@@ -33,7 +33,8 @@ public class ManagerResponse {
     @Schema(description = "Family name of the manager", example = "Singhal")
     String lastName;
 
-    @Schema(description = "Work email address", example = "pranay.singhal@pranaysinghal.in")
+    @Schema(description = "Work email address; absent when the manager has none",
+            example = "pranay.singhal@pranaysinghal.in", nullable = true)
     String email;
 
     @Schema(description = "Seniority the manager holds", example = "SENIOR_MANAGER")

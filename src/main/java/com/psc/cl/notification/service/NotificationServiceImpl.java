@@ -25,6 +25,7 @@ import com.psc.cl.notification.dto.ClientReminderResult;
 import com.psc.cl.notification.dto.LedgerSummaryEmailResponse;
 import com.psc.cl.notification.dto.PaymentReminderResponse;
 import com.psc.cl.notification.exception.EmailDeliveryException;
+import com.psc.cl.service.FirmLogo;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
@@ -88,7 +89,7 @@ public class NotificationServiceImpl implements NotificationService {
         Client client = requireClient(clientId);
         List<String> cc = managerEmail(client);
         FirmDetails firm = firm();
-        LedgerExport ledger = ledgerService.statementForCompany(clientId, companyId, year);
+        LedgerExport ledger = ledgerService.statementForCompany(clientId, companyId, year, firmName(firm));
 
         OpeningBalance opening = ledgerService.openingBalances(Set.of(companyId)).get(companyId);
 
@@ -176,7 +177,7 @@ public class NotificationServiceImpl implements NotificationService {
         List<String> cc = managerEmail(client);
         FirmDetails firm = firm();
         List<LedgerSummaryEmail.CompanyLine> companies = companyLines(clientId, year);
-        LedgerExport ledger = ledgerService.statementForClient(clientId, year);
+        LedgerExport ledger = ledgerService.statementForClient(clientId, year, firmName(firm));
 
         LedgerSummaryEmail email = paymentReminder
                 ? LedgerSummaryEmail.paymentReminderForClient(summary, reminderPending, companies,
@@ -254,6 +255,11 @@ public class NotificationServiceImpl implements NotificationService {
         return firmDetailsRepository.findFirstByOrderByCreatedAtAsc().orElse(null);
     }
 
+    /** The firm's name, for the top of the statement's pages; null when none is saved. */
+    private static String firmName(FirmDetails firm) {
+        return firm == null ? null : firm.getFirmName();
+    }
+
     private LedgerSummaryEmailResponse response(Client client, UUID companyId, FinancialYear year, List<String> cc,
                                                 LedgerSummaryEmail email, LedgerExport ledger) {
         return LedgerSummaryEmailResponse.builder()
@@ -269,18 +275,24 @@ public class NotificationServiceImpl implements NotificationService {
     }
 
     /**
-     * The client's manager, to copy in. Clients are held to their manager by foreign key, so a
-     * missing one only leaves the email without a copy rather than failing it.
+     * The client's manager, to copy in. A manager's email is optional, so one without leaves the
+     * email without a copy. Clients are held to their manager by foreign key, so a missing manager
+     * likewise only leaves the email without a copy rather than failing it.
      */
     private List<String> managerEmail(Client client) {
-        return managerRepository.findById(client.getManagerId())
-                .map(Manager::getEmail)
-                .map(List::of)
-                .orElseGet(() -> {
-                    log.warn("Manager {} of client {} not found; sending without a copy to them",
-                            client.getManagerId(), client.getId());
-                    return List.of();
-                });
+        Manager manager = managerRepository.findById(client.getManagerId()).orElse(null);
+        if (manager == null) {
+            log.warn("Manager {} of client {} not found; sending without a copy to them",
+                    client.getManagerId(), client.getId());
+            return List.of();
+        }
+        String email = manager.getEmail();
+        if (email == null || email.isBlank()) {
+            log.debug("Manager {} of client {} has no email; sending without a copy to them",
+                    manager.getId(), client.getId());
+            return List.of();
+        }
+        return List.of(email);
     }
 
     private void send(String to, List<String> cc, FirmDetails firm, LedgerSummaryEmail email, LedgerExport ledger) {
@@ -305,6 +317,12 @@ public class NotificationServiceImpl implements NotificationService {
             }
             helper.setSubject(email.subject());
             helper.setText(email.text(), email.html());
+            // Shown at the top of the HTML body, which refers to it by content id; inline parts must follow
+            // the text.
+            if (email.logo() != null) {
+                helper.addInline(LedgerSummaryEmail.LOGO_CONTENT_ID, new ByteArrayResource(email.logo()),
+                        FirmLogo.MEDIA_TYPE);
+            }
             helper.addAttachment(ledger.fileName(), new ByteArrayResource(ledger.content()),
                     LedgerExport.PDF_MEDIA_TYPE);
             mailSender.send(message);

@@ -61,6 +61,31 @@ class LedgerSummaryEmailTest {
     }
 
     @Test
+    @DisplayName("opens both bodies with the firm's name, the HTML one with the logo beside it")
+    void opensWithLetterhead() {
+        LedgerSummaryEmail email = LedgerSummaryEmail.forCompany(
+                summary("Mehta Textiles Pvt Ltd", "24235.00", true), null, "Rohan", firm(), AS_OF, ATTACHMENT);
+
+        // ca-logo.png from the main resources, 725 by 548 pixels, shown 48 high and so 64 wide.
+        assertThat(email.logo()).isNotEmpty();
+        assertThat(email.html())
+                .contains("<img src=\"cid:firm-logo\" alt=\"Sharma &amp; Associates\" width=\"64\" height=\"48\"");
+        // The letterhead comes before the greeting.
+        assertThat(email.html().indexOf("cid:firm-logo")).isLessThan(email.html().indexOf("Dear Rohan,"));
+        assertThat(email.text()).startsWith("Sharma & Associates\n===================\n\nDear Rohan,");
+    }
+
+    @Test
+    @DisplayName("without a firm name, shows the logo alone and opens the text body with the greeting")
+    void opensWithLogoAloneWithoutFirm() {
+        LedgerSummaryEmail email = LedgerSummaryEmail.forCompany(
+                summary("Mehta Textiles Pvt Ltd", "24235.00", true), null, "Rohan", null, AS_OF, ATTACHMENT);
+
+        assertThat(email.html()).contains("cid:firm-logo");
+        assertThat(email.text()).startsWith("Dear Rohan,");
+    }
+
+    @Test
     @DisplayName("shows an opening balance as a figure of its own, and as a column of the company breakdown")
     void showsOpeningBalance() {
         ClientLedgerSummaryResponse summary = ClientLedgerSummaryResponse.builder()

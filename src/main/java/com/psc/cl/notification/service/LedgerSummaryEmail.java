@@ -5,10 +5,12 @@ import com.psc.cl.ledger.dto.ClientLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.CompanyLedgerSummaryResponse;
 import com.psc.cl.ledger.dto.LastPayment;
 import com.psc.cl.ledger.dto.OpeningBalance;
+import com.psc.cl.service.FirmLogo;
 import org.springframework.web.util.HtmlUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.ByteBuffer;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -27,11 +29,22 @@ import java.util.Locale;
  * whatever the year it falls in; only one dated in the year counts in the figures. A company without
  * one is not mentioned.
  *
+ * <p>Both bodies open with the firm's name; the HTML body shows the firm's logo ({@link FirmLogo})
+ * beside it, as an inline image the sender attaches under {@link #LOGO_CONTENT_ID}.
+ *
  * @param subject the subject line
  * @param html    the HTML body
  * @param text    the plain-text body
+ * @param logo    the logo's .png file, to attach inline under {@link #LOGO_CONTENT_ID}; null when there
+ *                is no logo, and the HTML body then does not refer to one
  */
-record LedgerSummaryEmail(String subject, String html, String text) {
+record LedgerSummaryEmail(String subject, String html, String text, byte[] logo) {
+
+    /** The content id the HTML body refers to the inline logo by. */
+    static final String LOGO_CONTENT_ID = "firm-logo";
+
+    /** Height the logo is shown at in the HTML body, in pixels. */
+    private static final int LOGO_HEIGHT = 48;
 
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.ENGLISH);
 
@@ -176,11 +189,53 @@ record LedgerSummaryEmail(String subject, String html, String text) {
             case SUMMARY -> "Your ledger summary for " + content.topic() + ", FY " + content.financialYear();
             case PAYMENT_REMINDER -> "Payment reminder: " + rupees(content.totalPending()) + " pending";
         };
-        return new LedgerSummaryEmail(subject, html(content, purpose, clientName, firm, asOf, attachmentName),
-                text(content, purpose, clientName, firm, asOf, attachmentName));
+        byte[] logo = FirmLogo.png().orElse(null);
+        return new LedgerSummaryEmail(subject, html(content, purpose, clientName, firm, asOf, attachmentName, logo),
+                text(content, purpose, clientName, firm, asOf, attachmentName), logo);
     }
 
-    /** The heading under the firm's name, the page title, and how a summary or reminder opens and closes. */
+    /**
+     * The top of the HTML body: the logo, then the firm's name beside it; nothing when there is
+     * neither.
+     */
+    private static String letterheadHtml(String firmName, byte[] logo) {
+        if (firmName.isEmpty() && logo == null) {
+            return "";
+        }
+        String logoCell = logo == null ? ""
+                : "<td style=\"vertical-align:middle;padding-right:" + (firmName.isEmpty() ? 0 : 14) + "px;\">"
+                        + "<img src=\"cid:" + LOGO_CONTENT_ID + "\" alt=\"" + escape(firmName) + "\" width=\""
+                        + logoWidth(logo) + "\" height=\"" + LOGO_HEIGHT + "\" style=\"display:block;border:0;"
+                        + "height:" + LOGO_HEIGHT + "px;\"></td>";
+        String nameCell = firmName.isEmpty() ? ""
+                : "<td style=\"vertical-align:middle;font-size:22px;font-weight:bold;color:" + BRAND_COLOUR
+                        + ";\">" + escape(firmName) + "</td>";
+        return "<tr><td style=\"padding:20px 32px;border-bottom:1px solid #e3e6ea;\">"
+                + "<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\"><tr>" + logoCell + nameCell
+                + "</tr></table></td></tr>";
+    }
+
+    /**
+     * The width that keeps the logo's proportions at {@link #LOGO_HEIGHT}, read from the size in its
+     * PNG header; as tall as it is wide when the header cannot be read. Mail readers such as Outlook
+     * ignore a width set only in a style, so it is given as an attribute.
+     */
+    private static int logoWidth(byte[] png) {
+        // A PNG file opens with an 8-byte signature and the IHDR chunk, whose data starts at byte 16 with
+        // the width, then the height, each 4 bytes, most significant first.
+        if (png.length < 24) {
+            return LOGO_HEIGHT;
+        }
+        ByteBuffer header = ByteBuffer.wrap(png, 16, 8);
+        int width = header.getInt();
+        int height = header.getInt();
+        if (width <= 0 || height <= 0) {
+            return LOGO_HEIGHT;
+        }
+        return Math.max(1, Math.round((float) LOGO_HEIGHT * width / height));
+    }
+
+    /** The heading under the letterhead, the page title, and how a summary or reminder opens and closes. */
     private static String heading(Purpose purpose) {
         return purpose == Purpose.SUMMARY ? "Ledger summary" : "Payment reminder";
     }
@@ -252,7 +307,7 @@ record LedgerSummaryEmail(String subject, String html, String text) {
     }
 
     private static String html(Content content, Purpose purpose, String clientName, FirmDetails firm,
-                               LocalDate asOf, String attachmentName) {
+                               LocalDate asOf, String attachmentName, byte[] logo) {
         StringBuilder rows = new StringBuilder();
         for (Figure figure : figures(content)) {
             rows.append(row(figure.label(), figure.amount(), figure.highlight()));
@@ -265,7 +320,8 @@ record LedgerSummaryEmail(String subject, String html, String text) {
             notes += "<p style=\"margin:16px 0 0;font-size:14px;color:#555555;\">"
                     + escape("Opening balance: " + openingLine(content.companyOpening()) + ".") + "</p>";
         }
-        String firmName = firm == null || firm.getFirmName() == null ? "" : firm.getFirmName();
+        String firmName = firm == null || firm.getFirmName() == null ? "" : firm.getFirmName().strip();
+        String letterhead = letterheadHtml(firmName, logo);
 
         return """
                 <!DOCTYPE html>
@@ -279,9 +335,10 @@ record LedgerSummaryEmail(String subject, String html, String text) {
                 <tr><td align="center">
                 <table role="presentation" width="600" cellpadding="0" cellspacing="0" \
                 style="max-width:600px;width:100%%;background-color:#ffffff;border-radius:8px;overflow:hidden;">
+                %s
                 <tr><td style="background-color:%s;padding:24px 32px;color:#ffffff;">
                 <div style="font-size:20px;font-weight:bold;">%s</div>
-                <div style="font-size:14px;opacity:0.85;margin-top:4px;">%s &middot; FY %s</div>
+                <div style="font-size:14px;opacity:0.85;margin-top:4px;">FY %s</div>
                 </td></tr>
                 <tr><td style="padding:32px;">
                 <p style="margin:0 0 16px;font-size:15px;">Dear %s,</p>
@@ -304,8 +361,9 @@ record LedgerSummaryEmail(String subject, String html, String text) {
                 </html>
                 """.formatted(
                 escape(heading(purpose) + " for " + content.topic()),
+                letterhead,
                 BRAND_COLOUR,
-                escape(firmName.isEmpty() ? heading(purpose) : firmName),
+                // The letterhead above names the firm, so the band names the email.
                 heading(purpose),
                 escape(content.financialYear()),
                 escape(clientName),
@@ -386,8 +444,13 @@ record LedgerSummaryEmail(String subject, String html, String text) {
     private static String text(Content content, Purpose purpose, String clientName, FirmDetails firm,
                                LocalDate asOf, String attachmentName) {
         String firmName = firm == null || firm.getFirmName() == null ? "Accounts team" : firm.getFirmName();
-        StringBuilder text = new StringBuilder()
-                .append("Dear ").append(clientName).append(",\n\n")
+        StringBuilder text = new StringBuilder();
+        if (firm != null && firm.getFirmName() != null && !firm.getFirmName().isBlank()) {
+            // The letterhead: the firm's name, underlined, as plain text has no logo.
+            String name = firm.getFirmName().strip();
+            text.append(name).append('\n').append("=".repeat(name.length())).append("\n\n");
+        }
+        text.append("Dear ").append(clientName).append(",\n\n")
                 .append(introText(content, purpose, asOf)).append("\n\n");
         for (Figure figure : figures(content)) {
             // Lines above the bottom one are padded so their amounts line up.

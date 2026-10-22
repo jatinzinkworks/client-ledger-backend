@@ -95,7 +95,6 @@ class ManagerCatalogControllerTest {
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
                 .andExpect(jsonPath("$.errors[*].field", hasItem("firstName")))
                 .andExpect(jsonPath("$.errors[*].field", hasItem("lastName")))
-                .andExpect(jsonPath("$.errors[*].field", hasItem("email")))
                 .andExpect(jsonPath("$.errors[*].field", hasItem("role")))
                 .andExpect(jsonPath("$.errors[*].field", hasItem("mobileNumber")));
 

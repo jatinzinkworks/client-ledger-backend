@@ -66,7 +66,7 @@ public class ClientImportServiceImpl implements ClientImportService {
 
     static final String INSTRUCTIONS_SHEET = "Instructions";
 
-    /** The template's list of managers, which the Manager Email drop-down offers; it is not imported. */
+    /** The template's list of managers, which the Manager Name drop-down offers; it is not imported. */
     static final String MANAGERS_SHEET = "Managers";
 
     /** Most clients one workbook may import. */
@@ -78,8 +78,11 @@ public class ClientImportServiceImpl implements ClientImportService {
     /** Column of the client reference, first on both sheets. */
     private static final int REF = 0;
 
-    /** Column of the manager's email on the Clients sheet. */
-    private static final int MANAGER_EMAIL = 5;
+    /** Column of the manager's name on the Clients sheet. */
+    private static final int MANAGER_NAME = 5;
+
+    /** Runs of whitespace in a name, read as one space so a name matches however it is spaced. */
+    private static final Pattern WHITESPACE = Pattern.compile("\\s+");
 
     /** The path of a broken rule on one of a client's companies, such as companies[2].address. */
     private static final Pattern COMPANY_PATH = Pattern.compile("^companies\\[(\\d+)]\\.(\\w+)$");
@@ -101,12 +104,15 @@ public class ClientImportServiceImpl implements ClientImportService {
                     "+91 98200 12345"),
             new Column("Email", "email", 30, true, "Contact email address", "rohan.mehta@example.com"),
             // Its drop-down lists the managers of the moment, so it is added as the template is written.
-            new Column("Manager Email", "managerId", 30, true, "Email of the manager in the Manager Catalog who "
-                    + "looks after the client, picked from the drop-down, which offers those on the "
-                    + MANAGERS_SHEET + " sheet", "pranay.singhal@example.com"),
+            new Column("Manager Name", "managerId", 30, true, "First and last name of the manager in the Manager "
+                    + "Catalog who looks after the client, picked from the drop-down, which offers those on the "
+                    + MANAGERS_SHEET + " sheet. Two managers with the same name cannot be told apart", "Pranay "
+                    + "Singhal"),
             new Column("Discount %", "discountPercent", 12, false, "Discount for the client, 0 to 100 with at most 2 "
                     + "decimals. Type 10 or 10% for 10 percent. Blank for none. Applies to each of the client's "
-                    + "companies without a discount of its own", "10")), 0);
+                    + "companies without a discount of its own", "10"),
+            new Column("Birthday", "birthday", 14, false, "The client's date of birth; not after today. A date "
+                    + "cell, or text as 23/07/1985 or 1985-07-23. Blank for none", "23/07/1985")), 0);
 
     /** The Companies sheet, column A onwards; each field is the {@link NewCompanyRequest} component it fills. */
     static final SheetLayout COMPANIES = new SheetLayout(COMPANIES_SHEET, List.of(
@@ -141,13 +147,12 @@ public class ClientImportServiceImpl implements ClientImportService {
     @Override
     public byte[] template() {
         List<Manager> managers = managerRepository.findAll().stream()
-                .filter(manager -> manager.getEmail() != null)
-                .sorted(Comparator.comparing(Manager::getEmail, String.CASE_INSENSITIVE_ORDER))
+                .sorted(Comparator.comparing(ClientImportServiceImpl::name, String.CASE_INSENSITIVE_ORDER))
                 .toList();
         XlsxWorkbook workbook = new XlsxWorkbook();
         Sheet clients = SpreadsheetImport.addSheet(workbook, CLIENTS);
         if (!managers.isEmpty()) {
-            clients.addDropDown(MANAGER_EMAIL, 2, new Range(MANAGERS_SHEET, 0, 2, managers.size() + 1), true);
+            clients.addDropDown(MANAGER_NAME, 2, new Range(MANAGERS_SHEET, 0, 2, managers.size() + 1), true);
         }
         SpreadsheetImport.addSheet(workbook, COMPANIES);
 
@@ -155,7 +160,7 @@ public class ClientImportServiceImpl implements ClientImportService {
         instructions.addRow(Cell.bold("Importing clients and their companies"))
                 .addBlankRow()
                 .addRow(Cell.text("1. On the " + CLIENTS_SHEET + " sheet, add one row per client, each with its own "
-                        + "Client Ref, such as C1, C2. Pick the Manager Email from the drop-down, which offers the "
+                        + "Client Ref, such as C1, C2. Pick the Manager Name from the drop-down, which offers the "
                         + "managers on the " + MANAGERS_SHEET + " sheet as they were when this template was "
                         + "downloaded."))
                 .addRow(Cell.text("2. On the " + COMPANIES_SHEET + " sheet, add one row per company, picking the "
@@ -177,12 +182,16 @@ public class ClientImportServiceImpl implements ClientImportService {
         return workbook.toBytes();
     }
 
-    /** The managers the Manager Email drop-down offers, by email in column A, for reference. */
+    /**
+     * The managers the Manager Name drop-down offers, by name in column A, with their email, if any,
+     * for reference.
+     */
     private static void addManagers(XlsxWorkbook workbook, List<Manager> managers) {
-        Sheet sheet = workbook.addSheet(MANAGERS_SHEET, 34, 30)
+        Sheet sheet = workbook.addSheet(MANAGERS_SHEET, 30, 34)
                 .freezeHeaderRow()
-                .addRow(Cell.bold("Email"), Cell.bold("Name"));
-        managers.forEach(manager -> sheet.addRow(Cell.text(manager.getEmail()), Cell.text(name(manager))));
+                .addRow(Cell.bold("Name"), Cell.bold("Email"));
+        managers.forEach(manager -> sheet.addRow(Cell.text(name(manager)),
+                manager.getEmail() == null ? Cell.empty() : Cell.text(manager.getEmail())));
     }
 
     private static String name(Manager manager) {
@@ -248,7 +257,9 @@ public class ClientImportServiceImpl implements ClientImportService {
     }
 
     private Map<String, PendingClient> readClients(XlsxReader.Sheet sheet, CellErrors errors) {
-        Map<String, UUID> managers = managersByEmail();
+        // "Today" is the firm's calendar day, read from the business clock.
+        LocalDate today = LocalDate.now(clock);
+        Map<String, List<UUID>> managers = managersByName();
         Map<String, PendingClient> clients = new LinkedHashMap<>();
         SpreadsheetImport.dataRows(sheet).forEach((row, values) -> {
             Row cells = new Row(CLIENTS, row, values, errors);
@@ -267,8 +278,9 @@ public class ClientImportServiceImpl implements ClientImportService {
                     .lastName(cells.text(2))
                     .phone(cells.text(3))
                     .email(cells.text(4))
-                    .managerId(manager(cells, MANAGER_EMAIL, managers))
-                    .discountPercent(cells.percent(6));
+                    .managerId(manager(cells, MANAGER_NAME, managers))
+                    .discountPercent(cells.percent(6))
+                    .birthday(cells.dateUpTo(7, today));
             clients.put(SpreadsheetImport.key(ref), new PendingClient(row, ref, request));
         });
         return clients;
@@ -289,25 +301,38 @@ public class ClientImportServiceImpl implements ClientImportService {
         return amounts.reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
     }
 
-    /** Every manager's identifier by email, lower-cased; emails are unique ignoring case. */
-    private Map<String, UUID> managersByEmail() {
+    /**
+     * Every manager's identifier by full name, keyed by {@link #nameKey}. Names are not unique, so
+     * a name may stand for more than one manager.
+     */
+    private Map<String, List<UUID>> managersByName() {
         return managerRepository.findAll().stream()
-                .filter(manager -> manager.getEmail() != null)
-                .collect(Collectors.toMap(manager -> SpreadsheetImport.key(manager.getEmail()), Manager::getId,
-                        (first, same) -> first));
+                .collect(Collectors.groupingBy(manager -> nameKey(name(manager)),
+                        Collectors.mapping(Manager::getId, Collectors.toList())));
     }
 
-    private static UUID manager(Row cells, int column, Map<String, UUID> managers) {
-        String email = cells.text(column);
-        if (email == null) {
+    private static UUID manager(Row cells, int column, Map<String, List<UUID>> managers) {
+        String name = cells.text(column);
+        if (name == null) {
             // Left to validation, which reports the missing manager.
             return null;
         }
-        UUID managerId = managers.get(SpreadsheetImport.key(email));
-        if (managerId == null) {
-            cells.error(column, "no manager in the Manager Catalog has the email " + email);
+        List<UUID> matches = managers.getOrDefault(nameKey(name), List.of());
+        if (matches.isEmpty()) {
+            cells.error(column, "no manager in the Manager Catalog is named " + name);
+            return null;
         }
-        return managerId;
+        if (matches.size() > 1) {
+            cells.error(column, matches.size() + " managers in the Manager Catalog are named " + name
+                    + "; rename one of them in the catalog, or add this client without the import");
+            return null;
+        }
+        return matches.getFirst();
+    }
+
+    /** A name as compared: ignoring case, surrounding whitespace and how the words are spaced. */
+    private static String nameKey(String name) {
+        return WHITESPACE.matcher(SpreadsheetImport.key(name)).replaceAll(" ");
     }
 
     private void readCompanies(XlsxReader.Sheet sheet, Map<String, PendingClient> clients, CellErrors errors) {

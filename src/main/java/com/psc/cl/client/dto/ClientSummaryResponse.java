@@ -10,6 +10,7 @@ import lombok.Builder;
 import lombok.Value;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -46,6 +47,9 @@ public class ClientSummaryResponse {
             example = "Pranay Singhal")
     String managerName;
 
+    @Schema(description = "Date of birth of the client. Left out when not recorded", example = "1985-07-23")
+    LocalDate birthday;
+
     @Schema(description = "Discount granted to the client, as a percentage", example = "10.00")
     BigDecimal discountPercent;
 
@@ -75,6 +79,7 @@ public class ClientSummaryResponse {
                 .email(entity.getEmail())
                 .managerId(entity.getManagerId())
                 .managerName(ClientResponse.managerName(manager))
+                .birthday(entity.getBirthday())
                 .discountPercent(entity.getDiscountPercent())
                 .companyNames(entity.getCompanies().stream()
                         .map(ClientCompany::getCompanyName)

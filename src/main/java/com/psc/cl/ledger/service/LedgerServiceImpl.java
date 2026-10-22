@@ -561,7 +561,7 @@ public class LedgerServiceImpl implements LedgerService {
 
     @Override
     @Transactional(readOnly = true)
-    public LedgerExport statementForClient(UUID clientId, FinancialYear financialYear) {
+    public LedgerExport statementForClient(UUID clientId, FinancialYear financialYear, String firmName) {
         Client client = clientRepository.findById(clientId).orElseThrow(() -> new ClientNotFoundException(clientId));
         Map<UUID, String> companyNames = client.getCompanies().stream()
                 .collect(Collectors.toMap(ClientCompany::getId, ClientCompany::getCompanyName));
@@ -573,7 +573,7 @@ public class LedgerServiceImpl implements LedgerService {
         // Each company shows its opening balance, whatever the year it falls in.
         Map<UUID, OpeningBalance> openings = openingBalances(companyNames.keySet());
         byte[] content = LedgerStatementPdf.forClient(summary, entries, companyNames, openings,
-                LocalDate.now(clock));
+                LocalDate.now(clock), firmName);
 
         log.info("Wrote a statement of {} ledger entries of client {} for FY {}", entries.size(), clientId,
                 financialYear.label());
@@ -582,7 +582,8 @@ public class LedgerServiceImpl implements LedgerService {
 
     @Override
     @Transactional(readOnly = true)
-    public LedgerExport statementForCompany(UUID clientId, UUID companyId, FinancialYear financialYear) {
+    public LedgerExport statementForCompany(UUID clientId, UUID companyId, FinancialYear financialYear,
+                                            String firmName) {
         ClientCompany company = requireCompany(clientId, companyId);
 
         // The summary shows exactly what the company summary endpoint returns for the year.
@@ -592,7 +593,7 @@ public class LedgerServiceImpl implements LedgerService {
         // The details show the company's opening balance, whatever the year it falls in.
         OpeningBalance opening = openingBalances(Set.of(companyId)).get(companyId);
         byte[] content = LedgerStatementPdf.forCompany(fullName(company.getClient()), summary, entries, opening,
-                LocalDate.now(clock));
+                LocalDate.now(clock), firmName);
 
         log.info("Wrote a statement of {} ledger entries of company {} of client {} for FY {}", entries.size(),
                 companyId, clientId, financialYear.label());

@@ -39,8 +39,8 @@ public interface ClientImportApi {
     @Operation(
             summary = "Download the client import template",
             description = "Returns the Excel workbook to fill in for POST /clients/import. Its Clients sheet takes "
-                    + "one row per client: Client Ref, First Name, Last Name, Phone, Email, Manager Email, "
-                    + "and Discount %. Its Companies sheet takes one row per company: Client Ref, "
+                    + "one row per client: Client Ref, First Name, Last Name, Phone, Email, Manager Name, "
+                    + "Discount % and Birthday. Its Companies sheet takes one row per company: Client Ref, "
                     + "Company Name, Company Type, Address and Discount %, linked to its client by the Client Ref. "
                     + "An Instructions sheet describes every column with an example. Only clients and their "
                     + "companies are imported; services are assigned afterwards as usual.")

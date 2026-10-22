@@ -264,16 +264,18 @@ public interface LedgerService {
      * Writes a client's ledger statement for one financial year as a PDF, to send to the client: the
      * figures of {@link #summarizeClient} with a line per company, then each company's entries of the
      * year, earliest first, with a running balance and totals, on a page per company. Each charge is
-     * shown only as its total fee, with discount and GST folded in; no discount is shown.
+     * shown only as its total fee, with discount and GST folded in; no discount is shown. Every page is
+     * headed by the firm's logo and name.
      *
      * @param clientId      the client
      * @param financialYear the financial year of the statement
+     * @param firmName      the firm's name for the top of every page; null when none is saved
      * @return the .pdf file, named after the client and the year, such as
      *         {@code Rohan_Mehta_Ledger_FY2026-27.pdf}
      * @throws com.psc.cl.client.exception.ClientNotFoundException
      *         when no client carries this identifier
      */
-    LedgerExport statementForClient(UUID clientId, FinancialYear financialYear);
+    LedgerExport statementForClient(UUID clientId, FinancialYear financialYear, String firmName);
 
     /**
      * Writes the ledger statement of one company of a client for one financial year as a PDF, to send
@@ -283,10 +285,11 @@ public interface LedgerService {
      * @param clientId      the client
      * @param companyId     the company of the client
      * @param financialYear the financial year of the statement
+     * @param firmName      the firm's name for the top of every page; null when none is saved
      * @return the .pdf file, named after the company and the year, such as
      *         {@code Mehta_Textiles_Pvt_Ltd_Ledger_FY2026-27.pdf}
      */
-    LedgerExport statementForCompany(UUID clientId, UUID companyId, FinancialYear financialYear);
+    LedgerExport statementForCompany(UUID clientId, UUID companyId, FinancialYear financialYear, String firmName);
 
     /**
      * What each of the given clients still owes: billed less received across all of their companies

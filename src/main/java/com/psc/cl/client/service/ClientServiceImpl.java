@@ -219,7 +219,8 @@ public class ClientServiceImpl implements ClientService {
     }
 
     /**
-     * An omitted discount resets to the default, so nothing is left behind from a previous version.
+     * An omitted discount resets to the default and an omitted birthday is cleared, so nothing is
+     * left behind from a previous version.
      */
     private void applyClient(ClientDetails request, Client client) {
         client.setFirstName(request.firstName().trim());
@@ -227,6 +228,7 @@ public class ClientServiceImpl implements ClientService {
         client.setPhone(request.phone().trim());
         client.setEmail(request.email().trim());
         client.setManagerId(request.managerId());
+        client.setBirthday(request.birthday());
         client.setDiscountPercent(Percentages.orElse(request.discountPercent(), Client.DEFAULT_DISCOUNT_PERCENT));
     }
 

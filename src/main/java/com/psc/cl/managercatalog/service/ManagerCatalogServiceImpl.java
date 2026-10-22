@@ -50,8 +50,8 @@ public class ManagerCatalogServiceImpl implements ManagerCatalogService {
     @Override
     @Transactional
     public ManagerResponse createManager(ManagerRequest request) {
-        String email = request.email().trim();
-        if (managerRepository.existsByEmailIgnoreCase(email)) {
+        String email = email(request);
+        if (email != null && managerRepository.existsByEmailIgnoreCase(email)) {
             throw new ManagerEmailAlreadyExistsException(email);
         }
 
@@ -91,8 +91,8 @@ public class ManagerCatalogServiceImpl implements ManagerCatalogService {
     public ManagerResponse updateManager(UUID id, ManagerRequest request) {
         Manager manager = require(id);
 
-        String email = request.email().trim();
-        if (managerRepository.existsByEmailIgnoreCaseAndIdNot(email, id)) {
+        String email = email(request);
+        if (email != null && managerRepository.existsByEmailIgnoreCaseAndIdNot(email, id)) {
             throw new ManagerEmailAlreadyExistsException(email);
         }
 
@@ -123,6 +123,15 @@ public class ManagerCatalogServiceImpl implements ManagerCatalogService {
             throw new ManagerHasClientsException(id);
         }
         log.info("Deleted manager {}", id);
+    }
+
+    /** The requested email address, trimmed; null when none or a blank one is given. */
+    private static String email(ManagerRequest request) {
+        String email = request.email();
+        if (email == null || email.isBlank()) {
+            return null;
+        }
+        return email.trim();
     }
 
     private void apply(ManagerRequest request, String email, Manager manager) {

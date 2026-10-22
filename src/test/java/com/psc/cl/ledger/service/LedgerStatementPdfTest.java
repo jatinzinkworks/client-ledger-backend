@@ -2,6 +2,7 @@ package com.psc.cl.ledger.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.lowagie.text.pdf.PdfName;
 import com.lowagie.text.pdf.PdfReader;
 import com.lowagie.text.pdf.parser.PdfTextExtractor;
 import com.psc.cl.ledger.dto.ClientLedgerSummaryResponse;
@@ -46,7 +47,7 @@ class LedgerStatementPdfTest {
                 payment(TEXTILES_ID, LocalDate.of(2026, 9, 10), "-3000.00"),
                 charge(HUF_ID, LocalDate.of(2026, 9, 20), "Company Incorporation", "28025.00"));
 
-        byte[] pdf = LedgerStatementPdf.forClient(summary(), entries, COMPANY_NAMES, Map.of(), GENERATED_ON);
+        byte[] pdf = LedgerStatementPdf.forClient(summary(), entries, COMPANY_NAMES, Map.of(), GENERATED_ON, null);
 
         assertThat(new String(pdf, 0, 5, StandardCharsets.US_ASCII)).isEqualTo("%PDF-");
         PdfReader reader = new PdfReader(pdf);
@@ -86,7 +87,7 @@ class LedgerStatementPdfTest {
                 "5605.00"));
 
         PdfReader reader = new PdfReader(LedgerStatementPdf.forClient(summary(), entries, COMPANY_NAMES, Map.of(),
-                GENERATED_ON));
+                GENERATED_ON, null));
 
         for (int page = 1; page <= reader.getNumberOfPages(); page++) {
             assertThat(text(reader, page))
@@ -117,7 +118,7 @@ class LedgerStatementPdfTest {
                 .build();
 
         PdfReader reader = new PdfReader(LedgerStatementPdf.forClient(summary, entries, COMPANY_NAMES, Map.of(),
-                GENERATED_ON));
+                GENERATED_ON, null));
 
         assertThat(text(reader, 1))
                 .contains("Total billed").contains("Rs. 5,605.00")
@@ -136,7 +137,7 @@ class LedgerStatementPdfTest {
     @DisplayName("gives a company with no entries in the year its page, saying so")
     void writesIdleCompany() throws IOException {
         PdfReader reader = new PdfReader(LedgerStatementPdf.forClient(summary(), List.of(), COMPANY_NAMES, Map.of(),
-                GENERATED_ON));
+                GENERATED_ON, null));
 
         assertThat(reader.getNumberOfPages()).isEqualTo(3);
         assertThat(text(reader, 3))
@@ -152,7 +153,7 @@ class LedgerStatementPdfTest {
                 payment(TEXTILES_ID, LocalDate.of(2026, 9, 10), "-3000.00"));
 
         PdfReader reader = new PdfReader(LedgerStatementPdf.forCompany("Rohan Mehta", companySummary(), entries,
-                null, GENERATED_ON));
+                null, GENERATED_ON, null));
 
         assertThat(reader.getNumberOfPages()).isEqualTo(1);
         assertThat(text(reader, 1))
@@ -173,7 +174,7 @@ class LedgerStatementPdfTest {
                 new OpeningBalance(new BigDecimal("-5000.50"), LocalDate.of(2026, 3, 31)));
 
         PdfReader reader = new PdfReader(LedgerStatementPdf.forClient(summary(), List.of(), COMPANY_NAMES,
-                openings, GENERATED_ON));
+                openings, GENERATED_ON, null));
 
         assertThat(text(reader, 2))
                 .contains("Mehta Textiles Pvt Ltd")
@@ -191,12 +192,26 @@ class LedgerStatementPdfTest {
     @DisplayName("shows a company's opening balance and date above the details of its own statement")
     void showsOpeningBalanceRowsOnCompanyStatement() throws IOException {
         PdfReader reader = new PdfReader(LedgerStatementPdf.forCompany("Rohan Mehta", companySummary(), List.of(),
-                new OpeningBalance(new BigDecimal("25000.00"), LocalDate.of(2026, 3, 31)), GENERATED_ON));
+                new OpeningBalance(new BigDecimal("25000.00"), LocalDate.of(2026, 3, 31)), GENERATED_ON, null));
 
         assertThat(text(reader, 1))
                 .contains("Details")
                 .contains("Opening balance").contains("Rs. 25,000.00")
                 .contains("Opening balance date").contains("31 Mar 2026");
+    }
+
+    @Test
+    @DisplayName("heads every page with the firm's name and logo")
+    void headsEveryPageWithFirm() throws IOException {
+        PdfReader reader = new PdfReader(LedgerStatementPdf.forClient(summary(), List.of(), COMPANY_NAMES, Map.of(),
+                GENERATED_ON, "Sharma & Associates"));
+
+        assertThat(reader.getNumberOfPages()).isEqualTo(3);
+        for (int page = 1; page <= reader.getNumberOfPages(); page++) {
+            assertThat(text(reader, page)).contains("Sharma & Associates");
+            // The logo, ca-logo.png from the main resources, is drawn as an image on the page.
+            assertThat(reader.getPageResources(page).getAsDict(PdfName.XOBJECT)).isNotNull();
+        }
     }
 
     @Test

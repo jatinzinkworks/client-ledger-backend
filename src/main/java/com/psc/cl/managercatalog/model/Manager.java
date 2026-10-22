@@ -51,8 +51,8 @@ public class Manager {
     @Column(name = "last_name", nullable = false, length = MAX_NAME_LENGTH)
     private String lastName;
 
-    /** Unique across the catalog, ignoring case. */
-    @Column(name = "email", nullable = false, length = MAX_EMAIL_LENGTH)
+    /** Optional; when present, unique across the catalog, ignoring case. */
+    @Column(name = "email", length = MAX_EMAIL_LENGTH)
     private String email;
 
     @Enumerated(EnumType.STRING)

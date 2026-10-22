@@ -8,18 +8,20 @@ import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PastOrPresent;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Builder;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.UUID;
 
 /**
  * Payload for replacing a client wholesale.
  *
  * <p>Client fields follow the same rules as on create, and nothing is left behind from the previous
- * version: an omitted discount resets to zero. The client's companies are not part of this payload
+ * version: an omitted discount resets to zero and an omitted birthday is cleared. The client's companies are not part of this payload
  * and are left as they are; add or remove them through their own endpoints.
  */
 @Builder
@@ -59,6 +61,11 @@ public record ClientUpdateRequest(
                 + "the client", example = "e9b2c4d1-7f35-4a68-91c0-3d8a5e2f6b47",
                 requiredMode = Schema.RequiredMode.REQUIRED)
         UUID managerId,
+
+        @PastOrPresent(message = "must not be in the future")
+        @Schema(description = "Date of birth of the client; not after today. Optional; omitting it clears any "
+                + "stored before", example = "1985-07-23")
+        LocalDate birthday,
 
         @DecimalMin(value = "0.00", message = "must not be negative")
         @DecimalMax(value = "100.00", message = "must not exceed 100")

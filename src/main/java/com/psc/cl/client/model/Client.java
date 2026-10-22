@@ -16,6 +16,7 @@ import lombok.Setter;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -64,6 +65,10 @@ public class Client {
 
     @Column(name = "manager_id", nullable = false)
     private UUID managerId;
+
+    /** Date of birth; optional. */
+    @Column(name = "birthday")
+    private LocalDate birthday;
 
     /** Also applies to each company that does not carry a discount of its own. */
     @Column(name = "discount_percent", nullable = false, precision = 5, scale = 2)

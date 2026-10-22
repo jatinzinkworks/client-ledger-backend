@@ -3575,10 +3575,10 @@ paths:
       summary: Download the client import template
       description: "Returns the Excel workbook to fill in for POST /clients/import.\
         \ Its Clients sheet takes one row per client: Client Ref, First Name, Last\
-        \ Name, Phone, Email, Manager Email, and Discount %. Its Companies sheet takes\
-        \ one row per company: Client Ref, Company Name, Company Type, Address and\
-        \ Discount %, linked to its client by the Client Ref. An Instructions sheet\
-        \ describes every column with an example. Only clients and their companies\
+        \ Name, Phone, Email, Manager Name, Discount % and Birthday. Its Companies\
+        \ sheet takes one row per company: Client Ref, Company Name, Company Type,\
+        \ Address and Discount %, linked to its client by the Client Ref. An Instructions\
+        \ sheet describes every column with an example. Only clients and their companies\
         \ are imported; services are assigned afterwards as usual."
       operationId: downloadTemplate_1
       responses:
@@ -3871,9 +3871,12 @@ components:
           maxLength: 100
           minLength: 0
         email:
-          type: string
+          type:
+          - string
+          - "null"
           format: email
-          description: "Work email address, unique across the catalog"
+          description: "Work email address, unique across the catalog when given.\
+            \ Optional; without one, the manager is not copied into client emails"
           example: pranay.singhal@pranaysinghal.in
           maxLength: 254
           minLength: 0
@@ -3893,7 +3896,6 @@ components:
           minLength: 0
           pattern: "^[+]?[0-9 ()-]{6,20}$"
       required:
-      - email
       - firstName
       - lastName
       - mobileNumber
@@ -3932,6 +3934,11 @@ components:
           type: string
           description: Full name of the manager who looks after the client
           example: Pranay Singhal
+        birthday:
+          type: string
+          format: date
+          description: Date of birth of the client. Left out when not recorded
+          example: 1985-07-23
         discountPercent:
           type: number
           description: "Discount granted to the client, as a percentage"
@@ -3966,8 +3973,10 @@ components:
           description: Family name of the manager
           example: Singhal
         email:
-          type: string
-          description: Work email address
+          type:
+          - string
+          - "null"
+          description: Work email address; absent when the manager has none
           example: pranay.singhal@pranaysinghal.in
         role:
           type: string
@@ -4047,6 +4056,12 @@ components:
           description: Identifier of the manager from the Manager Catalog who looks
             after the client
           example: e9b2c4d1-7f35-4a68-91c0-3d8a5e2f6b47
+        birthday:
+          type: string
+          format: date
+          description: Date of birth of the client; not after today. Optional; omitting
+            it clears any stored before
+          example: 1985-07-23
         discountPercent:
           type: number
           default: "0.00"
@@ -4095,6 +4110,11 @@ components:
           type: string
           description: Full name of the manager who looks after the client
           example: Pranay Singhal
+        birthday:
+          type: string
+          format: date
+          description: Date of birth of the client. Left out when not recorded
+          example: 1985-07-23
         discountPercent:
           type: number
           description: "Discount granted to the client, as a percentage"
@@ -5005,6 +5025,11 @@ components:
           description: Identifier of the manager from the Manager Catalog who looks
             after the client
           example: e9b2c4d1-7f35-4a68-91c0-3d8a5e2f6b47
+        birthday:
+          type: string
+          format: date
+          description: Date of birth of the client; not after today. Optional
+          example: 1985-07-23
         discountPercent:
           type: number
           default: "0.00"

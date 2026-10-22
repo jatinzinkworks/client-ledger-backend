@@ -55,7 +55,7 @@ class ClientImportServiceImplTest {
     private static final ValidatorFactory VALIDATION = Validation.buildDefaultValidatorFactory();
 
     private static final Cell[] CLIENT_HEADINGS = headings("Client Ref", "First Name", "Last Name", "Phone", "Email",
-            "Manager Email", "Discount %");
+            "Manager Name", "Discount %", "Birthday");
 
     private static final Cell[] COMPANY_HEADINGS = headings("Client Ref", "Company Name", "Company Type", "Address",
             "Discount %", "Opening Balance", "Opening Balance Date");
@@ -90,32 +90,34 @@ class ClientImportServiceImplTest {
         assertThat(template.sheets()).extracting(XlsxReader.Sheet::name)
                 .containsExactly("Clients", "Companies", "Instructions", "Managers");
         XlsxReader.Sheet clients = template.sheet("Clients").orElseThrow();
-        assertThat(IntStream.range(0, 7).mapToObj(column -> clients.cell(1, column)))
-                .containsExactly("Client Ref", "First Name", "Last Name", "Phone", "Email", "Manager Email",
-                        "Discount %");
-        assertThat(clients.cell(1, 7)).isNull();
+        assertThat(IntStream.range(0, 8).mapToObj(column -> clients.cell(1, column)))
+                .containsExactly("Client Ref", "First Name", "Last Name", "Phone", "Email", "Manager Name",
+                        "Discount %", "Birthday");
+        assertThat(clients.cell(1, 8)).isNull();
         assertThat(clients.rows()).containsOnlyKeys(1);
         XlsxReader.Sheet companies = template.sheet("Companies").orElseThrow();
         assertThat(IntStream.range(0, 7).mapToObj(column -> companies.cell(1, column)))
                 .containsExactly("Client Ref", "Company Name", "Company Type", "Address", "Discount %",
                         "Opening Balance", "Opening Balance Date");
         assertThat(template.sheet("Instructions").orElseThrow().rows().values())
-                .anySatisfy(row -> assertThat(row.values()).contains("Manager Email"))
+                .anySatisfy(row -> assertThat(row.values()).contains("Manager Name"))
                 .anySatisfy(row -> assertThat(row.get(3)).contains("PRIVATE_LIMITED"));
     }
 
     @Test
-    @DisplayName("the template offers drop-downs, the managers' emails from a Managers sheet listing them")
+    @DisplayName("the template offers drop-downs, the managers' names from a Managers sheet listing them")
     void offersDropDowns() {
-        when(managerRepository.findAll()).thenReturn(List.of(manager()));
+        Manager withoutEmail = manager(UUID.randomUUID(), "Aarti", "Desai");
+        withoutEmail.setEmail(null);
+        when(managerRepository.findAll()).thenReturn(List.of(manager(), withoutEmail));
 
         byte[] template = importService.template();
 
         Map<String, String> parts = XlsxWorkbookTest.parts(template);
-        // On the Clients sheet, only the manager's email has a set list of values.
+        // On the Clients sheet, only the manager's name has a set list of values.
         assertThat(parts.get("xl/worksheets/sheet1.xml"))
                 .contains("<dataValidations count=\"1\">")
-                .contains("sqref=\"F2:F1048576\"><formula1>'Managers'!$A$2:$A$2</formula1>")
+                .contains("sqref=\"F2:F1048576\"><formula1>'Managers'!$A$2:$A$3</formula1>")
                 .doesNotContain("errorStyle");
         assertThat(parts.get("xl/worksheets/sheet2.xml"))
                 .contains("<dataValidations count=\"2\">")
@@ -124,13 +126,16 @@ class ClientImportServiceImplTest {
                         + "PROPRIETORSHIP,TRUST,HUF,INDIVIDUAL&quot;</formula1>")
                 .doesNotContain("errorStyle");
         XlsxReader.Sheet managers = XlsxReader.read(template).sheet("Managers").orElseThrow();
-        assertThat(managers.rows()).containsOnlyKeys(1, 2);
-        assertThat(managers.cell(2, 0)).isEqualTo("pranay@example.com");
-        assertThat(managers.cell(2, 1)).isEqualTo("Pranay Singhal");
+        // By name, including the manager without an email.
+        assertThat(managers.rows()).containsOnlyKeys(1, 2, 3);
+        assertThat(managers.cell(2, 0)).isEqualTo("Aarti Desai");
+        assertThat(managers.cell(2, 1)).isNull();
+        assertThat(managers.cell(3, 0)).isEqualTo("Pranay Singhal");
+        assertThat(managers.cell(3, 1)).isEqualTo("pranay@example.com");
     }
 
     @Test
-    @DisplayName("without managers in the catalog, the template offers no Manager Email drop-down")
+    @DisplayName("without managers in the catalog, the template offers no Manager Name drop-down")
     void offersNoManagerDropDownWithoutManagers() {
         String clients = XlsxWorkbookTest.parts(importService.template()).get("xl/worksheets/sheet1.xml");
 
@@ -158,8 +163,8 @@ class ClientImportServiceImplTest {
         byte[] workbook = workbook(
                 List.of(
                         row("C1", "Rohan", "Mehta", "+91 98200 12345", "rohan@example.com",
-                                "PRANAY@Example.com", "10"),
-                        row("C2", "Asha", "Kapoor", "9820012345", "asha@example.com", "pranay@example.com",
+                                "  PRANAY   singhal ", "10"),
+                        row("C2", "Asha", "Kapoor", "9820012345", "asha@example.com", "Pranay Singhal",
                                 null)),
                 List.of(
                         row("C1", "Mehta Textiles Pvt Ltd", "Private Limited", "12 MG Road, Bengaluru", "5%"),
@@ -173,7 +178,7 @@ class ClientImportServiceImplTest {
         ClientRequest rohan = captor.getAllValues().get(0);
         assertThat(rohan.firstName()).isEqualTo("Rohan");
         assertThat(rohan.phone()).isEqualTo("+91 98200 12345");
-        // The manager is found by email, ignoring case.
+        // The manager is found by name, ignoring case and spacing.
         assertThat(rohan.managerId()).isEqualTo(MANAGER_ID);
         assertThat(rohan.discountPercent()).isEqualByComparingTo("10");
         assertThat(rohan.companies()).extracting("companyName")
@@ -207,11 +212,11 @@ class ClientImportServiceImplTest {
         when(managerRepository.findAll()).thenReturn(List.of(manager()));
         byte[] workbook = workbook(
                 List.of(
-                        row("C1", "Rohan", "Mehta", "+91 98200 12345", "not-an-email", "nobody@example.com",
+                        row("C1", "Rohan", "Mehta", "+91 98200 12345", "not-an-email", "Nobody Here",
                                 "ten"),
-                        row("C1", "Asha", "Kapoor", "9820012345", "asha@example.com", "pranay@example.com",
+                        row("C1", "Asha", "Kapoor", "9820012345", "asha@example.com", "Pranay Singhal",
                                 null),
-                        row("C3", null, "Shah", "9820012345", "shah@example.com", "pranay@example.com", "150")),
+                        row("C3", null, "Shah", "9820012345", "shah@example.com", "Pranay Singhal", "150")),
                 List.of(
                         row("C1", "Mehta Textiles Pvt Ltd", "Corporation", "12 MG Road, Bengaluru", null),
                         row("C9", "Unknown Holdings", "LLP", "1 Main Road", null),
@@ -226,7 +231,7 @@ class ClientImportServiceImplTest {
                             "Clients!A4", "Clients!B4", "Clients!G4",
                             "Companies!C2", "Companies!A3", "Companies!A4");
                     assertThat(e.getErrors()).extracting(ErrorResponse.FieldError::getMessage).contains(
-                            "Manager Email: no manager in the Manager Catalog has the email nobody@example.com",
+                            "Manager Name: no manager in the Manager Catalog is named Nobody Here",
                             "Discount %: must be a number, such as 10, 12.5 or 10%",
                             "Client Ref: repeats the Client Ref of row 2; give each client its own",
                             "Client Ref: must contain at least one company on the Companies sheet",
@@ -239,13 +244,109 @@ class ClientImportServiceImplTest {
     }
 
     @Test
+    @DisplayName("reads each client's birthday, as dates are typed, and none when left blank")
+    void importsBirthdays() {
+        when(managerRepository.findAll()).thenReturn(List.of(manager()));
+        when(clientService.createClient(any())).thenAnswer(invocation -> created(invocation.getArgument(0)));
+        XlsxWorkbook workbook = new XlsxWorkbook();
+        workbook.addSheet("Clients").addRow(CLIENT_HEADINGS)
+                // A date cell, as Excel stores it.
+                .addRow(Cell.text("C1"), Cell.text("Rohan"), Cell.text("Mehta"), Cell.text("9820012345"),
+                        Cell.text("rohan@example.com"), Cell.text("Pranay Singhal"), Cell.empty(),
+                        Cell.date(LocalDate.of(1985, 7, 23)))
+                // Text, day first.
+                .addRow(row("C2", "Asha", "Kapoor", "9820012345", "asha@example.com", "Pranay Singhal", null,
+                        "01/02/1990"))
+                .addRow(row("C3", "Neel", "Shah", "9820012345", "neel@example.com", "Pranay Singhal", null,
+                        null));
+        workbook.addSheet("Companies").addRow(COMPANY_HEADINGS)
+                .addRow(row("C1", "Mehta Textiles Pvt Ltd", "LLP", "Pune", null))
+                .addRow(row("C2", "Kapoor & Sons", "LLP", "Pune", null))
+                .addRow(row("C3", "Shah Traders", "LLP", "Pune", null));
+
+        importService.importClients(workbook.toBytes());
+
+        ArgumentCaptor<ClientRequest> captor = ArgumentCaptor.forClass(ClientRequest.class);
+        verify(clientService, times(3)).createClient(captor.capture());
+        assertThat(captor.getAllValues()).extracting(ClientRequest::birthday)
+                .containsExactly(LocalDate.of(1985, 7, 23), LocalDate.of(1990, 2, 1), null);
+    }
+
+    @Test
+    @DisplayName("reports a birthday that cannot be read or is after today against its cell")
+    void reportsInvalidBirthdays() {
+        when(managerRepository.findAll()).thenReturn(List.of(manager()));
+        byte[] workbook = workbook(
+                List.of(
+                        row("C1", "Rohan", "Mehta", "9820012345", "rohan@example.com", "Pranay Singhal", null,
+                                "someday"),
+                        row("C2", "Asha", "Kapoor", "9820012345", "asha@example.com", "Pranay Singhal", null,
+                                "17/10/2026")),
+                List.of(
+                        row("C1", "Mehta Textiles Pvt Ltd", "LLP", "Pune", null),
+                        row("C2", "Kapoor & Sons", "LLP", "Pune", null)));
+
+        assertThatThrownBy(() -> importService.importClients(workbook))
+                .isInstanceOfSatisfying(SpreadsheetValidationException.class, e ->
+                        assertThat(e.getErrors()).extracting(ErrorResponse.FieldError::getField,
+                                        ErrorResponse.FieldError::getMessage)
+                                .containsExactly(
+                                        tuple("Clients!H2", "Birthday: must be a date, such as 31/03/2026 or "
+                                                + "2026-03-31"),
+                                        tuple("Clients!H3", "Birthday: must not be after today, 2026-10-16")));
+
+        verify(clientService, never()).createClient(any());
+    }
+
+    @Test
+    @DisplayName("reads a Clients sheet from an older template, without the Birthday column")
+    void importsClientsWithoutBirthdayColumn() {
+        when(managerRepository.findAll()).thenReturn(List.of(manager()));
+        when(clientService.createClient(any())).thenAnswer(invocation -> created(invocation.getArgument(0)));
+        XlsxWorkbook workbook = new XlsxWorkbook();
+        workbook.addSheet("Clients")
+                .addRow(headings("Client Ref", "First Name", "Last Name", "Phone", "Email", "Manager Name",
+                        "Discount %"))
+                .addRow(row("C1", "Rohan", "Mehta", "9820012345", "rohan@example.com", "Pranay Singhal", null));
+        workbook.addSheet("Companies").addRow(COMPANY_HEADINGS)
+                .addRow(row("C1", "Mehta Textiles Pvt Ltd", "LLP", "Pune", null));
+
+        importService.importClients(workbook.toBytes());
+
+        ArgumentCaptor<ClientRequest> captor = ArgumentCaptor.forClass(ClientRequest.class);
+        verify(clientService).createClient(captor.capture());
+        assertThat(captor.getValue().birthday()).isNull();
+    }
+
+    @Test
+    @DisplayName("reports a manager name that more than one manager holds, as it cannot tell them apart")
+    void reportsAmbiguousManagerName() {
+        when(managerRepository.findAll())
+                .thenReturn(List.of(manager(), manager(UUID.randomUUID(), "Pranay", "Singhal")));
+        byte[] workbook = workbook(
+                List.<Cell[]>of(row("C1", "Rohan", "Mehta", "9820012345", "rohan@example.com",
+                        "Pranay Singhal", null)),
+                List.<Cell[]>of(row("C1", "Mehta Textiles Pvt Ltd", "LLP", "Pune", null)));
+
+        assertThatThrownBy(() -> importService.importClients(workbook))
+                .isInstanceOfSatisfying(SpreadsheetValidationException.class, e ->
+                        assertThat(e.getErrors()).extracting(ErrorResponse.FieldError::getField,
+                                        ErrorResponse.FieldError::getMessage)
+                                .contains(tuple("Clients!F2", "Manager Name: 2 managers in the Manager Catalog "
+                                        + "are named Pranay Singhal; rename one of them in the catalog, or add this "
+                                        + "client without the import")));
+
+        verify(clientService, never()).createClient(any());
+    }
+
+    @Test
     @DisplayName("reads each company's opening balance and its date, as amounts and dates are typed")
     void importsOpeningBalances() {
         when(managerRepository.findAll()).thenReturn(List.of(manager()));
         when(clientService.createClient(any())).thenAnswer(invocation -> created(invocation.getArgument(0)));
         XlsxWorkbook workbook = new XlsxWorkbook();
         workbook.addSheet("Clients").addRow(CLIENT_HEADINGS)
-                .addRow(row("C1", "Rohan", "Mehta", "9820012345", "rohan@example.com", "pranay@example.com",
+                .addRow(row("C1", "Rohan", "Mehta", "9820012345", "rohan@example.com", "Pranay Singhal",
                         null));
         workbook.addSheet("Companies").addRow(COMPANY_HEADINGS)
                 // A number cell and a date cell, as Excel stores them.
@@ -292,7 +393,7 @@ class ClientImportServiceImplTest {
         byte[] workbook = workbook(
                 // One row is itself an array, so List.of needs telling it is the only element, not the elements.
                 List.<Cell[]>of(row("C1", "Rohan", "Mehta", "9820012345", "rohan@example.com",
-                        "pranay@example.com", null)),
+                        "Pranay Singhal", null)),
                 List.of(
                         row("C1", "Mehta Textiles Pvt Ltd", "LLP", "Pune", null, "lots", "31/02/2026"),
                         row("C1", "Rohan Mehta HUF", "HUF", "Pune", null, "1000", "17/10/2026"),
@@ -325,7 +426,7 @@ class ClientImportServiceImplTest {
         when(clientService.createClient(any())).thenAnswer(invocation -> created(invocation.getArgument(0)));
         XlsxWorkbook workbook = new XlsxWorkbook();
         workbook.addSheet("Clients").addRow(CLIENT_HEADINGS)
-                .addRow(row("C1", "Rohan", "Mehta", "9820012345", "rohan@example.com", "pranay@example.com",
+                .addRow(row("C1", "Rohan", "Mehta", "9820012345", "rohan@example.com", "Pranay Singhal",
                         null));
         workbook.addSheet("Companies")
                 .addRow(headings("Client Ref", "Company Name", "Company Type", "Address", "Discount %"))
@@ -341,7 +442,7 @@ class ClientImportServiceImplTest {
     void refusesWrongHeadings() {
         XlsxWorkbook workbook = new XlsxWorkbook();
         workbook.addSheet("Clients").addRow(headings("Ref", "First Name", "Surname", "Phone", "Email",
-                "Manager Email", "Discount %"));
+                "Manager Name", "Discount %"));
         workbook.addSheet("Companies").addRow(COMPANY_HEADINGS);
 
         assertThatThrownBy(() -> importService.importClients(workbook.toBytes()))
@@ -368,7 +469,7 @@ class ClientImportServiceImplTest {
     void refusesTooManyClients() {
         List<Cell[]> clients = IntStream.rangeClosed(1, ClientImportServiceImpl.MAX_CLIENTS + 1)
                 .mapToObj(n -> row("C" + n, "Client", "Number " + n, "9820012345", "c" + n + "@example.com",
-                        "pranay@example.com", null))
+                        "Pranay Singhal", null))
                 .toList();
 
         assertThatThrownBy(() -> importService.importClients(workbook(clients, List.of())))
@@ -396,11 +497,15 @@ class ClientImportServiceImplTest {
     }
 
     private static Manager manager() {
+        return manager(MANAGER_ID, "Pranay", "Singhal");
+    }
+
+    private static Manager manager(UUID id, String firstName, String lastName) {
         Manager manager = new Manager();
-        manager.setId(MANAGER_ID);
-        manager.setFirstName("Pranay");
-        manager.setLastName("Singhal");
-        manager.setEmail("pranay@example.com");
+        manager.setId(id);
+        manager.setFirstName(firstName);
+        manager.setLastName(lastName);
+        manager.setEmail(firstName.toLowerCase() + "@example.com");
         return manager;
     }
 

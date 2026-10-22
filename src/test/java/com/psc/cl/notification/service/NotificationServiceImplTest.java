@@ -3,6 +3,7 @@ package com.psc.cl.notification.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -32,9 +33,12 @@ import com.psc.cl.notification.dto.LedgerSummaryEmailResponse;
 import com.psc.cl.notification.dto.PaymentReminderResponse;
 import com.psc.cl.notification.exception.EmailDeliveryException;
 import jakarta.mail.Address;
+import jakarta.mail.BodyPart;
 import jakarta.mail.Message;
 import jakarta.mail.MessagingException;
+import jakarta.mail.Multipart;
 import jakarta.mail.Session;
+import jakarta.mail.internet.MimeBodyPart;
 import jakarta.mail.internet.MimeMessage;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -46,11 +50,14 @@ import org.springframework.data.domain.Sort;
 import org.springframework.mail.MailSendException;
 import org.springframework.mail.javamail.JavaMailSender;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -119,6 +126,10 @@ class NotificationServiceImplTest {
         assertThat(message.getSubject())
                 .isEqualTo("Sharma & Associates: Your ledger summary for Mehta Textiles Pvt Ltd, FY 2026-27");
 
+        // The firm's name heads the statement's pages.
+        verify(ledgerService).statementForCompany(CLIENT_ID, COMPANY_ID, YEAR, "Sharma & Associates");
+        // The logo the HTML body shows goes with it, inline.
+        assertThat(inlineContentIds(message)).containsExactly("<" + LedgerSummaryEmail.LOGO_CONTENT_ID + ">");
         // The company's opening balance is noted whatever its year.
         verify(ledgerService).openingBalances(Set.of(COMPANY_ID));
         assertThat(response.getFinancialYear()).isEqualTo("2026-27");
@@ -142,6 +153,28 @@ class NotificationServiceImplTest {
 
         ArgumentCaptor<MimeMessage> sent = ArgumentCaptor.forClass(MimeMessage.class);
         verify(mailSender).send(sent.capture());
+        assertThat(sent.getValue().getRecipients(Message.RecipientType.CC)).isNull();
+        assertThat(response.getCc()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("sends without a copy when the manager has no email")
+    void sendsWithoutManagerEmail() throws MessagingException {
+        stubLedger();
+        Manager manager = manager();
+        manager.setEmail(null);
+        when(clientRepository.findById(CLIENT_ID)).thenReturn(Optional.of(client()));
+        when(managerRepository.findById(MANAGER_ID)).thenReturn(Optional.of(manager));
+        when(firmDetailsRepository.findFirstByOrderByCreatedAtAsc()).thenReturn(Optional.empty());
+        when(mailSender.createMimeMessage()).thenReturn(new MimeMessage((Session) null));
+
+        LedgerSummaryEmailResponse response = service("ledger@sharma.example", "Accounts")
+                .sendLedgerSummary(CLIENT_ID, COMPANY_ID);
+
+        ArgumentCaptor<MimeMessage> sent = ArgumentCaptor.forClass(MimeMessage.class);
+        verify(mailSender).send(sent.capture());
+        assertThat(addresses(sent.getValue().getRecipients(Message.RecipientType.TO)))
+                .containsExactly("rohan@example.com");
         assertThat(sent.getValue().getRecipients(Message.RecipientType.CC)).isNull();
         assertThat(response.getCc()).isEmpty();
     }
@@ -211,7 +244,7 @@ class NotificationServiceImplTest {
                         new BigDecimal("24235.00"), new BigDecimal("0.00"))));
         when(clientCompanyRepository.findByClientIdOrderByCompanyNameAsc(CLIENT_ID)).thenReturn(List.of(
                 company(COMPANY_ID, "Mehta Textiles Pvt Ltd"), company(otherCompanyId, "Rohan Mehta HUF")));
-        when(ledgerService.statementForClient(CLIENT_ID, YEAR))
+        when(ledgerService.statementForClient(eq(CLIENT_ID), eq(YEAR), any()))
                 .thenReturn(new LedgerExport("Rohan_Mehta_Ledger_FY2026-27.pdf", new byte[] {1, 2, 3}));
         when(mailSender.createMimeMessage()).thenReturn(new MimeMessage((Session) null));
 
@@ -269,7 +302,7 @@ class NotificationServiceImplTest {
         when(firmDetailsRepository.findFirstByOrderByCreatedAtAsc()).thenReturn(Optional.empty());
         when(ledgerService.companyBalances(CLIENT_ID, YEAR)).thenReturn(Map.of());
         when(clientCompanyRepository.findByClientIdOrderByCompanyNameAsc(CLIENT_ID)).thenReturn(List.of());
-        when(ledgerService.statementForClient(CLIENT_ID, YEAR))
+        when(ledgerService.statementForClient(eq(CLIENT_ID), eq(YEAR), any()))
                 .thenReturn(new LedgerExport("Rohan_Mehta_Ledger_FY2026-27.pdf", new byte[] {1}));
         when(mailSender.createMimeMessage()).thenReturn(new MimeMessage((Session) null));
 
@@ -316,7 +349,7 @@ class NotificationServiceImplTest {
         when(firmDetailsRepository.findFirstByOrderByCreatedAtAsc()).thenReturn(Optional.empty());
         when(ledgerService.companyBalances(CLIENT_ID, YEAR)).thenReturn(Map.of());
         when(clientCompanyRepository.findByClientIdOrderByCompanyNameAsc(CLIENT_ID)).thenReturn(List.of());
-        when(ledgerService.statementForClient(CLIENT_ID, YEAR))
+        when(ledgerService.statementForClient(eq(CLIENT_ID), eq(YEAR), any()))
                 .thenReturn(new LedgerExport("Rohan_Mehta_Ledger_FY2026-27.pdf", new byte[] {1}));
         when(mailSender.createMimeMessage()).thenReturn(new MimeMessage((Session) null));
 
@@ -330,7 +363,7 @@ class NotificationServiceImplTest {
                 .containsExactly("pranay@sharma.example");
         assertThat(sent.getValue().getSubject()).isEqualTo("Payment reminder: \u20B930,000.00 pending");
         verify(ledgerService, never()).summarizeClient(settled.getId(), YEAR);
-        verify(ledgerService, never()).statementForClient(settled.getId(), YEAR);
+        verify(ledgerService, never()).statementForClient(eq(settled.getId()), eq(YEAR), any());
 
         assertThat(response.getFinancialYear()).isEqualTo("2026-27");
         assertThat(response.getClientCount()).isEqualTo(2);
@@ -412,12 +445,36 @@ class NotificationServiceImplTest {
                         .pending(new BigDecimal("24235.00"))
                         .totalDiscount(new BigDecimal("1750.00"))
                         .build());
-        when(ledgerService.statementForCompany(CLIENT_ID, COMPANY_ID, YEAR))
+        when(ledgerService.statementForCompany(eq(CLIENT_ID), eq(COMPANY_ID), eq(YEAR), any()))
                 .thenReturn(new LedgerExport(FILE_NAME, new byte[] {1, 2, 3}));
     }
 
     private static List<String> addresses(Address[] addresses) {
         return Arrays.stream(addresses).map(Address::toString).toList();
+    }
+
+    /** The content id of every part of a message that has one, such as an inline image, at any depth. */
+    private static List<String> inlineContentIds(MimeMessage message) throws MessagingException {
+        List<String> ids = new ArrayList<>();
+        try {
+            collectContentIds(message.getContent(), ids);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return ids;
+    }
+
+    private static void collectContentIds(Object content, List<String> ids) throws MessagingException, IOException {
+        if (!(content instanceof Multipart multipart)) {
+            return;
+        }
+        for (int i = 0; i < multipart.getCount(); i++) {
+            BodyPart part = multipart.getBodyPart(i);
+            if (part instanceof MimeBodyPart mime && mime.getContentID() != null) {
+                ids.add(mime.getContentID());
+            }
+            collectContentIds(part.getContent(), ids);
+        }
     }
 
     private static Client client() {

@@ -4,12 +4,14 @@ import com.lowagie.text.Document;
 import com.lowagie.text.DocumentException;
 import com.lowagie.text.Element;
 import com.lowagie.text.Font;
+import com.lowagie.text.Image;
 import com.lowagie.text.PageSize;
 import com.lowagie.text.Paragraph;
 import com.lowagie.text.Phrase;
 import com.lowagie.text.Rectangle;
 import com.lowagie.text.pdf.BaseFont;
 import com.lowagie.text.pdf.ColumnText;
+import com.lowagie.text.pdf.PdfContentByte;
 import com.lowagie.text.pdf.PdfPCell;
 import com.lowagie.text.pdf.PdfPTable;
 import com.lowagie.text.pdf.PdfPageEventHelper;
@@ -20,6 +22,7 @@ import com.psc.cl.ledger.dto.LastPayment;
 import com.psc.cl.ledger.dto.OpeningBalance;
 import com.psc.cl.ledger.model.LedgerEntry;
 import com.psc.cl.ledger.model.LedgerEntryType;
+import com.psc.cl.service.FirmLogo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,6 +55,8 @@ import java.util.stream.Collectors;
  * when the company started in credit. Above its details, each company also shows its opening balance
  * and the date it stood at, whatever the year it falls in, or None; only one dated in the year counts
  * in the year's figures.
+ *
+ * <p>Every page is headed by the firm's logo ({@link FirmLogo}) and name, each left out when missing.
  *
  * <p>Amounts carry the rupee sign when the fonts {@value #REGULAR_FONT} and {@value #BOLD_FONT} are on
  * the classpath, and are embedded. Without them the built-in Helvetica is used, which has no rupee
@@ -100,11 +105,13 @@ final class LedgerStatementPdf {
      * @param companyNames the name of each of the client's companies, by identifier
      * @param openings     the opening balance of each company that has one, by identifier
      * @param generatedOn  the firm's calendar day the statement was made
+     * @param firmName     the firm's name, shown with its logo at the top of every page; null when none
+     *                     is saved
      * @return the content of the .pdf file
      */
     static byte[] forClient(ClientLedgerSummaryResponse summary, List<LedgerEntry> entries,
                             Map<UUID, String> companyNames, Map<UUID, OpeningBalance> openings,
-                            LocalDate generatedOn) {
+                            LocalDate generatedOn, String firmName) {
         Map<UUID, List<LedgerEntry>> entriesByCompany = entries.stream()
                 .collect(Collectors.groupingBy(LedgerEntry::getCompanyId));
         List<Section> sections = companyNames.entrySet().stream()
@@ -116,7 +123,7 @@ final class LedgerStatementPdf {
         Figures figures = new Figures(summary.getFinancialYear(), summary.getFromDate(), summary.getToDate(),
                 summary.getTotalBilled(), orZero(summary.getOpeningBalance()), summary.getTotalPaymentReceived(),
                 summary.getPending(), summary.getLastPayment());
-        return write(summary.getClientName(), null, figures, sections, generatedOn);
+        return write(summary.getClientName(), null, figures, sections, generatedOn, firmName);
     }
 
     /**
@@ -128,29 +135,38 @@ final class LedgerStatementPdf {
      * @param entries     every entry of the year, in the order to list them
      * @param opening     the company's opening balance, or null when it has none
      * @param generatedOn the firm's calendar day the statement was made
+     * @param firmName    the firm's name, shown with its logo at the top of every page; null when none is
+     *                    saved
      * @return the content of the .pdf file
      */
     static byte[] forCompany(String clientName, CompanyLedgerSummaryResponse summary, List<LedgerEntry> entries,
-                             OpeningBalance opening, LocalDate generatedOn) {
+                             OpeningBalance opening, LocalDate generatedOn, String firmName) {
         Figures figures = new Figures(summary.getFinancialYear(), summary.getFromDate(), summary.getToDate(),
                 summary.getTotalBilled(), orZero(summary.getOpeningBalance()), summary.getTotalPaymentReceived(),
                 summary.getPending(), summary.getLastPayment());
         return write(clientName, summary.getCompanyName(), figures,
-                List.of(new Section(summary.getCompanyName(), opening, entries)), generatedOn);
+                List.of(new Section(summary.getCompanyName(), opening, entries)), generatedOn, firmName);
     }
 
     /**
      * @param companyName the company a single company's statement is for; null for a client's, which
      *                    lists a line per company in its summary and gives each company a page
+     * @param firmName    the firm's name for the page header; null when none is saved
      */
     private static byte[] write(String clientName, String companyName, Figures figures, List<Section> sections,
-                                LocalDate generatedOn) {
+                                LocalDate generatedOn, String firmName) {
         Fonts fonts = Fonts.load();
         boolean forClient = companyName == null;
-        Document document = new Document(PageSize.A4.rotate(), 36, 36, 36, 48);
+        Header header = Header.of(fonts, firmName);
+        // A page header needs room above the content; without one, the page starts at the usual margin.
+        float topMargin = header == null ? 36 : 36 + Header.HEIGHT + Header.GAP;
+        Document document = new Document(PageSize.A4.rotate(), 36, 36, topMargin, 48);
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try {
             PdfWriter writer = PdfWriter.getInstance(document, out);
+            if (header != null) {
+                writer.setPageEvent(header);
+            }
             writer.setPageEvent(new Footer(fonts, "Ledger statement for " + clientName + ", FY "
                     + figures.financialYear()));
             document.open();
@@ -444,6 +460,92 @@ final class LedgerStatementPdf {
     /** Summaries always carry an opening balance; zero stands in for one built without it. */
     private static BigDecimal orZero(BigDecimal amount) {
         return amount == null ? ZERO : amount;
+    }
+
+    /**
+     * The firm's logo and name at the top of every page, above a rule: the logo on the left, the name
+     * beside it. Either is left out when missing.
+     */
+    private static final class Header extends PdfPageEventHelper {
+
+        /** Height of the header, which the logo is scaled to. */
+        static final float HEIGHT = 40;
+
+        /** Space between the rule under the header and the content. */
+        static final float GAP = 14;
+
+        /** Widest the logo is drawn. */
+        private static final float LOGO_MAX_WIDTH = 120;
+
+        private static final float LOGO_TO_NAME = 10;
+
+        private final Image logo;
+
+        private final Phrase firmName;
+
+        private Header(Image logo, Phrase firmName) {
+            this.logo = logo;
+            this.firmName = firmName;
+        }
+
+        /** The header of the firm's logo and name; null when there is neither. */
+        static Header of(Fonts fonts, String firmName) {
+            Image logo = logo();
+            boolean named = firmName != null && !firmName.isBlank();
+            if (logo == null && !named) {
+                return null;
+            }
+            return new Header(logo, named ? new Phrase(firmName.strip(), fonts.bold(16, BRAND)) : null);
+        }
+
+        /** The logo scaled to the header, or null when it is missing or unreadable. */
+        private static Image logo() {
+            byte[] png = FirmLogo.png().orElse(null);
+            if (png == null) {
+                return null;
+            }
+            try {
+                Image logo = Image.getInstance(png);
+                logo.scaleToFit(LOGO_MAX_WIDTH, HEIGHT);
+                return logo;
+            } catch (IOException | DocumentException e) {
+                log.error("Logo {} could not be read as an image; writing the statement without it",
+                        FirmLogo.RESOURCE, e);
+                return null;
+            }
+        }
+
+        @Override
+        public void onEndPage(PdfWriter writer, Document document) {
+            PdfContentByte canvas = writer.getDirectContent();
+            // The header sits in the top margin: its top at the page margin, the rule under it.
+            float top = document.getPageSize().getTop() - 36;
+            float bottom = top - HEIGHT;
+            float x = document.left();
+            if (logo != null) {
+                logo.setAbsolutePosition(x, bottom + (HEIGHT - logo.getScaledHeight()) / 2);
+                try {
+                    canvas.addImage(logo);
+                } catch (DocumentException e) {
+                    throw new IllegalStateException("The logo could not be added to the ledger statement", e);
+                }
+                x += logo.getScaledWidth() + LOGO_TO_NAME;
+            }
+            if (firmName != null) {
+                // Roughly centred on the header's height: the baseline sits below the middle by a third of
+                // the text's size.
+                float baseline = bottom + HEIGHT / 2 - firmName.getFont().getSize() / 3;
+                ColumnText.showTextAligned(canvas, Element.ALIGN_LEFT, firmName, x, baseline, 0);
+            }
+            float rule = bottom - 4;
+            canvas.saveState();
+            canvas.setColorStroke(RULE);
+            canvas.setLineWidth(1);
+            canvas.moveTo(document.left(), rule);
+            canvas.lineTo(document.right(), rule);
+            canvas.stroke();
+            canvas.restoreState();
+        }
     }
 
     /** Names the statement and numbers the page at the foot of every page. */

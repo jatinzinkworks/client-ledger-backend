@@ -120,7 +120,7 @@ class ClientImportControllerTest {
                 "1 cell(s) of the workbook are invalid, so nothing was imported",
                 List.of(ErrorResponse.FieldError.builder()
                         .field("Clients!F2")
-                        .message("Manager Email: no manager in the Manager Catalog has the email x@example.com")
+                        .message("Manager Name: no manager in the Manager Catalog is named Nobody Here")
                         .build())));
 
         mockMvc.perform(multipart(IMPORT_URL).file(new MockMultipartFile("file", "clients.xlsx",

@@ -11,6 +11,7 @@ import lombok.Value;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -51,6 +52,9 @@ public class ClientResponse {
     @Schema(description = "Full name of the manager who looks after the client",
             example = "Pranay Singhal")
     String managerName;
+
+    @Schema(description = "Date of birth of the client. Left out when not recorded", example = "1985-07-23")
+    LocalDate birthday;
 
     @Schema(description = "Discount granted to the client, as a percentage", example = "10.00")
     BigDecimal discountPercent;
@@ -106,6 +110,7 @@ public class ClientResponse {
                 .email(entity.getEmail())
                 .managerId(entity.getManagerId())
                 .managerName(managerName(manager))
+                .birthday(entity.getBirthday())
                 .discountPercent(entity.getDiscountPercent())
                 .companies(companiesOf(entity, openings))
                 .createdAt(entity.getCreatedAt())
