@@ -259,7 +259,9 @@ class LedgerSummaryEmailTest {
 
         assertThat(email.subject()).isEqualTo("Sharma & Associates: Payment reminder: \u20B924,235.00 pending");
         assertThat(email.html())
-                .contains("Payment reminder &middot; FY 2026-27")
+                // The band under the letterhead names the email, then the year.
+                .contains("<div style=\"font-size:20px;font-weight:bold;\">Payment reminder</div>")
+                .contains(">FY 2026-27</div>")
                 .contains("This is a friendly reminder that <strong>\u20B924,235.00</strong> is pending on your "
                         + "account as of 14 Oct 2026")
                 .contains("Total billed")
@@ -267,7 +269,7 @@ class LedgerSummaryEmailTest {
                 .doesNotContain("Balance from earlier years")
                 .contains("By company")
                 .contains("Please arrange payment of the pending amount")
-                .doesNotContain("Ledger summary &middot;");
+                .doesNotContain("Ledger summary");
         assertThat(email.text())
                 .contains("This is a friendly reminder that \u20B924,235.00 is pending on your account as of "
                         + "14 Oct 2026. The details for the financial year 2026-27 (1 Apr 2026 to 31 Mar 2027) "

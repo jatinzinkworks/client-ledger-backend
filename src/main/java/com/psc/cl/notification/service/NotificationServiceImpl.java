@@ -89,7 +89,7 @@ public class NotificationServiceImpl implements NotificationService {
         Client client = requireClient(clientId);
         List<String> cc = managerEmail(client);
         FirmDetails firm = firm();
-        LedgerExport ledger = ledgerService.statementForCompany(clientId, companyId, year, firmName(firm));
+        LedgerExport ledger = companyStatement(clientId, companyId, year, firm);
 
         OpeningBalance opening = ledgerService.openingBalances(Set.of(companyId)).get(companyId);
 
@@ -107,6 +107,50 @@ public class NotificationServiceImpl implements NotificationService {
         // Summarising first checks the client exists, so a bad path is a 404 before anything else.
         ClientLedgerSummaryResponse summary = ledgerService.summarizeClient(clientId, year);
         return sendClientEmail(clientId, summary, year, null);
+    }
+
+    @Override
+    public LedgerExport clientLedgerSummaryPdf(UUID clientId, FinancialYear financialYear) {
+        FirmDetails firm = firm();
+        if (financialYear == null) {
+            LedgerExport statement = ledgerService.statementForClientAllYears(clientId, firmName(firm));
+            log.info("Wrote the ledger summary PDF of client {} across all years for download", clientId);
+            return statement;
+        }
+        LedgerExport statement = clientStatement(clientId, financialYear, firm);
+        log.info("Wrote the FY {} ledger summary PDF of client {} for download", financialYear.label(), clientId);
+        return statement;
+    }
+
+    /**
+     * The client's ledger statement for the year across all of their companies, headed by the firm's
+     * logo and name: what a client-wide email attaches and the download returns, so both are the same.
+     */
+    private LedgerExport clientStatement(UUID clientId, FinancialYear year, FirmDetails firm) {
+        return ledgerService.statementForClient(clientId, year, firmName(firm));
+    }
+
+    @Override
+    public LedgerExport companyLedgerSummaryPdf(UUID clientId, UUID companyId, FinancialYear financialYear) {
+        FirmDetails firm = firm();
+        if (financialYear == null) {
+            LedgerExport statement = ledgerService.statementForCompanyAllYears(clientId, companyId, firmName(firm));
+            log.info("Wrote the ledger summary PDF of company {} of client {} across all years for download",
+                    companyId, clientId);
+            return statement;
+        }
+        LedgerExport statement = companyStatement(clientId, companyId, financialYear, firm);
+        log.info("Wrote the FY {} ledger summary PDF of company {} of client {} for download", financialYear.label(),
+                companyId, clientId);
+        return statement;
+    }
+
+    /**
+     * One company's ledger statement for the year, headed by the firm's logo and name: what a company's
+     * email attaches and the download returns, so both are the same.
+     */
+    private LedgerExport companyStatement(UUID clientId, UUID companyId, FinancialYear year, FirmDetails firm) {
+        return ledgerService.statementForCompany(clientId, companyId, year, firmName(firm));
     }
 
     @Override
@@ -177,7 +221,7 @@ public class NotificationServiceImpl implements NotificationService {
         List<String> cc = managerEmail(client);
         FirmDetails firm = firm();
         List<LedgerSummaryEmail.CompanyLine> companies = companyLines(clientId, year);
-        LedgerExport ledger = ledgerService.statementForClient(clientId, year, firmName(firm));
+        LedgerExport ledger = clientStatement(clientId, year, firm);
 
         LedgerSummaryEmail email = paymentReminder
                 ? LedgerSummaryEmail.paymentReminderForClient(summary, reminderPending, companies,

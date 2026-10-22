@@ -278,6 +278,21 @@ public interface LedgerService {
     LedgerExport statementForClient(UUID clientId, FinancialYear financialYear, String firmName);
 
     /**
+     * Writes a client's ledger statement across every financial year they have been a client as one
+     * PDF, laid out as {@link #statementForClient} lays out one year. It spans from the year the client
+     * was added, or of their earliest entry if earlier, to the current year, or that of their latest
+     * entry if later: the summary covers the whole span, so what is pending is what the client owes
+     * overall, and each company lists every entry since it was taken on, with its running balance.
+     *
+     * @param clientId the client
+     * @param firmName the firm's name for the top of every page; null when none is saved
+     * @return the .pdf file, named after the client, such as {@code Rohan_Mehta_Ledger_All_Years.pdf}
+     * @throws com.psc.cl.client.exception.ClientNotFoundException
+     *         when no client carries this identifier
+     */
+    LedgerExport statementForClientAllYears(UUID clientId, String firmName);
+
+    /**
      * Writes the ledger statement of one company of a client for one financial year as a PDF, to send
      * to the client: the figures of {@link #summarizeCompany}, then the company's entries of the year,
      * laid out as in {@link #statementForClient}.
@@ -290,6 +305,23 @@ public interface LedgerService {
      *         {@code Mehta_Textiles_Pvt_Ltd_Ledger_FY2026-27.pdf}
      */
     LedgerExport statementForCompany(UUID clientId, UUID companyId, FinancialYear financialYear, String firmName);
+
+    /**
+     * Writes the ledger statement of one company of a client across every financial year as one PDF,
+     * laid out as {@link #statementForCompany} lays out one year. It spans the same years as
+     * {@link #statementForClientAllYears}, starting earlier only when the company's own entries do: the
+     * summary covers the whole span, so what is pending is what the company owes overall, and its
+     * details list every entry since it was taken on, with a running balance.
+     *
+     * @param clientId  the client
+     * @param companyId the company of the client
+     * @param firmName  the firm's name for the top of every page; null when none is saved
+     * @return the .pdf file, named after the company, such as
+     *         {@code Mehta_Textiles_Pvt_Ltd_Ledger_All_Years.pdf}
+     * @throws com.psc.cl.client.exception.ClientNotFoundException  when no client carries this identifier
+     * @throws com.psc.cl.client.exception.CompanyNotFoundException when the client holds no such company
+     */
+    LedgerExport statementForCompanyAllYears(UUID clientId, UUID companyId, String firmName);
 
     /**
      * What each of the given clients still owes: billed less received across all of their companies

@@ -582,6 +582,73 @@ public class LedgerServiceImpl implements LedgerService {
 
     @Override
     @Transactional(readOnly = true)
+    public LedgerExport statementForClientAllYears(UUID clientId, String firmName) {
+        Client client = clientRepository.findById(clientId).orElseThrow(() -> new ClientNotFoundException(clientId));
+        Map<UUID, String> companyNames = client.getCompanies().stream()
+                .collect(Collectors.toMap(ClientCompany::getId, ClientCompany::getCompanyName));
+
+        FinancialYear span = allYears(client,
+                ledgerEntryRepository.totalClientEntries(clientId, EARLIEST_DATE, LATEST_DATE));
+
+        ClientLedgerSummaryResponse summary = summarizeClient(clientId, span);
+        List<LedgerEntry> entries = ledgerEntryRepository.findAllByClientIdAndDueDateBetween(clientId,
+                span.firstDay(), span.lastDay(), EXPORT_ORDER);
+        Map<UUID, OpeningBalance> openings = openingBalances(companyNames.keySet());
+        byte[] content = LedgerStatementPdf.forClientAllYears(summary, entries, companyNames, openings,
+                LocalDate.now(clock), firmName);
+
+        log.info("Wrote a statement of {} ledger entries of client {} across FY {}", entries.size(), clientId,
+                span.label());
+        return new LedgerExport(allYearsFileName(fullName(client), "Client"), content);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public LedgerExport statementForCompanyAllYears(UUID clientId, UUID companyId, String firmName) {
+        ClientCompany company = requireCompany(clientId, companyId);
+
+        // The client's span, starting earlier only when the company's own entries do.
+        FinancialYear span = allYears(company.getClient(),
+                ledgerEntryRepository.totalCompanyEntries(companyId, EARLIEST_DATE, LATEST_DATE));
+
+        CompanyLedgerSummaryResponse summary = summarize(clientId, company, span);
+        List<LedgerEntry> entries = ledgerEntryRepository.findAllByCompanyIdAndDueDateBetween(companyId,
+                span.firstDay(), span.lastDay(), EXPORT_ORDER);
+        OpeningBalance opening = openingBalances(Set.of(companyId)).get(companyId);
+        byte[] content = LedgerStatementPdf.forCompanyAllYears(fullName(company.getClient()), summary, entries,
+                opening, LocalDate.now(clock), firmName);
+
+        log.info("Wrote a statement of {} ledger entries of company {} of client {} across FY {}", entries.size(),
+                companyId, clientId, span.label());
+        return new LedgerExport(allYearsFileName(company.getCompanyName(), "Company"), content);
+    }
+
+    /**
+     * Every financial year of a client's ledger as one period, so summaries and entries are read over
+     * its dates just as over a year's: the span the ledger status lists, from the year the client was
+     * added, or of the earliest entry if earlier, to the current year, or that of the latest entry if
+     * later. Its label names the first and last years, such as {@code 2024-25 to 2026-27}.
+     *
+     * @param rows the ledger's totals over every date, by financial year
+     */
+    private FinancialYear allYears(Client client, List<LedgerTotalsRow> rows) {
+        LocalDate today = LocalDate.now(clock);
+        List<FinancialYear> years = yearsLatestFirst(firstYear(client, rows, today),
+                lastYear(rows, FinancialYears.containing(today)));
+        FinancialYear first = years.getLast();
+        FinancialYear last = years.getFirst();
+        return new FinancialYear(years.size() == 1 ? first.label() : first.label() + " to " + last.label(),
+                first.firstDay(), last.lastDay());
+    }
+
+    /** Names a statement across every year, such as {@code Rohan_Mehta_Ledger_All_Years.pdf}. */
+    static String allYearsFileName(String name, String fallback) {
+        String safe = UNSAFE_FILE_NAME.matcher(name).replaceAll("_").replaceAll("^_|_$", "");
+        return (safe.isEmpty() ? fallback : safe) + "_Ledger_All_Years.pdf";
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public LedgerExport statementForCompany(UUID clientId, UUID companyId, FinancialYear financialYear,
                                             String firmName) {
         ClientCompany company = requireCompany(clientId, companyId);

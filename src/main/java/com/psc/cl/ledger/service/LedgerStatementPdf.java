@@ -112,6 +112,34 @@ final class LedgerStatementPdf {
     static byte[] forClient(ClientLedgerSummaryResponse summary, List<LedgerEntry> entries,
                             Map<UUID, String> companyNames, Map<UUID, OpeningBalance> openings,
                             LocalDate generatedOn, String firmName) {
+        return clientStatement(summary, entries, companyNames, openings, generatedOn, firmName, false);
+    }
+
+    /**
+     * Writes the statement of a client across all of their companies and every financial year they
+     * have been a client, laid out as {@link #forClient} lays out one year: the summary covers the
+     * whole span, each company lists every entry since it was taken on with its running balance, and
+     * every opening balance counts.
+     *
+     * @param summary      the client's summary over the whole span, whose financial year names its first
+     *                     and last years, such as {@code 2024-25 to 2026-27}
+     * @param entries      every entry of the span, in the order to list them
+     * @param companyNames the name of each of the client's companies, by identifier
+     * @param openings     the opening balance of each company that has one, by identifier
+     * @param generatedOn  the firm's calendar day the statement was made
+     * @param firmName     the firm's name, shown with its logo at the top of every page; null when none
+     *                     is saved
+     * @return the content of the .pdf file
+     */
+    static byte[] forClientAllYears(ClientLedgerSummaryResponse summary, List<LedgerEntry> entries,
+                                    Map<UUID, String> companyNames, Map<UUID, OpeningBalance> openings,
+                                    LocalDate generatedOn, String firmName) {
+        return clientStatement(summary, entries, companyNames, openings, generatedOn, firmName, true);
+    }
+
+    private static byte[] clientStatement(ClientLedgerSummaryResponse summary, List<LedgerEntry> entries,
+                                          Map<UUID, String> companyNames, Map<UUID, OpeningBalance> openings,
+                                          LocalDate generatedOn, String firmName, boolean allYears) {
         Map<UUID, List<LedgerEntry>> entriesByCompany = entries.stream()
                 .collect(Collectors.groupingBy(LedgerEntry::getCompanyId));
         List<Section> sections = companyNames.entrySet().stream()
@@ -123,7 +151,7 @@ final class LedgerStatementPdf {
         Figures figures = new Figures(summary.getFinancialYear(), summary.getFromDate(), summary.getToDate(),
                 summary.getTotalBilled(), orZero(summary.getOpeningBalance()), summary.getTotalPaymentReceived(),
                 summary.getPending(), summary.getLastPayment());
-        return write(summary.getClientName(), null, figures, sections, generatedOn, firmName);
+        return write(summary.getClientName(), null, figures, sections, generatedOn, firmName, allYears);
     }
 
     /**
@@ -141,20 +169,49 @@ final class LedgerStatementPdf {
      */
     static byte[] forCompany(String clientName, CompanyLedgerSummaryResponse summary, List<LedgerEntry> entries,
                              OpeningBalance opening, LocalDate generatedOn, String firmName) {
+        return companyStatement(clientName, summary, entries, opening, generatedOn, firmName, false);
+    }
+
+    /**
+     * Writes the statement of one company of a client across every financial year, laid out as
+     * {@link #forCompany} lays out one year: the summary covers the whole span, and the details list
+     * every entry since the company was taken on, with its running balance.
+     *
+     * @param clientName  the name of the client the company belongs to
+     * @param summary     the company's summary over the whole span, whose financial year names its first
+     *                    and last years, such as {@code 2024-25 to 2026-27}
+     * @param entries     every entry of the span, in the order to list them
+     * @param opening     the company's opening balance, or null when it has none
+     * @param generatedOn the firm's calendar day the statement was made
+     * @param firmName    the firm's name, shown with its logo at the top of every page; null when none is
+     *                    saved
+     * @return the content of the .pdf file
+     */
+    static byte[] forCompanyAllYears(String clientName, CompanyLedgerSummaryResponse summary,
+                                     List<LedgerEntry> entries, OpeningBalance opening, LocalDate generatedOn,
+                                     String firmName) {
+        return companyStatement(clientName, summary, entries, opening, generatedOn, firmName, true);
+    }
+
+    private static byte[] companyStatement(String clientName, CompanyLedgerSummaryResponse summary,
+                                           List<LedgerEntry> entries, OpeningBalance opening, LocalDate generatedOn,
+                                           String firmName, boolean allYears) {
         Figures figures = new Figures(summary.getFinancialYear(), summary.getFromDate(), summary.getToDate(),
                 summary.getTotalBilled(), orZero(summary.getOpeningBalance()), summary.getTotalPaymentReceived(),
                 summary.getPending(), summary.getLastPayment());
         return write(clientName, summary.getCompanyName(), figures,
-                List.of(new Section(summary.getCompanyName(), opening, entries)), generatedOn, firmName);
+                List.of(new Section(summary.getCompanyName(), opening, entries)), generatedOn, firmName, allYears);
     }
 
     /**
      * @param companyName the company a single company's statement is for; null for a client's, which
      *                    lists a line per company in its summary and gives each company a page
      * @param firmName    the firm's name for the page header; null when none is saved
+     * @param allYears    whether the figures span every year the client has been one, rather than one
+     *                    financial year
      */
     private static byte[] write(String clientName, String companyName, Figures figures, List<Section> sections,
-                                LocalDate generatedOn, String firmName) {
+                                LocalDate generatedOn, String firmName, boolean allYears) {
         Fonts fonts = Fonts.load();
         boolean forClient = companyName == null;
         Header header = Header.of(fonts, firmName);
@@ -171,7 +228,7 @@ final class LedgerStatementPdf {
                     + figures.financialYear()));
             document.open();
 
-            addHeading(document, fonts, clientName, companyName, figures, generatedOn);
+            addHeading(document, fonts, clientName, companyName, figures, generatedOn, allYears);
             addSummary(document, fonts, figures, forClient);
             if (forClient) {
                 addBreakdown(document, fonts, sections);
@@ -181,7 +238,7 @@ final class LedgerStatementPdf {
                     // Each company's details start on a page of their own.
                     document.newPage();
                 }
-                addSection(document, fonts, section, forClient);
+                addSection(document, fonts, section, forClient, allYears);
             }
             document.close();
         } catch (DocumentException e) {
@@ -191,13 +248,15 @@ final class LedgerStatementPdf {
     }
 
     private static void addHeading(Document document, Fonts fonts, String clientName, String companyName,
-                                   Figures figures, LocalDate generatedOn) throws DocumentException {
+                                   Figures figures, LocalDate generatedOn, boolean allYears)
+            throws DocumentException {
         document.add(paragraph("Ledger Statement", fonts.bold(20, BRAND), 0, 4));
         document.add(paragraph(clientName, fonts.bold(13, Color.BLACK), 0, 2));
         if (companyName != null) {
             document.add(paragraph(companyName, fonts.regular(12, Color.BLACK), 0, 2));
         }
-        document.add(paragraph("Financial year " + figures.financialYear() + " (" + DATE.format(figures.fromDate())
+        String period = allYears ? "All financial years, FY " : "Financial year ";
+        document.add(paragraph(period + figures.financialYear() + " (" + DATE.format(figures.fromDate())
                 + " to " + DATE.format(figures.toDate()) + ")  |  Generated on " + DATE.format(generatedOn),
                 fonts.regular(10, MUTED), 0, 14));
     }
@@ -277,11 +336,12 @@ final class LedgerStatementPdf {
     }
 
     /**
-     * @param titled whether to head the section with the company's name and figures, as a client's
-     *               statement does; a single company's statement has already named it
+     * @param titled   whether to head the section with the company's name and figures, as a client's
+     *                 statement does; a single company's statement has already named it
+     * @param allYears whether the section spans every year rather than one financial year
      */
-    private static void addSection(Document document, Fonts fonts, Section section, boolean titled)
-            throws DocumentException {
+    private static void addSection(Document document, Fonts fonts, Section section, boolean titled,
+                                   boolean allYears) throws DocumentException {
         if (titled) {
             document.add(paragraph(section.companyName(), fonts.bold(14, BRAND), 0, 4));
             String opening = section.openingInYear().signum() == 0 ? ""
@@ -294,8 +354,8 @@ final class LedgerStatementPdf {
         }
         addOpeningBalance(document, fonts, section.openingBalance());
         if (section.entries().isEmpty()) {
-            document.add(paragraph("No charges or payments in this financial year.", fonts.regular(10, MUTED), 0,
-                    0));
+            document.add(paragraph(allYears ? "No charges or payments yet."
+                    : "No charges or payments in this financial year.", fonts.regular(10, MUTED), 0, 0));
             return;
         }
         addEntries(document, fonts, section);

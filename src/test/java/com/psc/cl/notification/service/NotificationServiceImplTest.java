@@ -180,6 +180,100 @@ class NotificationServiceImplTest {
     }
 
     @Test
+    @DisplayName("writes the year's statement for download as the email attaches it, sending nothing")
+    void writesClientLedgerSummaryPdf() {
+        when(firmDetailsRepository.findFirstByOrderByCreatedAtAsc()).thenReturn(Optional.of(FirmDetails.builder()
+                .firmName("Sharma & Associates")
+                .build()));
+        LedgerExport statement = new LedgerExport("Rohan_Mehta_Ledger_FY2026-27.pdf", new byte[] {1, 2, 3});
+        when(ledgerService.statementForClient(CLIENT_ID, YEAR, "Sharma & Associates")).thenReturn(statement);
+
+        // No sender is needed, as nothing is emailed.
+        LedgerExport downloaded = service(null, null).clientLedgerSummaryPdf(CLIENT_ID, YEAR);
+
+        assertThat(downloaded).isSameAs(statement);
+        verify(mailSender, never()).send(any(MimeMessage.class));
+    }
+
+    @Test
+    @DisplayName("without a financial year, writes the statement across every year, headed by the firm")
+    void writesClientLedgerSummaryPdfForAllYears() {
+        when(firmDetailsRepository.findFirstByOrderByCreatedAtAsc()).thenReturn(Optional.of(FirmDetails.builder()
+                .firmName("Sharma & Associates")
+                .build()));
+        LedgerExport statement = new LedgerExport("Rohan_Mehta_Ledger_All_Years.pdf", new byte[] {1, 2, 3});
+        when(ledgerService.statementForClientAllYears(CLIENT_ID, "Sharma & Associates")).thenReturn(statement);
+
+        LedgerExport downloaded = service(null, null).clientLedgerSummaryPdf(CLIENT_ID, null);
+
+        assertThat(downloaded).isSameAs(statement);
+        verify(ledgerService, never()).statementForClient(any(), any(), any());
+        verify(mailSender, never()).send(any(MimeMessage.class));
+    }
+
+    @Test
+    @DisplayName("writes the statement for download without a firm name when no firm details are saved")
+    void writesClientLedgerSummaryPdfWithoutFirm() {
+        when(firmDetailsRepository.findFirstByOrderByCreatedAtAsc()).thenReturn(Optional.empty());
+        LedgerExport statement = new LedgerExport("Rohan_Mehta_Ledger_FY2026-27.pdf", new byte[] {1});
+        when(ledgerService.statementForClient(CLIENT_ID, YEAR, null)).thenReturn(statement);
+
+        assertThat(service(null, null).clientLedgerSummaryPdf(CLIENT_ID, YEAR)).isSameAs(statement);
+    }
+
+    @Test
+    @DisplayName("passes on that the client is unknown when downloading the statement")
+    void rejectsUnknownClientPdf() {
+        when(firmDetailsRepository.findFirstByOrderByCreatedAtAsc()).thenReturn(Optional.empty());
+        when(ledgerService.statementForClientAllYears(CLIENT_ID, null))
+                .thenThrow(new ClientNotFoundException(CLIENT_ID));
+
+        assertThatThrownBy(() -> service(null, null).clientLedgerSummaryPdf(CLIENT_ID, null))
+                .isInstanceOf(ClientNotFoundException.class);
+    }
+
+    @Test
+    @DisplayName("writes a company's year statement for download as its email attaches it, sending nothing")
+    void writesCompanyLedgerSummaryPdf() {
+        when(firmDetailsRepository.findFirstByOrderByCreatedAtAsc()).thenReturn(Optional.of(FirmDetails.builder()
+                .firmName("Sharma & Associates")
+                .build()));
+        LedgerExport statement = new LedgerExport("Mehta_Textiles_Pvt_Ltd_Ledger_FY2026-27.pdf", new byte[] {1});
+        when(ledgerService.statementForCompany(CLIENT_ID, COMPANY_ID, YEAR, "Sharma & Associates"))
+                .thenReturn(statement);
+
+        LedgerExport downloaded = service(null, null).companyLedgerSummaryPdf(CLIENT_ID, COMPANY_ID, YEAR);
+
+        assertThat(downloaded).isSameAs(statement);
+        verify(mailSender, never()).send(any(MimeMessage.class));
+    }
+
+    @Test
+    @DisplayName("without a financial year, writes the company's statement across every year")
+    void writesCompanyLedgerSummaryPdfForAllYears() {
+        when(firmDetailsRepository.findFirstByOrderByCreatedAtAsc()).thenReturn(Optional.empty());
+        LedgerExport statement = new LedgerExport("Mehta_Textiles_Pvt_Ltd_Ledger_All_Years.pdf", new byte[] {1});
+        when(ledgerService.statementForCompanyAllYears(CLIENT_ID, COMPANY_ID, null)).thenReturn(statement);
+
+        LedgerExport downloaded = service(null, null).companyLedgerSummaryPdf(CLIENT_ID, COMPANY_ID, null);
+
+        assertThat(downloaded).isSameAs(statement);
+        verify(ledgerService, never()).statementForCompany(any(), any(), any(), any());
+        verify(mailSender, never()).send(any(MimeMessage.class));
+    }
+
+    @Test
+    @DisplayName("passes on that the company is not the client's when downloading its statement")
+    void rejectsUnknownCompanyPdf() {
+        when(firmDetailsRepository.findFirstByOrderByCreatedAtAsc()).thenReturn(Optional.empty());
+        when(ledgerService.statementForCompanyAllYears(CLIENT_ID, COMPANY_ID, null))
+                .thenThrow(new CompanyNotFoundException(CLIENT_ID, COMPANY_ID));
+
+        assertThatThrownBy(() -> service(null, null).companyLedgerSummaryPdf(CLIENT_ID, COMPANY_ID, null))
+                .isInstanceOf(CompanyNotFoundException.class);
+    }
+
+    @Test
     @DisplayName("sends nothing when the company is not the client's")
     void rejectsUnknownCompany() {
         when(ledgerService.summarizeCompany(CLIENT_ID, COMPANY_ID, YEAR))

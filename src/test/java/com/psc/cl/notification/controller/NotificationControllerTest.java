@@ -1,16 +1,22 @@
 package com.psc.cl.notification.controller;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.psc.cl.client.exception.ClientNotFoundException;
 import com.psc.cl.client.exception.CompanyNotFoundException;
 import com.psc.cl.config.ApiPaths;
+import com.psc.cl.ledger.dto.LedgerExport;
+import com.psc.cl.ledger.service.FinancialYears;
 import com.psc.cl.notification.dto.BulkLedgerSummaryEmailResponse;
 import com.psc.cl.notification.dto.ClientEmailFailure;
 import com.psc.cl.notification.dto.ClientEmailResult;
@@ -23,6 +29,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -43,11 +51,123 @@ class NotificationControllerTest {
 
     private static final String CLIENT_URL = ApiPaths.V1 + "/clients/" + CLIENT_ID + "/ledger-summary-email";
 
+    private static final String PDF_URL = ApiPaths.V1 + "/clients/" + CLIENT_ID + "/ledger-summary-pdf";
+
+    private static final String COMPANY_PDF_URL = ApiPaths.V1 + "/clients/" + CLIENT_ID + "/companies/" + COMPANY_ID
+            + "/ledger-summary-pdf";
+
     @Autowired
     private MockMvc mockMvc;
 
     @MockitoBean
     private NotificationService notificationService;
+
+    @Test
+    @DisplayName("downloads the client's ledger summary PDF for a financial year as an attachment")
+    void downloadsClientLedgerSummaryPdf() throws Exception {
+        byte[] pdf = {37, 80, 68, 70};
+        when(notificationService.clientLedgerSummaryPdf(CLIENT_ID, FinancialYears.parse("2026-27")))
+                .thenReturn(new LedgerExport("Rohan_Mehta_Ledger_FY2026-27.pdf", pdf));
+
+        mockMvc.perform(get(PDF_URL).param("financialYear", "2026-27"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(LedgerExport.PDF_MEDIA_TYPE))
+                .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION,
+                        containsString("attachment; filename=\"Rohan_Mehta_Ledger_FY2026-27.pdf\"")))
+                .andExpect(content().bytes(pdf));
+    }
+
+    @Test
+    @DisplayName("without a financial year, downloads the PDF across every year")
+    void downloadsClientLedgerSummaryPdfForAllYears() throws Exception {
+        byte[] pdf = {37, 80, 68, 70};
+        when(notificationService.clientLedgerSummaryPdf(CLIENT_ID, null))
+                .thenReturn(new LedgerExport("Rohan_Mehta_Ledger_All_Years.pdf", pdf));
+
+        mockMvc.perform(get(PDF_URL))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION,
+                        containsString("attachment; filename=\"Rohan_Mehta_Ledger_All_Years.pdf\"")))
+                .andExpect(content().bytes(pdf));
+    }
+
+    @Test
+    @DisplayName("returns 404 as JSON when downloading the PDF of an unknown client")
+    void rejectsPdfOfUnknownClient() throws Exception {
+        when(notificationService.clientLedgerSummaryPdf(CLIENT_ID, null))
+                .thenThrow(new ClientNotFoundException(CLIENT_ID));
+
+        mockMvc.perform(get(PDF_URL))
+                .andExpect(status().isNotFound())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON));
+    }
+
+    @Test
+    @DisplayName("returns 400 when downloading the PDF with a client id that is not a UUID")
+    void rejectsPdfOfMalformedClientId() throws Exception {
+        mockMvc.perform(get(ApiPaths.V1 + "/clients/not-a-uuid/ledger-summary-pdf"))
+                .andExpect(status().isBadRequest());
+
+        verify(notificationService, never()).clientLedgerSummaryPdf(any(), any());
+    }
+
+    @Test
+    @DisplayName("downloads a company's ledger summary PDF for a financial year as an attachment")
+    void downloadsCompanyLedgerSummaryPdf() throws Exception {
+        byte[] pdf = {37, 80, 68, 70};
+        when(notificationService.companyLedgerSummaryPdf(CLIENT_ID, COMPANY_ID, FinancialYears.parse("2026-27")))
+                .thenReturn(new LedgerExport("Mehta_Textiles_Pvt_Ltd_Ledger_FY2026-27.pdf", pdf));
+
+        mockMvc.perform(get(COMPANY_PDF_URL).param("financialYear", "2026-27"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(LedgerExport.PDF_MEDIA_TYPE))
+                .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION,
+                        containsString("attachment; filename=\"Mehta_Textiles_Pvt_Ltd_Ledger_FY2026-27.pdf\"")))
+                .andExpect(content().bytes(pdf));
+    }
+
+    @Test
+    @DisplayName("without a financial year, downloads a company's PDF across every year")
+    void downloadsCompanyLedgerSummaryPdfForAllYears() throws Exception {
+        byte[] pdf = {37, 80, 68, 70};
+        when(notificationService.companyLedgerSummaryPdf(CLIENT_ID, COMPANY_ID, null))
+                .thenReturn(new LedgerExport("Mehta_Textiles_Pvt_Ltd_Ledger_All_Years.pdf", pdf));
+
+        mockMvc.perform(get(COMPANY_PDF_URL))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION,
+                        containsString("attachment; filename=\"Mehta_Textiles_Pvt_Ltd_Ledger_All_Years.pdf\"")))
+                .andExpect(content().bytes(pdf));
+    }
+
+    @Test
+    @DisplayName("returns 404 as JSON when downloading the PDF of a company the client does not hold")
+    void rejectsPdfOfUnknownCompany() throws Exception {
+        when(notificationService.companyLedgerSummaryPdf(CLIENT_ID, COMPANY_ID, null))
+                .thenThrow(new CompanyNotFoundException(CLIENT_ID, COMPANY_ID));
+
+        mockMvc.perform(get(COMPANY_PDF_URL))
+                .andExpect(status().isNotFound())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON));
+    }
+
+    @Test
+    @DisplayName("returns 400 when downloading a company's PDF for a malformed financial year")
+    void rejectsCompanyPdfOfMalformedFinancialYear() throws Exception {
+        mockMvc.perform(get(COMPANY_PDF_URL).param("financialYear", "26-27"))
+                .andExpect(status().isBadRequest());
+
+        verify(notificationService, never()).companyLedgerSummaryPdf(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("returns 400 when downloading the PDF for a financial year that is not like 2026-27")
+    void rejectsPdfOfMalformedFinancialYear() throws Exception {
+        mockMvc.perform(get(PDF_URL).param("financialYear", "2026-28"))
+                .andExpect(status().isBadRequest());
+
+        verify(notificationService, never()).clientLedgerSummaryPdf(any(), any());
+    }
 
     @Test
     @DisplayName("emails the ledger summary and says who it went to")

@@ -2,28 +2,33 @@ package com.psc.cl.notification.controller;
 
 import com.psc.cl.config.ApiPaths;
 import com.psc.cl.dto.ErrorResponse;
+import com.psc.cl.ledger.dto.LedgerExport;
 import com.psc.cl.notification.dto.BulkLedgerSummaryEmailResponse;
 import com.psc.cl.notification.dto.LedgerSummaryEmailResponse;
 import com.psc.cl.notification.dto.PaymentReminderResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.headers.Header;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 
 import java.util.UUID;
 
 /**
  * Contract for the emails sent to clients.
  */
-@Tag(name = "Notifications", description = "Emails sent to clients about their accounts")
+@Tag(name = "Notifications", description = "Emails sent to clients about their accounts, and the PDF they attach")
 @RequestMapping(produces = MediaType.APPLICATION_JSON_VALUE)
 public interface NotificationApi {
 
@@ -32,6 +37,12 @@ public interface NotificationApi {
 
     /** Path a client's ledger summary across all of their companies is emailed to them from. */
     String CLIENT_LEDGER_SUMMARY_EMAIL_PATH = ApiPaths.V1 + "/clients/{clientId}/ledger-summary-email";
+
+    /** Path the PDF a company's ledger summary email attaches is downloaded from. */
+    String LEDGER_SUMMARY_PDF_PATH = ApiPaths.V1 + "/clients/{clientId}/companies/{companyId}/ledger-summary-pdf";
+
+    /** Path the PDF a client's ledger summary email attaches is downloaded from. */
+    String CLIENT_LEDGER_SUMMARY_PDF_PATH = ApiPaths.V1 + "/clients/{clientId}/ledger-summary-pdf";
 
     /** Path every client is emailed their ledger summary from in one go. */
     String ALL_LEDGER_SUMMARY_EMAILS_PATH = ApiPaths.V1 + "/notifications/ledger-summary-emails";
@@ -112,6 +123,102 @@ public interface NotificationApi {
             @Parameter(description = "Identifier of the client", required = true,
                     example = "7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35")
             @PathVariable UUID clientId);
+
+    @Operation(
+            summary = "Download the ledger summary of one of a client's companies as a PDF",
+            description = "Downloads the PDF ledger statement that emailing the client the ledger summary of one "
+                    + "of their companies attaches, without sending anything, every page headed by the firm's "
+                    + "logo and its name from Global Settings. With financialYear, it covers that Indian "
+                    + "financial year (1 April to 31 March); for the current year it is exactly the PDF the "
+                    + "email attaches. Without it, it covers every year as one period, from the year the client "
+                    + "was added (or of the company's earliest entry, if earlier) to the current year: the "
+                    + "summary is across the whole span, so the amount pending is what the company owes "
+                    + "overall, and the details list every entry since it was taken on with a running balance. "
+                    + "Either way it opens with the company's summary, then its charges and payments, every "
+                    + "charge as one total fee and every payment as the amount paid, with no discount shown. "
+                    + "The file is named after the company and the year, such as "
+                    + "Mehta_Textiles_Pvt_Ltd_Ledger_FY2026-27.pdf, or Mehta_Textiles_Pvt_Ltd_Ledger_All_Years.pdf "
+                    + "for every year.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200",
+                    description = "The PDF, as an attachment; a period with no entries gives zero totals",
+                    headers = @Header(name = HttpHeaders.CONTENT_DISPOSITION,
+                            description = "attachment, with the statement's file name",
+                            schema = @Schema(type = "string",
+                                    example = "attachment; filename=\"Mehta_Textiles_Pvt_Ltd_Ledger_FY2026-27.pdf\"")),
+                    content = @Content(mediaType = LedgerExport.PDF_MEDIA_TYPE,
+                            schema = @Schema(type = "string", format = "binary"))),
+            @ApiResponse(responseCode = "400",
+                    description = "financialYear is not a year such as 2026-27, or an identifier is not a "
+                            + "valid UUID",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404",
+                    description = "No client carries this identifier, or the client holds no such company",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "500", description = "Unexpected server error",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class)))})
+    // JSON is listed too, so an error can still be returned as an ErrorResponse.
+    @GetMapping(value = LEDGER_SUMMARY_PDF_PATH,
+            produces = {LedgerExport.PDF_MEDIA_TYPE, MediaType.APPLICATION_JSON_VALUE})
+    ResponseEntity<byte[]> downloadLedgerSummaryPdf(
+            @Parameter(description = "Identifier of the client", required = true,
+                    example = "7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35")
+            @PathVariable UUID clientId,
+            @Parameter(description = "Identifier of the company", required = true,
+                    example = "4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28")
+            @PathVariable UUID companyId,
+            @Parameter(description = "Indian financial year of the statement, written as yyyy-yy. Omit for "
+                    + "every year together", example = "2026-27")
+            @RequestParam(required = false) String financialYear);
+
+    @Operation(
+            summary = "Download a client's ledger summary as a PDF",
+            description = "Downloads the PDF ledger statement that emailing the client their ledger summary "
+                    + "attaches, without sending anything, across all of the client's companies, every page "
+                    + "headed by the firm's logo and its name from Global Settings. With financialYear, it covers "
+                    + "that Indian financial year (1 April to 31 March); for the current year it is exactly the "
+                    + "PDF the email attaches. Without it, it covers every year the client has been one, from "
+                    + "the year they were added (or of their earliest entry) to the current year, as one "
+                    + "period: the summary is across the whole span, so the amount pending is what the client "
+                    + "owes overall, and each company lists every entry since it was taken on with a running "
+                    + "balance. Either way it opens with the summary and a line per company, then each "
+                    + "company's charges and payments on a page of its own, every charge as one total fee and "
+                    + "every payment as the amount paid, with no discount shown. The file is named after the "
+                    + "client and the year, such as Rohan_Mehta_Ledger_FY2026-27.pdf, or "
+                    + "Rohan_Mehta_Ledger_All_Years.pdf for every year.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200",
+                    description = "The PDF, as an attachment; a year with no entries gives zero totals",
+                    headers = @Header(name = HttpHeaders.CONTENT_DISPOSITION,
+                            description = "attachment, with the statement's file name",
+                            schema = @Schema(type = "string",
+                                    example = "attachment; filename=\"Rohan_Mehta_Ledger_FY2026-27.pdf\"")),
+                    content = @Content(mediaType = LedgerExport.PDF_MEDIA_TYPE,
+                            schema = @Schema(type = "string", format = "binary"))),
+            @ApiResponse(responseCode = "400",
+                    description = "financialYear is not a year such as 2026-27, or the identifier is not a "
+                            + "valid UUID",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "No client carries this identifier",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "500", description = "Unexpected server error",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class)))})
+    // JSON is listed too, so an error can still be returned as an ErrorResponse.
+    @GetMapping(value = CLIENT_LEDGER_SUMMARY_PDF_PATH,
+            produces = {LedgerExport.PDF_MEDIA_TYPE, MediaType.APPLICATION_JSON_VALUE})
+    ResponseEntity<byte[]> downloadClientLedgerSummaryPdf(
+            @Parameter(description = "Identifier of the client", required = true,
+                    example = "7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35")
+            @PathVariable UUID clientId,
+            @Parameter(description = "Indian financial year of the statement, written as yyyy-yy. Omit for "
+                    + "every year the client has been one, together", example = "2026-27")
+            @RequestParam(required = false) String financialYear);
 
     @Operation(
             summary = "Email every client their ledger summary",

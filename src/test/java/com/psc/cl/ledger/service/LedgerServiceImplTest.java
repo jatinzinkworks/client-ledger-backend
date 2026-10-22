@@ -60,6 +60,7 @@ import com.psc.cl.ledger.repository.CompanyChargeRow;
 import com.psc.cl.ledger.repository.CompanyPaidRow;
 import com.psc.cl.ledger.repository.DailyTotalsRow;
 import com.psc.cl.ledger.repository.LedgerEntryRepository;
+import com.psc.cl.ledger.repository.LedgerTotalsRow;
 import com.psc.cl.ledger.repository.ManagerBalanceRow;
 import com.psc.cl.ledger.repository.ManagerPendingRow;
 import com.psc.cl.ledger.repository.PostedPeriod;
@@ -1409,6 +1410,52 @@ class LedgerServiceImplTest {
     }
 
     @Test
+    @DisplayName("writes a client's every year as one PDF statement, from the year they were added to the current one")
+    void writesClientStatementForAllYears() throws IOException {
+        client.setFirstName("Rohan");
+        client.setLastName("Mehta");
+        // Added in FY 2024-25; today, 14 October 2026, is in FY 2026-27.
+        client.setCreatedAt(Instant.parse("2024-06-01T04:30:00Z"));
+        when(clientRepository.findById(CLIENT_ID)).thenReturn(Optional.of(client));
+        List<LedgerTotalsRow> rows = List.of(LedgerSummariesTest.row(COMPANY_ID, "2025-26", 1, "5000.00", "250.00",
+                "4750.00", "855.00", "5605.00"));
+        when(ledgerEntryRepository.totalClientEntries(CLIENT_ID, LocalDate.of(1, 1, 1), LocalDate.of(9999, 12, 31)))
+                .thenReturn(rows);
+        LocalDate from = LocalDate.of(2024, 4, 1);
+        LocalDate to = LocalDate.of(2027, 3, 31);
+        when(ledgerEntryRepository.totalClientEntries(CLIENT_ID, from, to)).thenReturn(rows);
+        when(ledgerEntryRepository.findFirstByClientIdAndEntryTypeAndDueDateBetweenOrderByDueDateDescCreatedAtDesc(
+                CLIENT_ID, LedgerEntryType.PAYMENT, from, to)).thenReturn(Optional.empty());
+        when(ledgerEntryRepository.findAllByClientIdAndDueDateBetween(CLIENT_ID, from, to, EARLIEST_DUE_FIRST))
+                .thenReturn(List.of(storedEntry()));
+        when(ledgerEntryRepository.findByCompanyIdInAndEntryType(any(), eq(LedgerEntryType.OPENING_BALANCE)))
+                .thenReturn(List.of());
+
+        LedgerExport statement = ledgerService.statementForClientAllYears(CLIENT_ID, "Sharma & Associates");
+
+        assertThat(statement.fileName()).isEqualTo("Rohan_Mehta_Ledger_All_Years.pdf");
+        PdfReader reader = new PdfReader(statement.content());
+        assertThat(reader.getNumberOfPages()).isEqualTo(2);
+        PdfTextExtractor extractor = new PdfTextExtractor(reader);
+        assertThat(extractor.getTextFromPage(1))
+                .contains("Sharma & Associates")
+                .contains("All financial years, FY 2024-25 to 2026-27 (1 Apr 2024 to 31 Mar 2027)")
+                .contains("5,605.00");
+        assertThat(extractor.getTextFromPage(2))
+                .contains("Mehta Textiles Pvt Ltd")
+                .contains("GST Monthly Return Filing");
+    }
+
+    @Test
+    @DisplayName("raises not found when writing every year's statement of an unknown client")
+    void statementForAllYearsFailsForUnknownClient() {
+        when(clientRepository.findById(CLIENT_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> ledgerService.statementForClientAllYears(CLIENT_ID, null))
+                .isInstanceOf(ClientNotFoundException.class);
+    }
+
+    @Test
     @DisplayName("raises not found when writing the statement of an unknown client")
     void writesStatementOfUnknownClient() {
         when(clientRepository.findById(CLIENT_ID)).thenReturn(Optional.empty());
@@ -1446,6 +1493,53 @@ class LedgerServiceImplTest {
                 .contains("Mehta Textiles Pvt Ltd")
                 .contains("GST Monthly Return Filing")
                 .contains("5,605.00");
+    }
+
+    @Test
+    @DisplayName("writes a company's every year as one PDF statement, from the year its client was added")
+    void writesCompanyStatementForAllYears() throws IOException {
+        client.setFirstName("Rohan");
+        client.setLastName("Mehta");
+        // Added in FY 2024-25; today, 14 October 2026, is in FY 2026-27.
+        client.setCreatedAt(Instant.parse("2024-06-01T04:30:00Z"));
+        stubCompany();
+        List<LedgerTotalsRow> rows = List.of(LedgerSummariesTest.row(COMPANY_ID, "2025-26", 1, "5000.00", "250.00",
+                "4750.00", "855.00", "5605.00"));
+        when(ledgerEntryRepository.totalCompanyEntries(COMPANY_ID, LocalDate.of(1, 1, 1), LocalDate.of(9999, 12, 31)))
+                .thenReturn(rows);
+        LocalDate from = LocalDate.of(2024, 4, 1);
+        LocalDate to = LocalDate.of(2027, 3, 31);
+        when(ledgerEntryRepository.totalCompanyEntries(COMPANY_ID, from, to)).thenReturn(rows);
+        when(ledgerEntryRepository.findFirstByCompanyIdAndEntryTypeAndDueDateBetweenOrderByDueDateDescCreatedAtDesc(
+                COMPANY_ID, LedgerEntryType.PAYMENT, from, to)).thenReturn(Optional.empty());
+        when(ledgerEntryRepository.findAllByCompanyIdAndDueDateBetween(COMPANY_ID, from, to, EARLIEST_DUE_FIRST))
+                .thenReturn(List.of(storedEntry()));
+
+        LedgerExport statement = ledgerService.statementForCompanyAllYears(CLIENT_ID, COMPANY_ID,
+                "Sharma & Associates");
+
+        assertThat(statement.fileName()).isEqualTo("Mehta_Textiles_Pvt_Ltd_Ledger_All_Years.pdf");
+        PdfReader reader = new PdfReader(statement.content());
+        assertThat(reader.getNumberOfPages()).isEqualTo(1);
+        assertThat(new PdfTextExtractor(reader).getTextFromPage(1))
+                .contains("Sharma & Associates")
+                .contains("Rohan Mehta")
+                .contains("Mehta Textiles Pvt Ltd")
+                .contains("All financial years, FY 2024-25 to 2026-27 (1 Apr 2024 to 31 Mar 2027)")
+                .contains("GST Monthly Return Filing")
+                .contains("5,605.00");
+    }
+
+    @Test
+    @DisplayName("raises not found when writing every year's statement of a company the client does not hold")
+    void writesAllYearsStatementOfUnknownCompany() {
+        when(clientRepository.existsById(CLIENT_ID)).thenReturn(true);
+        when(clientCompanyRepository.findByIdAndClientId(COMPANY_ID, CLIENT_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> ledgerService.statementForCompanyAllYears(CLIENT_ID, COMPANY_ID, null))
+                .isInstanceOf(CompanyNotFoundException.class);
+
+        verify(ledgerEntryRepository, never()).findAllByCompanyIdAndDueDateBetween(any(), any(), any(), any());
     }
 
     @Test

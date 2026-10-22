@@ -202,6 +202,35 @@ class LedgerStatementPdfTest {
     }
 
     @Test
+    @DisplayName("names the whole span in an all-years statement, and a company with no entries as having none yet")
+    void writesAllYearsStatement() throws IOException {
+        ClientLedgerSummaryResponse summary = ClientLedgerSummaryResponse.builder()
+                .clientName("Rohan Mehta")
+                .financialYear("2024-25 to 2026-27")
+                .fromDate(LocalDate.of(2024, 4, 1))
+                .toDate(LocalDate.of(2027, 3, 31))
+                .totalBilled(new BigDecimal("5605.00"))
+                .totalPaymentReceived(new BigDecimal("0.00"))
+                .pending(new BigDecimal("5605.00"))
+                .build();
+        List<LedgerEntry> entries = List.of(
+                charge(TEXTILES_ID, LocalDate.of(2025, 5, 7), "Monthly Return Filing", "5605.00"));
+
+        PdfReader reader = new PdfReader(LedgerStatementPdf.forClientAllYears(summary, entries, COMPANY_NAMES,
+                Map.of(), GENERATED_ON, null));
+
+        assertThat(reader.getNumberOfPages()).isEqualTo(3);
+        assertThat(text(reader, 1))
+                .contains("All financial years, FY 2024-25 to 2026-27 (1 Apr 2024 to 31 Mar 2027)")
+                .contains("Rs. 5,605.00");
+        assertThat(text(reader, 2)).contains("Monthly Return Filing");
+        assertThat(text(reader, 3))
+                .contains("Rohan Mehta HUF")
+                .contains("No charges or payments yet.")
+                .doesNotContain("in this financial year");
+    }
+
+    @Test
     @DisplayName("heads every page with the firm's name and logo")
     void headsEveryPageWithFirm() throws IOException {
         PdfReader reader = new PdfReader(LedgerStatementPdf.forClient(summary(), List.of(), COMPANY_NAMES, Map.of(),
