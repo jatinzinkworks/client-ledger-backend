@@ -54,6 +54,9 @@ class ClientIT extends AbstractPostgresIT {
 
     private UUID managerId;
 
+    /** How many clients this test has added through {@link #clientJson}, which numbers their client ids. */
+    private int clientsAdded;
+
     @BeforeEach
     void createManager() {
         clearClientsAndManagers();
@@ -105,6 +108,45 @@ class ClientIT extends AbstractPostgresIT {
     }
 
     @Test
+    @DisplayName("returns 409 and stores nothing when another client already holds the client id")
+    void rejectsTakenClientId() throws Exception {
+        mockMvc.perform(post(CLIENTS_URL)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(clientJson("PSC-00001", "Rohan", "Mehta", "rohan.mehta@example.com", managerId)))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post(CLIENTS_URL)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(clientJson("PSC-00001", "Asha", "Kapoor", "asha.kapoor@example.com", managerId)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("RESOURCE_ALREADY_EXISTS"));
+
+        assertThat(clientRepository.count()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("gives the next client id as the highest held plus one, and PSC-00001 when there are none")
+    void givesNextClientId() throws Exception {
+        mockMvc.perform(get(CLIENTS_URL + ClientApi.NEXT_CLIENT_ID_PATH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.clientId").value("PSC-00001"));
+
+        // The highest, not the latest added.
+        mockMvc.perform(post(CLIENTS_URL)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(clientJson("PSC-00041", "Rohan", "Mehta", "rohan.mehta@example.com", managerId)))
+                .andExpect(status().isCreated());
+        mockMvc.perform(post(CLIENTS_URL)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(clientJson("PSC-00007", "Asha", "Kapoor", "asha.kapoor@example.com", managerId)))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get(CLIENTS_URL + ClientApi.NEXT_CLIENT_ID_PATH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.clientId").value("PSC-00042"));
+    }
+
+    @Test
     @DisplayName("returns 404 and stores nothing when the assigned manager does not exist")
     void rejectsUnknownManager() throws Exception {
         mockMvc.perform(post(CLIENTS_URL)
@@ -123,6 +165,7 @@ class ClientIT extends AbstractPostgresIT {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
+                                  "clientId": "PSC-00001",
                                   "firstName": "Rohan",
                                   "lastName": "Mehta",
                                   "phone": "+91 98200 12345",
@@ -148,6 +191,7 @@ class ClientIT extends AbstractPostgresIT {
         mockMvc.perform(get(CLIENTS_URL + "/" + id))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(id))
+                .andExpect(jsonPath("$.clientId").value("PSC-00001"))
                 .andExpect(jsonPath("$.managerName").value("Pranay Singhal"))
                 .andExpect(jsonPath("$.companies.length()").value(2))
                 .andExpect(jsonPath("$.companies[0].companyName").value("Mehta Textiles Pvt Ltd"))
@@ -169,8 +213,10 @@ class ClientIT extends AbstractPostgresIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(3))
                 .andExpect(jsonPath("$[0].lastName").value("Kapoor"))
+                .andExpect(jsonPath("$[0].clientId").value("PSC-00002"))
                 .andExpect(jsonPath("$[1].firstName").value("Anil"))
                 .andExpect(jsonPath("$[2].firstName").value("Rohan"))
+                .andExpect(jsonPath("$[2].clientId").value("PSC-00001"))
                 .andExpect(jsonPath("$[2].managerName").value("Pranay Singhal"))
                 .andExpect(jsonPath("$[2].companyNames.length()").value(2))
                 .andExpect(jsonPath("$[2].companyNames[0]").value("Mehta Textiles Pvt Ltd"))
@@ -185,6 +231,7 @@ class ClientIT extends AbstractPostgresIT {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
+                                  "clientId": "PSC-00001",
                                   "firstName": "Rohan",
                                   "lastName": "Mehta",
                                   "phone": "+91 98200 12345",
@@ -248,6 +295,7 @@ class ClientIT extends AbstractPostgresIT {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
+                                  "clientId": "PSC-00099",
                                   "firstName": "Rohit",
                                   "lastName": "Mehta",
                                   "phone": "+91 98200 99999",
@@ -257,6 +305,8 @@ class ClientIT extends AbstractPostgresIT {
                                 }""".formatted(managerId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(id))
+                // The client id cannot be changed: one sent on update is ignored.
+                .andExpect(jsonPath("$.clientId").value("PSC-00001"))
                 .andExpect(jsonPath("$.firstName").value("Rohit"))
                 .andExpect(jsonPath("$.discountPercent").value(7.5))
                 .andExpect(jsonPath("$.companies.length()").value(2))
@@ -275,6 +325,7 @@ class ClientIT extends AbstractPostgresIT {
         // Read back from the database.
         mockMvc.perform(get(CLIENTS_URL + "/" + id))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.clientId").value("PSC-00001"))
                 .andExpect(jsonPath("$.phone").value("+91 98200 99999"))
                 .andExpect(jsonPath("$.email").value("rohit.mehta@example.com"))
                 .andExpect(jsonPath("$.companies.length()").value(2))
@@ -382,6 +433,7 @@ class ClientIT extends AbstractPostgresIT {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
+                                  "clientId": "PSC-00001",
                                   "firstName": "Rohan",
                                   "lastName": "Mehta",
                                   "phone": "+91 98200 12345",
@@ -427,9 +479,15 @@ class ClientIT extends AbstractPostgresIT {
         return clientJson("Rohan", "Mehta", "rohan.mehta@example.com", manager);
     }
 
+    /** A client payload under the next client id of this test: PSC-00001, then PSC-00002, and so on. */
     private String clientJson(String firstName, String lastName, String email, UUID manager) {
+        return clientJson("PSC-%05d".formatted(++clientsAdded), firstName, lastName, email, manager);
+    }
+
+    private String clientJson(String clientId, String firstName, String lastName, String email, UUID manager) {
         return """
                 {
+                  "clientId": "%s",
                   "firstName": "%s",
                   "lastName": "%s",
                   "phone": "+91 98200 12345",
@@ -447,6 +505,6 @@ class ClientIT extends AbstractPostgresIT {
                       "address": "12 MG Road, Bengaluru, Karnataka 560001"
                     }
                   ]
-                }""".formatted(firstName, lastName, email, manager);
+                }""".formatted(clientId, firstName, lastName, email, manager);
     }
 }

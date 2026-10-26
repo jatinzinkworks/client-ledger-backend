@@ -23,8 +23,11 @@ import com.psc.cl.client.dto.ClientResponse;
 import com.psc.cl.client.dto.ClientSummaryResponse;
 import com.psc.cl.client.dto.ClientUpdateRequest;
 import com.psc.cl.client.dto.CompanyResponse;
+import com.psc.cl.client.dto.NextClientIdResponse;
 import com.psc.cl.client.exception.AssignedManagerNotFoundException;
 import com.psc.cl.client.exception.ClientHasServicesException;
+import com.psc.cl.client.exception.ClientIdAlreadyExistsException;
+import com.psc.cl.client.exception.ClientIdsExhaustedException;
 import com.psc.cl.client.exception.ClientNotFoundException;
 import com.psc.cl.client.exception.ClientsNotFoundException;
 import com.psc.cl.client.model.CompanyType;
@@ -54,6 +57,7 @@ class ClientControllerTest {
     /** A complete, valid client payload. Variants below alter one field at a time. */
     private static final String VALID_CLIENT_JSON = """
             {
+              "clientId": "PSC-00001",
               "firstName": "Rohan",
               "lastName": "Mehta",
               "phone": "+91 98200 12345",
@@ -100,6 +104,7 @@ class ClientControllerTest {
                         .content(VALID_CLIENT_JSON))
                 .andExpect(status().isCreated())
                 .andExpect(header().exists(HttpHeaders.LOCATION))
+                .andExpect(jsonPath("$.clientId").value("PSC-00001"))
                 .andExpect(jsonPath("$.firstName").value("Rohan"))
                 .andExpect(jsonPath("$.managerId").value(MANAGER_ID))
                 .andExpect(jsonPath("$.managerName").value("Pranay Singhal"))
@@ -109,6 +114,7 @@ class ClientControllerTest {
         ArgumentCaptor<ClientRequest> captor = ArgumentCaptor.forClass(ClientRequest.class);
         verify(clientService).createClient(captor.capture());
         ClientRequest received = captor.getValue();
+        assertThat(received.clientId()).isEqualTo("PSC-00001");
         assertThat(received.firstName()).isEqualTo("Rohan");
         assertThat(received.lastName()).isEqualTo("Mehta");
         assertThat(received.phone()).isEqualTo("+91 98200 12345");
@@ -128,6 +134,7 @@ class ClientControllerTest {
                         .content("{}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors[*].field", hasItem("clientId")))
                 .andExpect(jsonPath("$.errors[*].field", hasItem("firstName")))
                 .andExpect(jsonPath("$.errors[*].field", hasItem("lastName")))
                 .andExpect(jsonPath("$.errors[*].field", hasItem("phone")))
@@ -215,6 +222,54 @@ class ClientControllerTest {
     }
 
     @Test
+    @DisplayName("returns 400 when the client id is not PSC- followed by 5 digits")
+    void rejectsMalformedClientId() throws Exception {
+        for (String clientId : List.of("PSC-0001", "PSC-000001", "psc-00001", "ABC-00001", "PSC-0000A")) {
+            mockMvc.perform(post(CLIENTS_URL)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(VALID_CLIENT_JSON.replace("\"PSC-00001\"", "\"" + clientId + "\"")))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.errors[*].field", hasItem("clientId")));
+        }
+
+        verify(clientService, never()).createClient(any());
+    }
+
+    @Test
+    @DisplayName("returns 409 when another client already holds the client id")
+    void returnsConflictForTakenClientId() throws Exception {
+        when(clientService.createClient(any())).thenThrow(new ClientIdAlreadyExistsException("PSC-00001"));
+
+        mockMvc.perform(post(CLIENTS_URL)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_CLIENT_JSON))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("RESOURCE_ALREADY_EXISTS"));
+    }
+
+    @Test
+    @DisplayName("returns 200 with the next free client id, not routing to /{id}")
+    void returnsNextClientId() throws Exception {
+        when(clientService.nextClientId()).thenReturn(new NextClientIdResponse("PSC-00042"));
+
+        mockMvc.perform(get(CLIENTS_URL + ClientApi.NEXT_CLIENT_ID_PATH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.clientId").value("PSC-00042"));
+
+        verify(clientService, never()).getClient(any());
+    }
+
+    @Test
+    @DisplayName("returns 409 when no client id is left to give")
+    void returnsConflictWhenClientIdsExhausted() throws Exception {
+        when(clientService.nextClientId()).thenThrow(new ClientIdsExhaustedException("PSC-99999"));
+
+        mockMvc.perform(get(CLIENTS_URL + ClientApi.NEXT_CLIENT_ID_PATH))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("BUSINESS_RULE_VIOLATION"));
+    }
+
+    @Test
     @DisplayName("returns 404 when the assigned manager does not exist")
     void returnsNotFoundForUnknownManager() throws Exception {
         when(clientService.createClient(any()))
@@ -235,6 +290,8 @@ class ClientControllerTest {
 
         mockMvc.perform(get(CLIENTS_URL + "/" + id))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").exists())
+                .andExpect(jsonPath("$.clientId").value("PSC-00001"))
                 .andExpect(jsonPath("$.email").value("rohan.mehta@example.com"))
                 .andExpect(jsonPath("$.managerName").value("Pranay Singhal"))
                 .andExpect(jsonPath("$.companies[0].companyType").value("PRIVATE_LIMITED"))
@@ -267,6 +324,7 @@ class ClientControllerTest {
     void listsClients() throws Exception {
         when(clientService.listClients(null)).thenReturn(List.of(ClientSummaryResponse.builder()
                 .id(UUID.randomUUID())
+                .clientId("PSC-00001")
                 .firstName("Rohan")
                 .lastName("Mehta")
                 .phone("+91 98200 12345")
@@ -280,6 +338,7 @@ class ClientControllerTest {
         mockMvc.perform(get(CLIENTS_URL))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].clientId").value("PSC-00001"))
                 .andExpect(jsonPath("$[0].managerName").value("Pranay Singhal"))
                 .andExpect(jsonPath("$[0].companyNames[0]").value("Mehta Textiles Pvt Ltd"))
                 .andExpect(jsonPath("$[0].companyNames[1]").value("Rohan Mehta HUF"))
@@ -520,6 +579,7 @@ class ClientControllerTest {
     private String discountJson(String clientDiscount, String companies) {
         return """
                 {
+                  "clientId": "PSC-00001",
                   "firstName": "Rohan",
                   "lastName": "Mehta",
                   "phone": "+91 98200 12345",
@@ -533,6 +593,7 @@ class ClientControllerTest {
     private String clientJson(String phone, String email, String companies) {
         return """
                 {
+                  "clientId": "PSC-00001",
                   "firstName": "Rohan",
                   "lastName": "Mehta",
                   "phone": "%s",
@@ -557,6 +618,7 @@ class ClientControllerTest {
         Instant now = Instant.now();
         return ClientResponse.builder()
                 .id(UUID.randomUUID())
+                .clientId("PSC-00001")
                 .firstName("Rohan")
                 .lastName("Mehta")
                 .phone("+91 98200 12345")

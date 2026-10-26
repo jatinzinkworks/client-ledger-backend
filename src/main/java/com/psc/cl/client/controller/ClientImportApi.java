@@ -39,9 +39,10 @@ public interface ClientImportApi {
     @Operation(
             summary = "Download the client import template",
             description = "Returns the Excel workbook to fill in for POST /clients/import. Its Clients sheet takes "
-                    + "one row per client: Client Ref, First Name, Last Name, Phone, Email, Manager Name, "
-                    + "Discount % and Birthday. Its Companies sheet takes one row per company: Client Ref, "
-                    + "Company Name, Company Type, Address and Discount %, linked to its client by the Client Ref. "
+                    + "one row per client: Client ID, First Name, Last Name, Phone, Email, Manager Name, "
+                    + "Discount % and Birthday. Its Companies sheet takes one row per company: Client ID, "
+                    + "Company Name, Company Type, Address, Discount %, Opening Balance and Opening Balance Date, "
+                    + "linked to its client by the Client ID. "
                     + "An Instructions sheet describes every column with an example. Only clients and their "
                     + "companies are imported; services are assigned afterwards as usual.")
     @ApiResponses({
@@ -61,19 +62,24 @@ public interface ClientImportApi {
 
     @Operation(
             summary = "Import clients and their companies from an Excel workbook",
-            description = "Creates every client on a filled-in import template (GET /clients/import/template), "
-                    + "each with the companies the Companies sheet links to them, as POST /clients would. The "
-                    + "import is all or nothing: every row is checked first, and if any cell is missing or "
-                    + "invalid, nothing is created and each cell at fault is listed under errors, by reference "
-                    + "such as Clients!F3. Managers are named by their email in the Manager Catalog. Up to 500 "
-                    + "clients may be imported at once, each with 1 to 50 companies. Clients already on file "
-                    + "are not looked for, so importing the same workbook twice creates its clients twice. "
-                    + "The response lists each company created with the opening balance recorded for it, and "
+            description = "Imports a filled-in import template (GET /clients/import/template), matching clients "
+                    + "by their Client ID, ignoring case. A Client ID no client holds yet creates the client, "
+                    + "with the companies the Companies sheet links to it, as POST /clients would. A Client ID "
+                    + "a client already holds adds the companies linked to it to that client, as "
+                    + "POST /clients/{id}/companies would, leaving the client's own details as they are; such a "
+                    + "client need not be on the Clients sheet. The import is all or nothing: every row is "
+                    + "checked first, and if any cell is missing or invalid, nothing is created and each cell at "
+                    + "fault is listed under errors, by reference such as Clients!F3. Managers are named by "
+                    + "their full name in the Manager Catalog. Up to 500 clients may be listed at once; each new "
+                    + "client needs 1 to 50 companies, and no client may hold more than 50 in all. Importing the "
+                    + "same workbook twice does not create its clients twice, but adds their companies again. "
+                    + "The response lists each client created or added to, and each company created with the "
+                    + "opening balance recorded for it, and "
                     + "counts and adds those balances up per client and overall, so they can be checked "
                     + "against the workbook.")
     @ApiResponses({
-            @ApiResponse(responseCode = "201", description = "Every client and company was created, with the "
-                    + "opening balances recorded",
+            @ApiResponse(responseCode = "201", description = "Every new client and every company was created, "
+                    + "with the opening balances recorded",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ClientImportResponse.class))),
             @ApiResponse(responseCode = "400",
@@ -84,7 +90,12 @@ public interface ClientImportApi {
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "404",
-                    description = "A manager was deleted while the import ran; nothing was created",
+                    description = "A manager or a client was deleted while the import ran; nothing was created",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "409",
+                    description = "Another import or request added a client under one of the workbook's Client "
+                            + "IDs, or companies to one of its clients, while the import ran; nothing was created",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "413", description = "The file is larger than the server accepts",

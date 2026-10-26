@@ -27,6 +27,10 @@ public class ClientSummaryResponse {
     @Schema(description = "Identifier of the client", example = "7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35")
     UUID id;
 
+    @Schema(description = "The firm's own identifier for the client; fixed when the client is added",
+            example = "PSC-00001")
+    String clientId;
+
     @Schema(description = "Given name of the client", example = "Rohan")
     String firstName;
 
@@ -73,6 +77,7 @@ public class ClientSummaryResponse {
     public static ClientSummaryResponse from(Client entity, Manager manager, BigDecimal totalPending) {
         return ClientSummaryResponse.builder()
                 .id(entity.getId())
+                .clientId(entity.getClientId())
                 .firstName(entity.getFirstName())
                 .lastName(entity.getLastName())
                 .phone(entity.getPhone())

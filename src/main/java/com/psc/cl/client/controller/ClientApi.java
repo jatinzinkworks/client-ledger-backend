@@ -5,6 +5,7 @@ import com.psc.cl.client.dto.ClientRequest;
 import com.psc.cl.client.dto.ClientResponse;
 import com.psc.cl.client.dto.ClientSummaryResponse;
 import com.psc.cl.client.dto.ClientUpdateRequest;
+import com.psc.cl.client.dto.NextClientIdResponse;
 import com.psc.cl.config.ApiPaths;
 import com.psc.cl.dto.ErrorResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -46,11 +47,37 @@ public interface ClientApi {
     /** Path several clients are assigned to a manager through, relative to {@link #BASE_PATH}. */
     String MANAGER_PATH = "/manager";
 
+    /** Path the next free client id is read from, relative to {@link #BASE_PATH}. */
+    String NEXT_CLIENT_ID_PATH = "/next-client-id";
+
+    @Operation(
+            summary = "Get the next free client id",
+            description = "Returns the client id to give the next client added: the highest client id held plus "
+                    + "one, as PSC-00042, or PSC-00001 when there are no clients. The id is not reserved: if "
+                    + "another client is added under it first, creating a client with it returns 409, and this "
+                    + "endpoint can be asked again.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "The next free client id",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = NextClientIdResponse.class))),
+            @ApiResponse(responseCode = "409", description = "The highest client id held is already PSC-99999",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "500", description = "Unexpected server error",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class)))})
+    // A literal path, so Spring routes it here rather than to getClient's /{id}.
+    @GetMapping(NEXT_CLIENT_ID_PATH)
+    ResponseEntity<NextClientIdResponse> nextClientId();
+
     @Operation(
             summary = "Create a client",
             description = "Adds a client together with the companies they hold. Every field is "
                     + "mandatory, at least one company must be supplied, and the assigned manager "
-                    + "must already exist in the Manager Catalog. A company may bring an opening balance: "
+                    + "must already exist in the Manager Catalog. The clientId is the firm's own identifier for "
+                    + "the client, PSC- followed by 5 digits: no other client may hold it, and it cannot be "
+                    + "changed afterwards. GET /clients" + NEXT_CLIENT_ID_PATH + " suggests the next free one. A company "
+                    + "may bring an opening balance: "
                     + "what it owed (positive) or was owed (negative) when taken on, dated "
                     + "openingBalanceDate or the day the client is added. It is recorded in the company's "
                     + "ledger as an OPENING_BALANCE entry, counted in what is pending but not as billed. "
@@ -67,6 +94,9 @@ public interface ClientApi {
             @ApiResponse(responseCode = "404", description = "The assigned manager does not exist",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "409", description = "Another client already holds the clientId",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "500", description = "Unexpected server error",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ErrorResponse.class)))})
@@ -78,8 +108,8 @@ public interface ClientApi {
 
     @Operation(
             summary = "Fetch a client",
-            description = "Returns one client by identifier, with their companies in full and the "
-                    + "name of the manager who looks after them.")
+            description = "Returns one client by identifier, with their client id, their companies in full and "
+                    + "the name of the manager who looks after them.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Client found",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
@@ -102,7 +132,8 @@ public interface ClientApi {
     @Operation(
             summary = "Update a client",
             description = "Replaces a client's own fields wholesale. The client's companies are left "
-                    + "as they are; add or delete them through the company endpoints. An omitted "
+                    + "as they are; add or delete them through the company endpoints. The client id cannot be "
+                    + "changed, so it is not part of the payload. An omitted "
                     + "client discount resets to zero. Companies without a discount of their own take the "
                     + "new client discount.")
     @ApiResponses({
@@ -195,7 +226,8 @@ public interface ClientApi {
     @Operation(
             summary = "List clients",
             description = "Returns every client, or only the clients of one manager when managerId is "
-                    + "given, ordered by last name then first name. Each entry names the client's "
+                    + "given, ordered by last name then first name. Each entry carries the client's client id "
+                    + "and names the client's "
                     + "companies only; fetch a client by id for the full company details. Each entry also "
                     + "carries what the client still owes (totalPending): everything billed to all of their "
                     + "companies less every payment received, across all financial years. The list is "

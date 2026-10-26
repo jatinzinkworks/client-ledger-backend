@@ -20,6 +20,8 @@ import com.psc.cl.client.dto.NewCompanyRequest;
 import com.psc.cl.client.exception.AssignedManagerNotFoundException;
 import com.psc.cl.client.exception.ClientHasLedgerEntriesException;
 import com.psc.cl.client.exception.ClientHasServicesException;
+import com.psc.cl.client.exception.ClientIdAlreadyExistsException;
+import com.psc.cl.client.exception.ClientIdsExhaustedException;
 import com.psc.cl.client.exception.ClientNotFoundException;
 import com.psc.cl.client.exception.ClientsNotFoundException;
 import com.psc.cl.client.model.Client;
@@ -85,6 +87,7 @@ class ClientServiceImplTest {
 
         verify(clientRepository).save(clientCaptor.capture());
         Client saved = clientCaptor.getValue();
+        assertThat(saved.getClientId()).isEqualTo("PSC-00001");
         assertThat(saved.getFirstName()).isEqualTo("Rohan");
         assertThat(saved.getLastName()).isEqualTo("Mehta");
         assertThat(saved.getPhone()).isEqualTo("+91 98200 12345");
@@ -99,8 +102,48 @@ class ClientServiceImplTest {
         assertThat(first.getAddress()).isEqualTo("4 Park Street, Kolkata, West Bengal 700016");
 
         assertThat(response.getId()).isEqualTo(saved.getId());
+        assertThat(response.getClientId()).isEqualTo("PSC-00001");
         assertThat(response.getManagerId()).isEqualTo(MANAGER_ID);
         assertThat(response.getManagerName()).isEqualTo("Pranay Singhal");
+    }
+
+    @Test
+    @DisplayName("rejects a client id another client already holds, without saving anything")
+    void rejectsTakenClientId() {
+        when(clientRepository.existsByClientId("PSC-00001")).thenReturn(true);
+
+        assertThatThrownBy(() -> clientService.createClient(request().build()))
+                .isInstanceOf(ClientIdAlreadyExistsException.class)
+                .hasMessageContaining("PSC-00001");
+
+        verify(clientRepository, never()).save(any());
+        verify(managerRepository, never()).findById(any());
+    }
+
+    @Test
+    @DisplayName("gives the next client id as the highest held plus one, keeping 5 digits")
+    void givesNextClientId() {
+        when(clientRepository.findMaxClientId()).thenReturn(Optional.of("PSC-00041"));
+
+        assertThat(clientService.nextClientId().clientId()).isEqualTo("PSC-00042");
+    }
+
+    @Test
+    @DisplayName("gives PSC-00001 as the next client id when there are no clients")
+    void givesFirstClientId() {
+        when(clientRepository.findMaxClientId()).thenReturn(Optional.empty());
+
+        assertThat(clientService.nextClientId().clientId()).isEqualTo("PSC-00001");
+    }
+
+    @Test
+    @DisplayName("refuses a next client id when the highest held is already PSC-99999")
+    void refusesNextClientIdWhenExhausted() {
+        when(clientRepository.findMaxClientId()).thenReturn(Optional.of("PSC-99999"));
+
+        assertThatThrownBy(() -> clientService.nextClientId())
+                .isInstanceOf(ClientIdsExhaustedException.class)
+                .hasMessageContaining("PSC-99999");
     }
 
     @Test
@@ -672,6 +715,7 @@ class ClientServiceImplTest {
     private Client stored(String firstName, String lastName, String... companyNames) {
         Client client = new Client();
         client.setId(UUID.randomUUID());
+        client.setClientId("PSC-00001");
         client.setFirstName(firstName);
         client.setLastName(lastName);
         client.setPhone("+91 98200 12345");
@@ -691,6 +735,7 @@ class ClientServiceImplTest {
 
     private ClientRequest.ClientRequestBuilder request() {
         return ClientRequest.builder()
+                .clientId("PSC-00001")
                 .firstName("Rohan")
                 .lastName("Mehta")
                 .phone("+91 98200 12345")

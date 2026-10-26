@@ -54,6 +54,33 @@ public interface ClientRepository extends JpaRepository<Client, UUID> {
     List<Client> findByIdIn(Collection<UUID> ids);
 
     /**
+     * Whether a client already holds a client id. Served by the unique index on {@code client_id}.
+     *
+     * @param clientId the client id to look for
+     * @return true when a client already holds this client id
+     */
+    boolean existsByClientId(String clientId);
+
+    /**
+     * Loads the clients holding any of the given client ids, together with their companies, in one
+     * query. Served by the unique index on {@code client_id}.
+     *
+     * @param clientIds the client ids to look for
+     * @return the clients found, with companies initialised, in no particular order
+     */
+    @EntityGraph(attributePaths = "companies")
+    List<Client> findByClientIdIn(Collection<String> clientIds);
+
+    /**
+     * The highest client id held. Every client id has the same width, so the highest sorts last; served
+     * by the unique index on {@code client_id}.
+     *
+     * @return the highest client id, or empty when there are no clients
+     */
+    @Query("select max(c.clientId) from Client c")
+    Optional<String> findMaxClientId();
+
+    /**
      * Reads a client and locks its row until the transaction ends, so concurrent deletions of the
      * client's companies take turns and cannot together remove the last one.
      *

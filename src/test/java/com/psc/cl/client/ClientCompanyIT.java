@@ -45,6 +45,9 @@ class ClientCompanyIT extends AbstractPostgresIT {
 
     private UUID managerId;
 
+    /** How many clients this test has added through {@link #clientJson}, which numbers their client ids. */
+    private int clientsAdded;
+
     @BeforeEach
     void createManager() {
         clearClientsAndManagers();
@@ -297,9 +300,11 @@ class ClientCompanyIT extends AbstractPostgresIT {
         return clientJson("Rohan", "Mehta", "rohan.mehta@example.com", manager);
     }
 
+    /** A client payload under the next client id of this test: PSC-00001, then PSC-00002, and so on. */
     private String clientJson(String firstName, String lastName, String email, UUID manager) {
         return """
                 {
+                  "clientId": "PSC-%05d",
                   "firstName": "%s",
                   "lastName": "%s",
                   "phone": "+91 98200 12345",
@@ -317,6 +322,6 @@ class ClientCompanyIT extends AbstractPostgresIT {
                       "address": "12 MG Road, Bengaluru, Karnataka 560001"
                     }
                   ]
-                }""".formatted(firstName, lastName, email, manager);
+                }""".formatted(++clientsAdded, firstName, lastName, email, manager);
     }
 }

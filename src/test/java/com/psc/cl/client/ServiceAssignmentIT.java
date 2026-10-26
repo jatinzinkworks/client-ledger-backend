@@ -63,6 +63,7 @@ class ServiceAssignmentIT extends AbstractPostgresIT {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
+                                  "clientId": "PSC-00001",
                                   "firstName": "Rohan",
                                   "lastName": "Mehta",
                                   "phone": "+91 98200 12345",

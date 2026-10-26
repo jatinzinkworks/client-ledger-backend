@@ -5,9 +5,12 @@ import com.psc.cl.client.dto.ClientImportResponse.ImportedClient;
 import com.psc.cl.client.dto.ClientImportResponse.ImportedCompany;
 import com.psc.cl.client.dto.ClientRequest;
 import com.psc.cl.client.dto.ClientResponse;
+import com.psc.cl.client.dto.CompanyRequest;
 import com.psc.cl.client.dto.CompanyResponse;
 import com.psc.cl.client.dto.NewCompanyRequest;
+import com.psc.cl.client.model.Client;
 import com.psc.cl.client.model.CompanyType;
+import com.psc.cl.client.repository.ClientRepository;
 import com.psc.cl.exception.SpreadsheetValidationException;
 import com.psc.cl.managercatalog.model.Manager;
 import com.psc.cl.managercatalog.repository.ManagerRepository;
@@ -38,9 +41,12 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -49,9 +55,14 @@ import java.util.stream.Stream;
 /**
  * Default {@link ClientImportService}.
  *
+ * <p>Clients are named by their client id. A client id no client holds yet creates the client, with the
+ * companies linked to it; one a client already holds, ignoring case, adds the companies linked to it to
+ * that client, leaving the client's own details as they are.
+ *
  * <p>Every row is read and checked before anything is created: values that cannot be read, such as
- * an unknown manager or company type, are reported against their cell, and each client is then
- * checked against the same rules as {@code POST /clients}, with each rule broken also reported
+ * an unknown manager or company type, are reported against their cell, and each new client is then
+ * checked against the same rules as {@code POST /clients}, and each company added to a client already on
+ * file against those of {@code POST /clients/{id}/companies}, with each rule broken also reported
  * against its cell. Only a workbook without a single error is imported, in one transaction.
  */
 @Service
@@ -75,8 +86,8 @@ public class ClientImportServiceImpl implements ClientImportService {
     /** What the template is called in messages. */
     private static final String TEMPLATE = "client import template";
 
-    /** Column of the client reference, first on both sheets. */
-    private static final int REF = 0;
+    /** Column of the client id, first on both sheets. */
+    private static final int CLIENT_ID = 0;
 
     /** Column of the manager's name on the Clients sheet. */
     private static final int MANAGER_NAME = 5;
@@ -95,8 +106,11 @@ public class ClientImportServiceImpl implements ClientImportService {
 
     /** The Clients sheet, column A onwards; each field is the {@link ClientRequest} component it fills. */
     static final SheetLayout CLIENTS = new SheetLayout(CLIENTS_SHEET, List.of(
-            new Column("Client Ref", null, 12, true, "Your own short reference for the client, different for "
-                    + "each row of this sheet. Companies are linked to their client by it. It is not stored", "C1"),
+            new Column("Client ID", "clientId", 14, true, "The firm's own identifier for the client, different "
+                    + "for each row of this sheet: PSC- followed by 5 digits. Companies are linked to their client "
+                    + "by it. It cannot be changed once the client is added. When a client already holds it, the "
+                    + "rest of the row is not read and the client is left as it is: only the companies linked to "
+                    + "it are added", "PSC-00001"),
             new Column("First Name", "firstName", 18, true, "Given name, up to 100 characters", "Rohan"),
             new Column("Last Name", "lastName", 18, true, "Family name, up to 100 characters", "Mehta"),
             new Column("Phone", "phone", 18, true, "6 to 20 digits, spaces, brackets or hyphens, with an optional "
@@ -116,9 +130,11 @@ public class ClientImportServiceImpl implements ClientImportService {
 
     /** The Companies sheet, column A onwards; each field is the {@link NewCompanyRequest} component it fills. */
     static final SheetLayout COMPANIES = new SheetLayout(COMPANIES_SHEET, List.of(
-            new Column("Client Ref", null, 12, true, "The Client Ref of the client on the Clients sheet who holds "
-                    + "the company, picked from the drop-down, which offers those typed there", "C1",
-                    Choices.from(new Range(CLIENTS_SHEET, REF, 2, MAX_CLIENTS + 1))),
+            // Not strict: a client already on file may be typed in, though the sheet does not list it.
+            new Column("Client ID", null, 14, true, "The Client ID of the client who holds the company: one on "
+                    + "the " + CLIENTS_SHEET + " sheet, picked from the drop-down, which offers those typed there, "
+                    + "or that of a client already on file, typed in, to add the company to them", "PSC-00001",
+                    new Choices(List.of(), new Range(CLIENTS_SHEET, CLIENT_ID, 2, MAX_CLIENTS + 1), false)),
             new Column("Company Name", "companyName", 32, true, "Registered name, up to 200 characters",
                     "Mehta Textiles Pvt Ltd"),
             new Column("Company Type", "companyType", 18, true, "One of "
@@ -137,6 +153,10 @@ public class ClientImportServiceImpl implements ClientImportService {
                     "31/03/2026")), 1);
 
     private final ClientService clientService;
+
+    private final ClientCompanyService clientCompanyService;
+
+    private final ClientRepository clientRepository;
 
     private final ManagerRepository managerRepository;
 
@@ -159,20 +179,25 @@ public class ClientImportServiceImpl implements ClientImportService {
         Sheet instructions = workbook.addSheet(INSTRUCTIONS_SHEET, 14, 18, 10, 100, 40);
         instructions.addRow(Cell.bold("Importing clients and their companies"))
                 .addBlankRow()
-                .addRow(Cell.text("1. On the " + CLIENTS_SHEET + " sheet, add one row per client, each with its own "
-                        + "Client Ref, such as C1, C2. Pick the Manager Name from the drop-down, which offers the "
-                        + "managers on the " + MANAGERS_SHEET + " sheet as they were when this template was "
-                        + "downloaded."))
-                .addRow(Cell.text("2. On the " + COMPANIES_SHEET + " sheet, add one row per company, picking the "
-                        + "Client Ref of the client who holds it from the drop-down. Every client needs 1 to "
-                        + ClientRequest.MAX_COMPANIES + " companies. Give a company's opening balance there "
-                        + "too, if it brings one."))
+                .addRow(Cell.text("1. On the " + CLIENTS_SHEET + " sheet, add one row per new client, each with "
+                        + "its own Client ID, such as PSC-00001, PSC-00002. Pick the Manager Name from the drop-down, "
+                        + "which offers the managers on the " + MANAGERS_SHEET + " sheet as they were when this "
+                        + "template was downloaded. A client whose Client ID is already on file is not created "
+                        + "again, and its details are left as they are."))
+                .addRow(Cell.text("2. On the " + COMPANIES_SHEET + " sheet, add one row per company, giving the "
+                        + "Client ID of the client who holds it: picked from the drop-down for a client on the "
+                        + CLIENTS_SHEET + " sheet, or typed in for a client already on file, who then need not be "
+                        + "on the " + CLIENTS_SHEET + " sheet. Every new client needs 1 to "
+                        + ClientRequest.MAX_COMPANIES + " companies, and no client may hold more than "
+                        + ClientRequest.MAX_COMPANIES + " in all. Give a company's opening balance there too, if it "
+                        + "brings one."))
                 .addRow(Cell.text("3. Keep the headings in row 1 as they are. Blank rows are skipped. Up to "
                         + MAX_CLIENTS + " clients per file. Columns with a set list of values offer it in a "
                         + "drop-down. The " + MANAGERS_SHEET + " sheet is for reference and is not imported."))
                 .addRow(Cell.text("4. The file is imported whole or not at all: if any cell is wrong, nothing is "
                         + "imported, and every cell at fault is listed so it can be corrected."))
-                .addRow(Cell.text("Importing the same file twice creates the clients twice."))
+                .addRow(Cell.text("Importing the same file twice does not create its clients twice, as their "
+                        + "Client IDs are then on file, but it does add their companies to them again."))
                 .addBlankRow()
                 .addRow(Cell.bold("Sheet"), Cell.bold("Column"), Cell.bold("Required"), Cell.bold("What to enter"),
                         Cell.bold("Example"));
@@ -213,42 +238,29 @@ public class ClientImportServiceImpl implements ClientImportService {
         }
 
         CellErrors errors = new CellErrors();
-        Map<String, PendingClient> clients = readClients(clientSheet, errors);
-        readCompanies(companySheet, clients, errors);
+        Map<String, Client> onFile = clientsOnFile(clientSheet, companySheet);
+        Map<String, PendingClient> clients = readClients(clientSheet, onFile, errors);
+        readCompanies(companySheet, clients, onFile, errors);
         clients.values().forEach(client -> validate(client, errors));
         if (!errors.isEmpty()) {
             throw errors.toException();
         }
         if (clients.isEmpty()) {
-            throw new SpreadsheetValidationException("The " + CLIENTS_SHEET + " sheet has no clients below its "
-                    + "headings");
+            throw new SpreadsheetValidationException("The workbook has no clients or companies below the "
+                    + "headings of its " + CLIENTS_SHEET + " and " + COMPANIES_SHEET + " sheets");
         }
 
-        List<ImportedClient> imported = new ArrayList<>();
-        for (PendingClient client : clients.values()) {
-            ClientResponse created = clientService.createClient(client.request());
-            // The opening balances as the ledger recorded them, which the created companies carry.
-            List<BigDecimal> openings = created.getCompanies().stream()
-                    .map(CompanyResponse::getOpeningBalanceAmount)
-                    .filter(Objects::nonNull)
-                    .toList();
-            imported.add(ImportedClient.builder()
-                    .clientRef(client.ref)
-                    .clientId(created.getId())
-                    .clientName(created.getFirstName() + " " + created.getLastName())
-                    .companyCount(created.getCompanies().size())
-                    .openingBalanceCount(openings.size())
-                    .openingBalanceTotal(sum(openings.stream()))
-                    .companies(created.getCompanies().stream().map(ClientImportServiceImpl::imported).toList())
-                    .build());
-        }
+        List<ImportedClient> imported = clients.values().stream().map(this::importClient).toList();
+        int createdCount = (int) imported.stream().filter(ImportedClient::isCreated).count();
         int companyCount = imported.stream().mapToInt(ImportedClient::getCompanyCount).sum();
         int openingBalanceCount = imported.stream().mapToInt(ImportedClient::getOpeningBalanceCount).sum();
-        log.info("Imported {} client(s) with {} company(ies), {} with an opening balance, from a workbook",
-                imported.size(), companyCount, openingBalanceCount);
+        log.info("Imported {} new client(s) and added to {} client(s) on file, with {} company(ies), {} with an "
+                + "opening balance, from a workbook", createdCount, imported.size() - createdCount, companyCount,
+                openingBalanceCount);
 
         return ClientImportResponse.builder()
-                .clientCount(imported.size())
+                .clientCount(createdCount)
+                .existingClientCount(imported.size() - createdCount)
                 .companyCount(companyCount)
                 .openingBalanceCount(openingBalanceCount)
                 .openingBalanceTotal(sum(imported.stream().map(ImportedClient::getOpeningBalanceTotal)))
@@ -256,24 +268,107 @@ public class ClientImportServiceImpl implements ClientImportService {
                 .build();
     }
 
-    private Map<String, PendingClient> readClients(XlsxReader.Sheet sheet, CellErrors errors) {
+    /**
+     * Creates a client not yet on file, with their companies, or adds the companies to a client who is.
+     *
+     * @param client the client as read and checked
+     * @return what was imported for the client
+     */
+    private ImportedClient importClient(PendingClient client) {
+        if (client.existing == null) {
+            ClientResponse created = clientService.createClient(client.request());
+            return imported(created.getId(), created.getClientId(), true,
+                    created.getFirstName() + " " + created.getLastName(), created.getCompanies());
+        }
+        Client existing = client.existing;
+        List<CompanyResponse> added = client.companies.stream()
+                .map(company -> clientCompanyService.addCompany(existing.getId(), companyRequest(company.request())))
+                .toList();
+        return imported(existing.getId(), existing.getClientId(), false,
+                existing.getFirstName() + " " + existing.getLastName(), added);
+    }
+
+    private static ImportedClient imported(UUID id, String clientId, boolean created, String clientName,
+                                           List<CompanyResponse> companies) {
+        // The opening balances as the ledger recorded them, which the created companies carry.
+        List<BigDecimal> openings = companies.stream()
+                .map(CompanyResponse::getOpeningBalanceAmount)
+                .filter(Objects::nonNull)
+                .toList();
+        return ImportedClient.builder()
+                .id(id)
+                .clientId(clientId)
+                .created(created)
+                .clientName(clientName)
+                .companyCount(companies.size())
+                .openingBalanceCount(openings.size())
+                .openingBalanceTotal(sum(openings.stream()))
+                .companies(companies.stream().map(ClientImportServiceImpl::imported).toList())
+                .build();
+    }
+
+    /** A company read for a client already on file, as the company endpoint takes it. */
+    private static CompanyRequest companyRequest(NewCompanyRequest company) {
+        return CompanyRequest.builder()
+                .companyName(company.companyName())
+                .companyType(company.companyType())
+                .address(company.address())
+                .discountPercent(company.discountPercent())
+                .openingBalance(company.openingBalance())
+                .openingBalanceDate(company.openingBalanceDate())
+                .build();
+    }
+
+    /**
+     * The clients already on file that either sheet names by client id, with their companies, keyed by
+     * {@link SpreadsheetImport#key}, so a client id typed in lower case still finds its client. Read in
+     * one query.
+     */
+    private Map<String, Client> clientsOnFile(XlsxReader.Sheet clientSheet, XlsxReader.Sheet companySheet) {
+        // Client ids are stored in upper case, as PSC-00001.
+        Set<String> clientIds = Stream.of(clientSheet, companySheet)
+                .flatMap(sheet -> SpreadsheetImport.dataRows(sheet).values().stream())
+                .map(values -> values.get(CLIENT_ID))
+                .filter(value -> value != null && !value.isBlank())
+                .map(value -> value.strip().toUpperCase(Locale.ROOT))
+                .collect(Collectors.toSet());
+        if (clientIds.isEmpty()) {
+            return Map.of();
+        }
+        return clientRepository.findByClientIdIn(clientIds).stream()
+                .collect(Collectors.toMap(client -> SpreadsheetImport.key(client.getClientId()),
+                        Function.identity()));
+    }
+
+    private Map<String, PendingClient> readClients(XlsxReader.Sheet sheet, Map<String, Client> onFile,
+                                                   CellErrors errors) {
         // "Today" is the firm's calendar day, read from the business clock.
         LocalDate today = LocalDate.now(clock);
         Map<String, List<UUID>> managers = managersByName();
         Map<String, PendingClient> clients = new LinkedHashMap<>();
         SpreadsheetImport.dataRows(sheet).forEach((row, values) -> {
             Row cells = new Row(CLIENTS, row, values, errors);
-            String ref = cells.text(REF);
-            if (ref == null) {
-                cells.error(REF, "must not be blank: give each client a reference to link their companies to");
+            String clientId = cells.text(CLIENT_ID);
+            if (clientId == null) {
+                cells.error(CLIENT_ID, "must not be blank: give each client their client id");
                 return;
             }
-            PendingClient earlier = clients.get(SpreadsheetImport.key(ref));
+            String key = SpreadsheetImport.key(clientId);
+            PendingClient earlier = clients.get(key);
             if (earlier != null) {
-                cells.error(REF, "repeats the Client Ref of row " + earlier.row + "; give each client its own");
+                cells.error(CLIENT_ID, "repeats the Client ID of row " + earlier.row + "; give each client their "
+                        + "own");
+                return;
+            }
+            Client existing = onFile.get(key);
+            if (existing != null) {
+                // Already on file: the rest of the row is not read, and only companies are added.
+                clients.put(key, new PendingClient(row, existing));
                 return;
             }
             ClientRequest.ClientRequestBuilder request = ClientRequest.builder()
+                    // Stored in upper case, so psc-00001 typed reads as PSC-00001.
+                    .clientId(clientId.toUpperCase(Locale.ROOT))
                     .firstName(cells.text(1))
                     .lastName(cells.text(2))
                     .phone(cells.text(3))
@@ -281,7 +376,7 @@ public class ClientImportServiceImpl implements ClientImportService {
                     .managerId(manager(cells, MANAGER_NAME, managers))
                     .discountPercent(cells.percent(6))
                     .birthday(cells.dateUpTo(7, today));
-            clients.put(SpreadsheetImport.key(ref), new PendingClient(row, ref, request));
+            clients.put(key, new PendingClient(row, request));
         });
         return clients;
     }
@@ -335,7 +430,8 @@ public class ClientImportServiceImpl implements ClientImportService {
         return WHITESPACE.matcher(SpreadsheetImport.key(name)).replaceAll(" ");
     }
 
-    private void readCompanies(XlsxReader.Sheet sheet, Map<String, PendingClient> clients, CellErrors errors) {
+    private void readCompanies(XlsxReader.Sheet sheet, Map<String, PendingClient> clients, Map<String, Client> onFile,
+                               CellErrors errors) {
         // "Today" is the firm's calendar day, read from the business clock, as the ledger reads it.
         LocalDate today = LocalDate.now(clock);
         SpreadsheetImport.dataRows(sheet).forEach((row, values) -> {
@@ -348,12 +444,15 @@ public class ClientImportServiceImpl implements ClientImportService {
                     .openingBalance(cells.amount(5))
                     .openingBalanceDate(cells.dateUpTo(6, today))
                     .build();
-            String ref = cells.text(REF);
-            PendingClient client = ref == null ? null : clients.get(SpreadsheetImport.key(ref));
-            if (ref == null) {
-                cells.error(REF, "must not be blank: give the Client Ref of the client who holds the company");
+            String clientId = cells.text(CLIENT_ID);
+            PendingClient client = clientId == null
+                    ? null
+                    : clientFor(SpreadsheetImport.key(clientId), clients, onFile);
+            if (clientId == null) {
+                cells.error(CLIENT_ID, "must not be blank: give the Client ID of the client who holds the company");
             } else if (client == null) {
-                cells.error(REF, "no client on the " + CLIENTS_SHEET + " sheet has the Client Ref " + ref);
+                cells.error(CLIENT_ID, "no client on the " + CLIENTS_SHEET + " sheet or already on file has the "
+                        + "Client ID " + clientId);
             } else {
                 client.companies.add(new PendingCompany(row, request));
             }
@@ -361,10 +460,33 @@ public class ClientImportServiceImpl implements ClientImportService {
     }
 
     /**
+     * The client a company is linked to: one on the Clients sheet, or else one already on file, who is
+     * then added to the clients imported, after those on the Clients sheet. Null when there is neither.
+     */
+    private static PendingClient clientFor(String key, Map<String, PendingClient> clients,
+                                           Map<String, Client> onFile) {
+        PendingClient client = clients.get(key);
+        Client existing = onFile.get(key);
+        if (client == null && existing != null) {
+            client = new PendingClient(null, existing);
+            clients.put(key, client);
+        }
+        return client;
+    }
+
+    private void validate(PendingClient client, CellErrors errors) {
+        if (client.existing == null) {
+            validateNew(client, errors);
+        } else {
+            validateAdded(client, errors);
+        }
+    }
+
+    /**
      * Checks a client and their companies against the rules of {@code POST /clients}, reporting each
      * rule broken against the cell it concerns. A cell already reported keeps its first error.
      */
-    private void validate(PendingClient client, CellErrors errors) {
+    private void validateNew(PendingClient client, CellErrors errors) {
         for (ConstraintViolation<ClientRequest> violation : validator.validate(client.request())) {
             String path = violation.getPropertyPath().toString();
             Matcher company = COMPANY_PATH.matcher(path);
@@ -374,34 +496,78 @@ public class ClientImportServiceImpl implements ClientImportService {
                         violation.getMessage());
             } else if (path.startsWith("companies")) {
                 // The client has no companies, or too many: reported on the client's own row.
-                errors.add(CLIENTS, client.row, REF, violation.getMessage() + " on the " + COMPANIES_SHEET + " sheet");
+                errors.add(CLIENTS, client.row, CLIENT_ID, violation.getMessage() + " on the " + COMPANIES_SHEET
+                        + " sheet");
             } else {
                 errors.add(CLIENTS, client.row, columnOf(CLIENTS, path), violation.getMessage());
             }
         }
     }
 
-    /** The column filling this field, or the reference column for a field no column fills. */
-    private static int columnOf(SheetLayout layout, String field) {
-        int column = layout.columnOf(FIELD_COLUMNS.getOrDefault(field, field));
-        return column < 0 ? REF : column;
+    /**
+     * Checks the companies to add to a client already on file against the rules of
+     * {@code POST /clients/{id}/companies}, reporting each rule broken against the cell it concerns: the
+     * client must be given at least one, and may not then hold more than {@link ClientRequest#MAX_COMPANIES}.
+     */
+    private void validateAdded(PendingClient client, CellErrors errors) {
+        Client existing = client.existing;
+        if (client.companies.isEmpty()) {
+            // Only a client on the Clients sheet can be without companies, so the client has a row.
+            errors.add(CLIENTS, client.row, CLIENT_ID, "is already on file, so only companies are added to that "
+                    + "client: link at least one to it on the " + COMPANIES_SHEET + " sheet");
+            return;
+        }
+        for (PendingCompany company : client.companies) {
+            for (ConstraintViolation<NewCompanyRequest> violation : validator.validate(company.request())) {
+                errors.add(COMPANIES, company.row(), columnOf(COMPANIES, violation.getPropertyPath().toString()),
+                        violation.getMessage());
+            }
+        }
+        int held = existing.getCompanies().size();
+        if (held + client.companies.size() > ClientRequest.MAX_COMPANIES) {
+            // Reported on the first company that would take the client past the limit.
+            PendingCompany over = client.companies.get(Math.max(0, ClientRequest.MAX_COMPANIES - held));
+            errors.add(COMPANIES, over.row(), CLIENT_ID, "client " + existing.getClientId() + " already holds "
+                    + held + " companies, and may hold at most " + ClientRequest.MAX_COMPANIES + "; "
+                    + client.companies.size() + " are linked to it here");
+        }
     }
 
-    /** A client read from the Clients sheet, gathering their companies from the Companies sheet. */
+    /** The column filling this field, or the client id column for a field no column fills. */
+    private static int columnOf(SheetLayout layout, String field) {
+        int column = layout.columnOf(FIELD_COLUMNS.getOrDefault(field, field));
+        return column < 0 ? CLIENT_ID : column;
+    }
+
+    /**
+     * A client named on the workbook, gathering their companies from the Companies sheet: either a new
+     * client, read from the Clients sheet, or one already on file, to add the companies to.
+     */
     private static final class PendingClient {
 
-        private final int row;
+        /** The client's row on the Clients sheet; null for a client on file named only on the Companies sheet. */
+        private final Integer row;
 
-        private final String ref;
-
+        /** The new client as read; null for a client already on file. */
         private final ClientRequest.ClientRequestBuilder request;
+
+        /** The client already on file, with their companies; null for a new client. */
+        private final Client existing;
 
         private final List<PendingCompany> companies = new ArrayList<>();
 
-        private PendingClient(int row, String ref, ClientRequest.ClientRequestBuilder request) {
+        /** A new client, read from a row of the Clients sheet. */
+        private PendingClient(int row, ClientRequest.ClientRequestBuilder request) {
             this.row = row;
-            this.ref = ref;
             this.request = request;
+            this.existing = null;
+        }
+
+        /** A client already on file, named on the Clients sheet at a row, or only on the Companies sheet. */
+        private PendingClient(Integer row, Client existing) {
+            this.row = row;
+            this.request = null;
+            this.existing = existing;
         }
 
         /** The client as a create request, with their companies in the order of the Companies sheet. */

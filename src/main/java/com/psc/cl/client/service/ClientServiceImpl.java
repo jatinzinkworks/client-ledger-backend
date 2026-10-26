@@ -7,9 +7,12 @@ import com.psc.cl.client.dto.ClientResponse;
 import com.psc.cl.client.dto.ClientSummaryResponse;
 import com.psc.cl.client.dto.ClientUpdateRequest;
 import com.psc.cl.client.dto.NewCompanyRequest;
+import com.psc.cl.client.dto.NextClientIdResponse;
 import com.psc.cl.client.exception.AssignedManagerNotFoundException;
 import com.psc.cl.client.exception.ClientHasLedgerEntriesException;
 import com.psc.cl.client.exception.ClientHasServicesException;
+import com.psc.cl.client.exception.ClientIdAlreadyExistsException;
+import com.psc.cl.client.exception.ClientIdsExhaustedException;
 import com.psc.cl.client.exception.ClientNotFoundException;
 import com.psc.cl.client.exception.ClientsNotFoundException;
 import com.psc.cl.client.model.Client;
@@ -52,6 +55,9 @@ public class ClientServiceImpl implements ClientService {
     /** What a client with no ledger entries owes, at the ledger's scale. */
     private static final BigDecimal NOTHING_PENDING = new BigDecimal("0.00");
 
+    /** The highest number a client id can carry in its digits: 99999. */
+    private static final int MAX_CLIENT_ID_NUMBER = (int) Math.pow(10, Client.CLIENT_ID_DIGITS) - 1;
+
     private final ClientRepository clientRepository;
 
     private final ServiceAssignmentRepository serviceAssignmentRepository;
@@ -63,18 +69,42 @@ public class ClientServiceImpl implements ClientService {
     @Override
     @Transactional
     public ClientResponse createClient(ClientRequest request) {
+        String clientId = request.clientId().trim();
+        if (clientRepository.existsByClientId(clientId)) {
+            throw new ClientIdAlreadyExistsException(clientId);
+        }
         Manager manager = requireAssignableManager(request.managerId());
 
         Client client = new Client();
+        // Set only here: the client id is fixed once the client is added.
+        client.setClientId(clientId);
         applyClient(request, client);
         request.companies().forEach(company -> client.addCompany(Companies.newCompany(company)));
 
         Client saved = clientRepository.save(client);
         int openingBalances = recordOpeningBalances(saved, request.companies());
-        log.info("Created client {} assigned to manager {} with {} company(ies), {} with an opening balance",
-                saved.getId(), saved.getManagerId(), saved.getCompanies().size(), openingBalances);
+        log.info("Created client {} ({}) assigned to manager {} with {} company(ies), {} with an opening balance",
+                saved.getId(), saved.getClientId(), saved.getManagerId(), saved.getCompanies().size(), openingBalances);
 
         return ClientResponse.from(saved, manager, openingBalancesOf(saved));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public NextClientIdResponse nextClientId() {
+        // Every client id has the same width, so the highest sorts last.
+        int next = clientRepository.findMaxClientId()
+                .map(highest -> {
+                    int number = Integer.parseInt(highest.substring(Client.CLIENT_ID_PREFIX.length()));
+                    if (number >= MAX_CLIENT_ID_NUMBER) {
+                        throw new ClientIdsExhaustedException(highest);
+                    }
+                    return number + 1;
+                })
+                .orElse(1);
+        String clientId = Client.CLIENT_ID_PREFIX + String.format("%0" + Client.CLIENT_ID_DIGITS + "d", next);
+        log.debug("Next free client id is {}", clientId);
+        return new NextClientIdResponse(clientId);
     }
 
     @Override

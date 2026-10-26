@@ -13,8 +13,6 @@ tags:
   description: The firm's position across every client
 - name: Global Settings
   description: "Tenant-wide configuration for the Client Ledger, such as payment terms"
-- name: Notifications
-  description: Emails sent to clients about their accounts
 - name: Client Services
   description: Services from the Service Catalog delivered to a client's companies
 - name: Clients
@@ -26,8 +24,12 @@ tags:
 - name: Manager Catalog
   description: "Staff who can be assigned to client work, with their roles and contact\
     \ details"
+- name: Notifications
+  description: "Emails sent to clients about their accounts, and the PDF they attach"
 - name: Ledger
   description: Amounts client companies owe for the services delivered to them
+- name: Birthdays
+  description: "Clients' birthdays, to greet them on the day"
 paths:
   /psc/cl/v1/services/{id}:
     get:
@@ -361,8 +363,8 @@ paths:
       tags:
       - Clients
       summary: Fetch a client
-      description: "Returns one client by identifier, with their companies in full\
-        \ and the name of the manager who looks after them."
+      description: "Returns one client by identifier, with their client id, their\
+        \ companies in full and the name of the manager who looks after them."
       operationId: getClient
       parameters:
       - name: id
@@ -402,10 +404,11 @@ paths:
       tags:
       - Clients
       summary: Update a client
-      description: Replaces a client's own fields wholesale. The client's companies
-        are left as they are; add or delete them through the company endpoints. An
-        omitted client discount resets to zero. Companies without a discount of their
-        own take the new client discount.
+      description: "Replaces a client's own fields wholesale. The client's companies\
+        \ are left as they are; add or delete them through the company endpoints.\
+        \ The client id cannot be changed, so it is not part of the payload. An omitted\
+        \ client discount resets to zero. Companies without a discount of their own\
+        \ take the new client discount."
       operationId: updateClient
       parameters:
       - name: id
@@ -1633,11 +1636,12 @@ paths:
       - Clients
       summary: List clients
       description: "Returns every client, or only the clients of one manager when\
-        \ managerId is given, ordered by last name then first name. Each entry names\
-        \ the client's companies only; fetch a client by id for the full company details.\
-        \ Each entry also carries what the client still owes (totalPending): everything\
-        \ billed to all of their companies less every payment received, across all\
-        \ financial years. The list is returned whole; it is not paged."
+        \ managerId is given, ordered by last name then first name. Each entry carries\
+        \ the client's client id and names the client's companies only; fetch a client\
+        \ by id for the full company details. Each entry also carries what the client\
+        \ still owes (totalPending): everything billed to all of their companies less\
+        \ every payment received, across all financial years. The list is returned\
+        \ whole; it is not paged."
       operationId: listClients
       parameters:
       - name: managerId
@@ -1676,11 +1680,14 @@ paths:
       summary: Create a client
       description: "Adds a client together with the companies they hold. Every field\
         \ is mandatory, at least one company must be supplied, and the assigned manager\
-        \ must already exist in the Manager Catalog. A company may bring an opening\
-        \ balance: what it owed (positive) or was owed (negative) when taken on, dated\
-        \ openingBalanceDate or the day the client is added. It is recorded in the\
-        \ company's ledger as an OPENING_BALANCE entry, counted in what is pending\
-        \ but not as billed. Nothing is created when any of it cannot be."
+        \ must already exist in the Manager Catalog. The clientId is the firm's own\
+        \ identifier for the client, PSC- followed by 5 digits: no other client may\
+        \ hold it, and it cannot be changed afterwards. GET /clients/next-client-id\
+        \ suggests the next free one. A company may bring an opening balance: what\
+        \ it owed (positive) or was owed (negative) when taken on, dated openingBalanceDate\
+        \ or the day the client is added. It is recorded in the company's ledger as\
+        \ an OPENING_BALANCE entry, counted in what is pending but not as billed.\
+        \ Nothing is created when any of it cannot be."
       operationId: createClient
       requestBody:
         description: "Client to add, with their companies"
@@ -1705,6 +1712,12 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: The assigned manager does not exist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Another client already holds the clientId
           content:
             application/json:
               schema:
@@ -2475,17 +2488,22 @@ paths:
       tags:
       - Clients
       summary: Import clients and their companies from an Excel workbook
-      description: "Creates every client on a filled-in import template (GET /clients/import/template),\
-        \ each with the companies the Companies sheet links to them, as POST /clients\
-        \ would. The import is all or nothing: every row is checked first, and if\
-        \ any cell is missing or invalid, nothing is created and each cell at fault\
-        \ is listed under errors, by reference such as Clients!F3. Managers are named\
-        \ by their email in the Manager Catalog. Up to 500 clients may be imported\
-        \ at once, each with 1 to 50 companies. Clients already on file are not looked\
-        \ for, so importing the same workbook twice creates its clients twice. The\
-        \ response lists each company created with the opening balance recorded for\
-        \ it, and counts and adds those balances up per client and overall, so they\
-        \ can be checked against the workbook."
+      description: "Imports a filled-in import template (GET /clients/import/template),\
+        \ matching clients by their Client ID, ignoring case. A Client ID no client\
+        \ holds yet creates the client, with the companies the Companies sheet links\
+        \ to it, as POST /clients would. A Client ID a client already holds adds the\
+        \ companies linked to it to that client, as POST /clients/{id}/companies would,\
+        \ leaving the client's own details as they are; such a client need not be\
+        \ on the Clients sheet. The import is all or nothing: every row is checked\
+        \ first, and if any cell is missing or invalid, nothing is created and each\
+        \ cell at fault is listed under errors, by reference such as Clients!F3. Managers\
+        \ are named by their full name in the Manager Catalog. Up to 500 clients may\
+        \ be listed at once; each new client needs 1 to 50 companies, and no client\
+        \ may hold more than 50 in all. Importing the same workbook twice does not\
+        \ create its clients twice, but adds their companies again. The response lists\
+        \ each client created or added to, and each company created with the opening\
+        \ balance recorded for it, and counts and adds those balances up per client\
+        \ and overall, so they can be checked against the workbook."
       operationId: importClients
       requestBody:
         content:
@@ -2501,8 +2519,8 @@ paths:
               - file
       responses:
         "201":
-          description: "Every client and company was created, with the opening balances\
-            \ recorded"
+          description: "Every new client and every company was created, with the opening\
+            \ balances recorded"
           content:
             application/json:
               schema:
@@ -2517,7 +2535,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: A manager was deleted while the import ran; nothing was created
+          description: A manager or a client was deleted while the import ran; nothing
+            was created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "Another import or request added a client under one of the\
+            \ workbook's Client IDs, or companies to one of its clients, while the\
+            \ import ran; nothing was created"
           content:
             application/json:
               schema:
@@ -3156,6 +3183,79 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/clients/{clientId}/ledger-summary-pdf:
+    get:
+      tags:
+      - Notifications
+      summary: Download a client's ledger summary as a PDF
+      description: "Downloads the PDF ledger statement that emailing the client their\
+        \ ledger summary attaches, without sending anything, across all of the client's\
+        \ companies, every page headed by the firm's logo and its name from Global\
+        \ Settings. With financialYear, it covers that Indian financial year (1 April\
+        \ to 31 March); for the current year it is exactly the PDF the email attaches.\
+        \ Without it, it covers every year the client has been one, from the year\
+        \ they were added (or of their earliest entry) to the current year, as one\
+        \ period: the summary is across the whole span, so the amount pending is what\
+        \ the client owes overall, and each company lists every entry since it was\
+        \ taken on with a running balance. Either way it opens with the summary and\
+        \ a line per company, then each company's charges and payments on a page of\
+        \ its own, every charge as one total fee and every payment as the amount paid,\
+        \ with no discount shown. The file is named after the client and the year,\
+        \ such as Rohan_Mehta_Ledger_FY2026-27.pdf, or Rohan_Mehta_Ledger_All_Years.pdf\
+        \ for every year."
+      operationId: downloadClientLedgerSummaryPdf
+      parameters:
+      - name: clientId
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: financialYear
+        in: query
+        description: "Indian financial year of the statement, written as yyyy-yy.\
+          \ Omit for every year the client has been one, together"
+        required: false
+        schema:
+          type: string
+        example: 2026-27
+      responses:
+        "200":
+          description: "The PDF, as an attachment; a year with no entries gives zero\
+            \ totals"
+          headers:
+            Content-Disposition:
+              description: "attachment, with the statement's file name"
+              style: simple
+              schema:
+                type: string
+                example: attachment; filename="Rohan_Mehta_Ledger_FY2026-27.pdf"
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: "financialYear is not a year such as 2026-27, or the identifier\
+            \ is not a valid UUID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No client carries this identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /psc/cl/v1/clients/{clientId}/ledger-status:
     get:
       tags:
@@ -3490,6 +3590,87 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/clients/{clientId}/companies/{companyId}/ledger-summary-pdf:
+    get:
+      tags:
+      - Notifications
+      summary: Download the ledger summary of one of a client's companies as a PDF
+      description: "Downloads the PDF ledger statement that emailing the client the\
+        \ ledger summary of one of their companies attaches, without sending anything,\
+        \ every page headed by the firm's logo and its name from Global Settings.\
+        \ With financialYear, it covers that Indian financial year (1 April to 31\
+        \ March); for the current year it is exactly the PDF the email attaches. Without\
+        \ it, it covers every year as one period, from the year the client was added\
+        \ (or of the company's earliest entry, if earlier) to the current year: the\
+        \ summary is across the whole span, so the amount pending is what the company\
+        \ owes overall, and the details list every entry since it was taken on with\
+        \ a running balance. Either way it opens with the company's summary, then\
+        \ its charges and payments, every charge as one total fee and every payment\
+        \ as the amount paid, with no discount shown. The file is named after the\
+        \ company and the year, such as Mehta_Textiles_Pvt_Ltd_Ledger_FY2026-27.pdf,\
+        \ or Mehta_Textiles_Pvt_Ltd_Ledger_All_Years.pdf for every year."
+      operationId: downloadLedgerSummaryPdf
+      parameters:
+      - name: clientId
+        in: path
+        description: Identifier of the client
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+      - name: companyId
+        in: path
+        description: Identifier of the company
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 4c1f8a52-2d6b-4e93-b7a0-9e5d3c1f6a28
+      - name: financialYear
+        in: query
+        description: "Indian financial year of the statement, written as yyyy-yy.\
+          \ Omit for every year together"
+        required: false
+        schema:
+          type: string
+        example: 2026-27
+      responses:
+        "200":
+          description: "The PDF, as an attachment; a period with no entries gives\
+            \ zero totals"
+          headers:
+            Content-Disposition:
+              description: "attachment, with the statement's file name"
+              style: simple
+              schema:
+                type: string
+                example: attachment; filename="Mehta_Textiles_Pvt_Ltd_Ledger_FY2026-27.pdf"
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: "financialYear is not a year such as 2026-27, or an identifier\
+            \ is not a valid UUID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "No client carries this identifier, or the client holds no\
+            \ such company"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /psc/cl/v1/clients/{clientId}/companies/{companyId}/ledger-export:
     get:
       tags:
@@ -3568,18 +3749,48 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/clients/next-client-id:
+    get:
+      tags:
+      - Clients
+      summary: Get the next free client id
+      description: "Returns the client id to give the next client added: the highest\
+        \ client id held plus one, as PSC-00042, or PSC-00001 when there are no clients.\
+        \ The id is not reserved: if another client is added under it first, creating\
+        \ a client with it returns 409, and this endpoint can be asked again."
+      operationId: nextClientId
+      responses:
+        "200":
+          description: The next free client id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NextClientIdResponse"
+        "409":
+          description: The highest client id held is already PSC-99999
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /psc/cl/v1/clients/import/template:
     get:
       tags:
       - Clients
       summary: Download the client import template
       description: "Returns the Excel workbook to fill in for POST /clients/import.\
-        \ Its Clients sheet takes one row per client: Client Ref, First Name, Last\
+        \ Its Clients sheet takes one row per client: Client ID, First Name, Last\
         \ Name, Phone, Email, Manager Name, Discount % and Birthday. Its Companies\
-        \ sheet takes one row per company: Client Ref, Company Name, Company Type,\
-        \ Address and Discount %, linked to its client by the Client Ref. An Instructions\
-        \ sheet describes every column with an example. Only clients and their companies\
-        \ are imported; services are assigned afterwards as usual."
+        \ sheet takes one row per company: Client ID, Company Name, Company Type,\
+        \ Address, Discount %, Opening Balance and Opening Balance Date, linked to\
+        \ its client by the Client ID. An Instructions sheet describes every column\
+        \ with an example. Only clients and their companies are imported; services\
+        \ are assigned afterwards as usual."
       operationId: downloadTemplate_1
       responses:
         "200":
@@ -3596,6 +3807,49 @@ paths:
               schema:
                 type: string
                 format: binary
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /psc/cl/v1/birthdays:
+    get:
+      tags:
+      - Birthdays
+      summary: List the clients with a birthday in a month
+      description: "Returns every client whose birthday falls in the given month,\
+        \ whatever the year they were born, ordered by day of the month, then first\
+        \ and last name. Clients without a birthday recorded are left out. The list\
+        \ is returned whole; it is not paged."
+      operationId: listBirthdays
+      parameters:
+      - name: month
+        in: query
+        description: "Month of the year, 1 for January to 12 for December"
+        required: true
+        schema:
+          type: integer
+          maximum: 12
+          minimum: 1
+        example: 7
+      responses:
+        "200":
+          description: "The clients with a birthday in the month, empty when there\
+            \ are none"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ClientBirthdayResponse"
+        "400":
+          description: "month is missing, not a whole number, or not between 1 and\
+            \ 12"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Unexpected server error
           content:
@@ -3909,6 +4163,11 @@ components:
           format: uuid
           description: Identifier of the client
           example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+        clientId:
+          type: string
+          description: The firm's own identifier for the client; fixed when the client
+            is added
+          example: PSC-00001
         firstName:
           type: string
           description: Given name of the client
@@ -4085,6 +4344,11 @@ components:
           format: uuid
           description: Identifier of the client
           example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+        clientId:
+          type: string
+          description: The firm's own identifier for the client; fixed when the client
+            is added
+          example: PSC-00001
         firstName:
           type: string
           description: Given name of the client
@@ -4993,6 +5257,14 @@ components:
       type: object
       description: "Client to add, with the companies they hold"
       properties:
+        clientId:
+          type: string
+          description: "The firm's own identifier for the client: PSC- followed by\
+            \ 5 digits, held by no other client. GET /clients/next-client-id suggests\
+            \ the next free one. It cannot be changed once the client is added"
+          example: PSC-00001
+          minLength: 1
+          pattern: "^PSC-[0-9]{5}$"
         firstName:
           type: string
           description: Given name of the client
@@ -5047,6 +5319,7 @@ components:
           maxItems: 50
           minItems: 0
       required:
+      - clientId
       - companies
       - email
       - firstName
@@ -5190,6 +5463,11 @@ components:
           format: int32
           description: How many clients were created
           example: 2
+        existingClientCount:
+          type: integer
+          format: int32
+          description: How many clients already on file had companies added to them
+          example: 1
         companyCount:
           type: integer
           format: int32
@@ -5209,22 +5487,30 @@ components:
           example: 20000.0
         clients:
           type: array
-          description: "Each client created, in the order of the Clients sheet"
+          description: "Each client the import created or added companies to: first\
+            \ those on the Clients sheet, in its order, then any named only on the\
+            \ Companies sheet"
           items:
             $ref: "#/components/schemas/ImportedClient"
     ImportedClient:
       type: object
-      description: A client created by an import
+      description: "A client created by an import, or one already on file that an\
+        \ import added companies to"
       properties:
-        clientRef:
-          type: string
-          description: The client's reference on the Clients sheet
-          example: C1
-        clientId:
+        id:
           type: string
           format: uuid
-          description: Identifier given to the new client
+          description: Identifier of the client
           example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+        clientId:
+          type: string
+          description: "The client's client id, as on file"
+          example: PSC-00001
+        created:
+          type: boolean
+          description: True when the import created the client; false when the client
+            was already on file and only had companies added
+          example: true
         clientName:
           type: string
           description: Full name of the client
@@ -5248,8 +5534,8 @@ components:
           example: 25000.0
         companies:
           type: array
-          description: "Each company created for the client, by name, with the opening\
-            \ balance recorded for it"
+          description: "Each company created for the client, with the opening balance\
+            \ recorded for it"
           items:
             $ref: "#/components/schemas/ImportedCompany"
     ImportedCompany:
@@ -6524,6 +6810,59 @@ components:
           $ref: "#/components/schemas/LastPayment"
           description: The most recent payment received in the year; absent when none
             was received
+    NextClientIdResponse:
+      type: object
+      description: The next free client id
+      properties:
+        clientId:
+          type: string
+          description: "One above the highest client id held, or PSC-00001 when there\
+            \ are no clients"
+          example: PSC-00042
+    ClientBirthdayResponse:
+      type: object
+      description: A client's birthday
+      properties:
+        clientId:
+          type: string
+          format: uuid
+          description: Identifier of the client
+          example: 7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35
+        firstName:
+          type: string
+          description: Given name of the client
+          example: Rohan
+        lastName:
+          type: string
+          description: Family name of the client
+          example: Mehta
+        birthday:
+          type: string
+          format: date
+          description: Date of birth of the client
+          example: 1985-07-23
+        dayOfMonth:
+          type: integer
+          format: int32
+          description: Day of the month the birthday falls on
+          example: 23
+        phone:
+          type: string
+          description: Contact phone number
+          example: +91 98200 12345
+        email:
+          type: string
+          description: Contact email address
+          example: rohan.mehta@example.com
+        managerId:
+          type: string
+          format: uuid
+          description: Identifier of the manager who looks after the client
+          example: e9b2c4d1-7f35-4a68-91c0-3d8a5e2f6b47
+        managerName:
+          type: string
+          description: Full name of the manager who looks after the client
+          example: Pranay Singhal
   securitySchemes:
     bearerAuth:
       type: http

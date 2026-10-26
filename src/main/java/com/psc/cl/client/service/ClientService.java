@@ -5,6 +5,7 @@ import com.psc.cl.client.dto.ClientRequest;
 import com.psc.cl.client.dto.ClientResponse;
 import com.psc.cl.client.dto.ClientSummaryResponse;
 import com.psc.cl.client.dto.ClientUpdateRequest;
+import com.psc.cl.client.dto.NextClientIdResponse;
 
 import java.util.List;
 import java.util.UUID;
@@ -23,12 +24,24 @@ public interface ClientService {
      *
      * @param request the client to create
      * @return the created client, including the generated identifiers
+     * @throws com.psc.cl.client.exception.ClientIdAlreadyExistsException
+     *         when another client already holds the client id
      * @throws com.psc.cl.client.exception.AssignedManagerNotFoundException
      *         when the assigned manager does not exist
      * @throws com.psc.cl.ledger.exception.FutureOpeningBalanceDateException
      *         when an opening balance is dated after today; nothing is created
      */
     ClientResponse createClient(ClientRequest request);
+
+    /**
+     * The next free client id: the highest held plus one, as PSC-00042, or PSC-00001 when there are no
+     * clients. It is not reserved, so a client added meanwhile may take it first.
+     *
+     * @return the next free client id
+     * @throws com.psc.cl.client.exception.ClientIdsExhaustedException
+     *         when the highest held is already PSC-99999
+     */
+    NextClientIdResponse nextClientId();
 
     /**
      * Replaces a client's own fields wholesale, leaving their companies as they are.

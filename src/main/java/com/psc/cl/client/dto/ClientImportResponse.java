@@ -12,8 +12,8 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * What a client import created: every client on the uploaded workbook, with their companies and the
- * opening balances those companies were taken on with.
+ * What a client import did: every client on the uploaded workbook, created or already on file, with the
+ * companies added to them and the opening balances those companies were taken on with.
  */
 @Value
 @Builder
@@ -22,6 +22,9 @@ public class ClientImportResponse {
 
     @Schema(description = "How many clients were created", example = "2")
     int clientCount;
+
+    @Schema(description = "How many clients already on file had companies added to them", example = "1")
+    int existingClientCount;
 
     @Schema(description = "How many companies were created, across every client", example = "3")
     int companyCount;
@@ -34,22 +37,28 @@ public class ClientImportResponse {
             + "on the whole, negative when in credit; 0.00 when none were", example = "20000.00")
     BigDecimal openingBalanceTotal;
 
-    @ArraySchema(arraySchema = @Schema(description = "Each client created, in the order of the Clients sheet"))
+    @ArraySchema(arraySchema = @Schema(description = "Each client the import created or added companies to: "
+            + "first those on the Clients sheet, in its order, then any named only on the Companies sheet"))
     List<ImportedClient> clients;
 
     /**
-     * One client created by an import.
+     * One client an import created, or added companies to.
      */
     @Value
     @Builder
-    @Schema(name = "ImportedClient", description = "A client created by an import")
+    @Schema(name = "ImportedClient", description = "A client created by an import, or one already on file that "
+            + "an import added companies to")
     public static class ImportedClient {
 
-        @Schema(description = "The client's reference on the Clients sheet", example = "C1")
-        String clientRef;
+        @Schema(description = "Identifier of the client", example = "7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35")
+        UUID id;
 
-        @Schema(description = "Identifier given to the new client", example = "7a3d9e10-5b2c-4f81-a6e4-2c8b1d0f9e35")
-        UUID clientId;
+        @Schema(description = "The client's client id, as on file", example = "PSC-00001")
+        String clientId;
+
+        @Schema(description = "True when the import created the client; false when the client was already on "
+                + "file and only had companies added", example = "true")
+        boolean created;
 
         @Schema(description = "Full name of the client", example = "Rohan Mehta")
         String clientName;
@@ -65,8 +74,8 @@ public class ClientImportResponse {
                 + "when owed on the whole, negative when in credit; 0.00 when none were", example = "25000.00")
         BigDecimal openingBalanceTotal;
 
-        @ArraySchema(arraySchema = @Schema(description = "Each company created for the client, by name, with "
-                + "the opening balance recorded for it"))
+        @ArraySchema(arraySchema = @Schema(description = "Each company created for the client, with the opening "
+                + "balance recorded for it"))
         List<ImportedCompany> companies;
     }
 

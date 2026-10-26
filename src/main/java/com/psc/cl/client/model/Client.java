@@ -34,6 +34,18 @@ import java.util.UUID;
 @NoArgsConstructor
 public class Client {
 
+    /** What every client id starts with. */
+    public static final String CLIENT_ID_PREFIX = "PSC-";
+
+    /** How many digits follow the prefix of a client id. */
+    public static final int CLIENT_ID_DIGITS = 5;
+
+    /** The shape of a client id: the prefix, then exactly {@link #CLIENT_ID_DIGITS} digits, as PSC-00001. */
+    public static final String CLIENT_ID_PATTERN = "^PSC-[0-9]{5}$";
+
+    /** Length of every client id. */
+    public static final int CLIENT_ID_LENGTH = 9;
+
     /** Longest first or last name accepted, matching the column width. */
     public static final int MAX_NAME_LENGTH = 100;
 
@@ -50,6 +62,13 @@ public class Client {
     @GeneratedValue(strategy = GenerationType.UUID)
     @Column(name = "id", nullable = false, updatable = false)
     private UUID id;
+
+    /**
+     * The firm's own identifier for the client, as PSC-00001, unique. Given when the client is added and
+     * never changed afterwards.
+     */
+    @Column(name = "client_id", nullable = false, updatable = false, length = CLIENT_ID_LENGTH)
+    private String clientId;
 
     @Column(name = "first_name", nullable = false, length = MAX_NAME_LENGTH)
     private String firstName;

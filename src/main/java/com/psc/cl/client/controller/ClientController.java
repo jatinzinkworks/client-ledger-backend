@@ -5,6 +5,7 @@ import com.psc.cl.client.dto.ClientRequest;
 import com.psc.cl.client.dto.ClientResponse;
 import com.psc.cl.client.dto.ClientSummaryResponse;
 import com.psc.cl.client.dto.ClientUpdateRequest;
+import com.psc.cl.client.dto.NextClientIdResponse;
 import com.psc.cl.client.service.ClientService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -33,6 +34,12 @@ public class ClientController implements ClientApi {
         ClientResponse response = clientService.createClient(request);
         return ResponseEntity.created(URI.create(BASE_PATH + "/" + response.getId()))
                 .body(response);
+    }
+
+    @Override
+    public ResponseEntity<NextClientIdResponse> nextClientId() {
+        log.debug("Received request for the next free client id");
+        return ResponseEntity.ok(clientService.nextClientId());
     }
 
     @Override

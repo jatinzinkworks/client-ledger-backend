@@ -22,7 +22,8 @@ import java.util.UUID;
  *
  * <p>Client fields follow the same rules as on create, and nothing is left behind from the previous
  * version: an omitted discount resets to zero and an omitted birthday is cleared. The client's companies are not part of this payload
- * and are left as they are; add or remove them through their own endpoints.
+ * and are left as they are; add or remove them through their own endpoints. The client id is not part of it
+ * either: it is fixed when the client is added.
  */
 @Builder
 @Schema(name = "ClientUpdateRequest", description = "New content for a client, excluding their companies")

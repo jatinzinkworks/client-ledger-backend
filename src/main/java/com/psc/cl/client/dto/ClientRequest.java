@@ -25,7 +25,7 @@ import java.util.UUID;
  * Payload for creating a client.
  *
  * <p>Every field except the birthday and the discount is mandatory, and at least one company must be
- * supplied.
+ * supplied. The client id, as PSC-00001, must not be held by another client, and cannot be changed later.
  * Values are trimmed before storage, and the assigned manager must exist in the Manager Catalog.
  * The discount defaults to zero, and applies to every company that does not set its own. Each
  * company may bring an opening balance, recorded in its ledger.
@@ -33,6 +33,14 @@ import java.util.UUID;
 @Builder
 @Schema(name = "ClientRequest", description = "Client to add, with the companies they hold")
 public record ClientRequest(
+
+        @NotBlank(message = "must not be blank")
+        @Pattern(regexp = Client.CLIENT_ID_PATTERN, message = "must be PSC- followed by 5 digits, such as PSC-00001")
+        @Schema(description = "The firm's own identifier for the client: PSC- followed by 5 digits, held by no "
+                + "other client. GET /clients/next-client-id suggests the next free one. It cannot be changed "
+                + "once the client is added", example = "PSC-00001", pattern = Client.CLIENT_ID_PATTERN,
+                requiredMode = Schema.RequiredMode.REQUIRED)
+        String clientId,
 
         @NotBlank(message = "must not be blank")
         @Size(max = Client.MAX_NAME_LENGTH, message = "must not exceed 100 characters")
